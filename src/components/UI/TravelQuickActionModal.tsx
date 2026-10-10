@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Trip, ExpenseItem, PaymentMethod } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
+import { compressImageFile } from '../../utils/image';
 import {
   SUPPORTED_CURRENCIES,
   CURRENCY_MAP,
@@ -33,6 +34,11 @@ import {
   Bookmark,
   Edit2,
   Users,
+  Camera,
+  ImageIcon,
+  Loader2,
+  Calendar,
+  Maximize2,
 } from 'lucide-react';
 
 interface TravelQuickActionModalProps {
@@ -105,6 +111,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   // --- 1. Fast Expense States ---
   const [expenseAmount, setExpenseAmount] = useState<string>('');
   const [expenseTitle, setExpenseTitle] = useState<string>('');
+  const [expenseNotes, setExpenseNotes] = useState<string>('');
   const [expenseCat, setExpenseCat] = useState<string>('food');
   const [expensePayment, setExpensePayment] = useState<PaymentMethod>('card');
   const [expenseDate, setExpenseDate] = useState<string>(() => {
@@ -112,6 +119,13 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     if (today >= trip.startDate && today <= trip.endDate) return today;
     return trip.startDate || today;
   });
+
+  // Receipts / Invoice Upload States
+  const [receiptImages, setReceiptImages] = useState<string[]>([]);
+  const [isCompressingReceipts, setIsCompressingReceipts] = useState<boolean>(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const receiptInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   // Friend split states in Quick Modal
   const splitMembersList = React.useMemo(() => {
@@ -131,6 +145,38 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     }
   }, [splitMembersList]);
 
+  // Handle uploading receipt/invoice photos
+  const handleReceiptFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsCompressingReceipts(true);
+    try {
+      const compressedList: string[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const compressed = await compressImageFile(file, 900, 0.75);
+        compressedList.push(compressed);
+      }
+      setReceiptImages((prev) => [...prev, ...compressedList]);
+      if (onShowToast) {
+        onShowToast(`已上傳 ${files.length} 張發票收據！`);
+      }
+    } catch (err) {
+      console.error('Failed to compress receipt images:', err);
+      if (onShowToast) {
+        onShowToast('發票上傳失敗，請再試一次');
+      }
+    } finally {
+      setIsCompressingReceipts(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleRemoveReceiptImage = (indexToRemove: number) => {
+    setReceiptImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  };
+
   const parsedAmount = parseFloat(expenseAmount) || 0;
   const convertedToTwd = convertAmount(parsedAmount, expenseCur, 'TWD', trip.customExchangeRates);
 
@@ -149,6 +195,9 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       category: expenseCat,
       paymentMethod: expensePayment,
       date: expenseDate,
+      notes: expenseNotes.trim() || undefined,
+      receiptImages: receiptImages.length > 0 ? receiptImages : undefined,
+      receiptImage: receiptImages.length > 0 ? receiptImages[0] : undefined,
       paidBy: isSplitMode ? quickPaidBy : undefined,
       splitWith: isSplitMode && !quickIsPersonal
         ? (quickSplitWith.length > 0 ? quickSplitWith : splitMembersList)
@@ -163,21 +212,24 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     });
 
     if (onShowToast) {
+      const receiptSuffix = receiptImages.length > 0 ? ` · 附 ${receiptImages.length} 張發票` : '';
       if (isSplitMode && !quickIsPersonal) {
         onShowToast(
-          `已記帳並分攤：${expenseCur} ${parsedAmount.toLocaleString()} (${newExpense.title} · 由 ${quickPaidBy} 代墊 · ${quickSplitWith.length} 人均分)`
+          `已記帳並分攤：${expenseCur} ${parsedAmount.toLocaleString()} (${newExpense.title} · 由 ${quickPaidBy} 代墊${receiptSuffix})`
         );
       } else {
-        onShowToast(`已記帳：${expenseCur} ${parsedAmount.toLocaleString()} (${newExpense.title})`);
+        onShowToast(`已記帳：${expenseCur} ${parsedAmount.toLocaleString()} (${newExpense.title}${receiptSuffix})`);
       }
     }
 
     setExpenseAmount('');
     setExpenseTitle('');
+    setExpenseNotes('');
+    setReceiptImages([]);
     onClose();
   };
 
-  // --- 2. Scratchpad States (Cleaned of all emoji clutter) ---
+  // --- 2. Scratchpad States (便簽免標題，直接快速記筆記) ---
   const STORAGE_KEY_NOTES = `hiyori_scratchpad_${trip.id}`;
   const [notes, setNotes] = useState<ScratchpadNote[]>(() => {
     try {
@@ -188,23 +240,22 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       {
         id: '1',
         category: 'locker',
-        label: '車站寄物櫃',
+        label: '置物櫃',
         content: '剪票口旁 28 號置物櫃，密碼 5183',
         createdAt: Date.now(),
       },
       {
         id: '2',
         category: 'seat',
-        label: '指定席座位',
+        label: '車次座位',
         content: '車次 7 車 14A (靠窗位)',
         createdAt: Date.now(),
       },
     ];
   });
 
-  const [newNoteLabel, setNewNoteLabel] = useState('');
   const [newNoteContent, setNewNoteContent] = useState('');
-  const [newNoteCat, setNewNoteCat] = useState<'locker' | 'seat' | 'hotel' | 'other'>('locker');
+  const [newNoteCat, setNewNoteCat] = useState<'locker' | 'seat' | 'hotel' | 'other'>('other');
   const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -221,24 +272,24 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     const item: ScratchpadNote = {
       id: `note-${Date.now()}`,
       category: newNoteCat,
-      label: newNoteLabel.trim() || matched?.label || '隨手便簽',
+      label: matched?.label || '隨手便簽',
       content: newNoteContent.trim(),
       createdAt: Date.now(),
     };
 
     setNotes([item, ...notes]);
-    setNewNoteLabel('');
     setNewNoteContent('');
+    if (onShowToast) {
+      onShowToast('便簽已儲存！');
+    }
   };
 
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
-  const [editNoteLabel, setEditNoteLabel] = useState('');
   const [editNoteContent, setEditNoteContent] = useState('');
-  const [editNoteCat, setEditNoteCat] = useState<'locker' | 'seat' | 'hotel' | 'other'>('locker');
+  const [editNoteCat, setEditNoteCat] = useState<'locker' | 'seat' | 'hotel' | 'other'>('other');
 
   const handleStartEditNote = (note: ScratchpadNote) => {
     setEditingNoteId(note.id);
-    setEditNoteLabel(note.label);
     setEditNoteContent(note.content);
     setEditNoteCat(note.category);
   };
@@ -247,12 +298,13 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     if (e) e.preventDefault();
     if (!editingNoteId || !editNoteContent.trim()) return;
 
+    const matched = SCRATCHPAD_CATS.find((c) => c.key === editNoteCat);
     setNotes((prevNotes) =>
       prevNotes.map((n) =>
         n.id === editingNoteId
           ? {
               ...n,
-              label: editNoteLabel.trim() || '隨手便籤',
+              label: matched?.label || n.label || '隨手便簽',
               content: editNoteContent.trim(),
               category: editNoteCat,
             }
@@ -261,7 +313,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     );
     setEditingNoteId(null);
     if (onShowToast) {
-      onShowToast('便籤內容已更新儲存！');
+      onShowToast('便簽內容已更新！');
     }
   };
 
@@ -412,7 +464,10 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               </div>
 
               {/* Amount input */}
-              <div className="relative">
+              <div className="flex items-stretch rounded-2xl bg-white dark:bg-slate-900 border-2 border-teal-600/80 focus-within:border-teal-500 overflow-hidden shadow-xs">
+                <span className="inline-flex items-center px-3.5 bg-teal-50 dark:bg-teal-950/60 border-r border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-300 font-black font-mono text-base select-none shrink-0">
+                  {CURRENCY_MAP[expenseCur]?.symbol || expenseCur}
+                </span>
                 <input
                   type="number"
                   inputMode="decimal"
@@ -420,11 +475,11 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                   required
                   value={expenseAmount}
                   onChange={(e) => setExpenseAmount(e.target.value)}
-                  placeholder="輸入金額，例如：15、480..."
-                  className="w-full pl-4 pr-16 py-3 rounded-xl bg-white dark:bg-slate-900 border-2 border-teal-600/80 text-2xl font-black font-mono text-slate-900 dark:text-white outline-none focus:border-teal-600"
+                  placeholder="輸入消費金額..."
+                  className="flex-1 px-3 py-2.5 bg-transparent text-2xl font-black font-mono text-slate-900 dark:text-white outline-none"
                   autoFocus
                 />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-500 dark:text-slate-400 font-mono">
+                <span className="inline-flex items-center pr-3.5 text-xs font-bold text-slate-400 font-mono shrink-0">
                   {expenseCur}
                 </span>
               </div>
@@ -442,7 +497,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               )}
             </div>
 
-            {/* Quick Title Chips */}
+            {/* Quick Title Chips & Input */}
             <div className="space-y-1.5">
               <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
                 品項名稱：
@@ -473,6 +528,34 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                 placeholder="或手動輸入品項，如：咖啡、博物館門票、藥妝..."
                 className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-teal-500 mt-1"
               />
+            </div>
+
+            {/* Date & Optional Notes */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1">
+                  <Calendar className="w-3 h-3 text-slate-400" />
+                  <span>消費日期：</span>
+                </label>
+                <input
+                  type="date"
+                  value={expenseDate}
+                  onChange={(e) => setExpenseDate(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-100 outline-none focus:border-teal-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                  備註說明 (選填)：
+                </label>
+                <input
+                  type="text"
+                  value={expenseNotes}
+                  onChange={(e) => setExpenseNotes(e.target.value)}
+                  placeholder="如：店名、菜色、發票號碼..."
+                  className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-teal-500"
+                />
+              </div>
             </div>
 
             {/* Clean Category Selector (No emoji spam) */}
@@ -529,6 +612,100 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                   );
                 })}
               </div>
+            </div>
+
+            {/* Receipt / Invoice Upload Section */}
+            <div className="p-3.5 rounded-2xl bg-teal-50/70 dark:bg-slate-800/80 border border-teal-200 dark:border-teal-800/60 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-teal-900 dark:text-teal-200 flex items-center gap-1.5">
+                  <Camera className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                  <span>發票 / 收據憑證 (選填，支援多張相片)</span>
+                </label>
+                {receiptImages.length > 0 && (
+                  <span className="text-[11px] font-bold text-teal-700 dark:text-teal-300">
+                    已附加 {receiptImages.length} 張發票
+                  </span>
+                )}
+              </div>
+
+              {/* Hidden file inputs */}
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleReceiptFiles}
+                className="hidden"
+              />
+              <input
+                ref={receiptInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleReceiptFiles}
+                className="hidden"
+              />
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => cameraInputRef.current?.click()}
+                  disabled={isCompressingReceipts}
+                  className="flex-1 py-2 px-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 text-teal-900 dark:text-teal-200 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 transition"
+                >
+                  <Camera className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                  <span>即時拍照</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => receiptInputRef.current?.click()}
+                  disabled={isCompressingReceipts}
+                  className="flex-1 py-2 px-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 text-teal-900 dark:text-teal-200 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 transition"
+                >
+                  <ImageIcon className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                  <span>相簿選取發票</span>
+                </button>
+              </div>
+
+              {/* Compressing indicator */}
+              {isCompressingReceipts && (
+                <div className="py-1.5 flex items-center justify-center gap-2 text-xs font-bold text-teal-700 dark:text-teal-300">
+                  <Loader2 className="w-4 h-4 animate-spin text-teal-600" />
+                  <span>照片最佳化壓縮中...</span>
+                </div>
+              )}
+
+              {/* Thumbnails preview strip */}
+              {receiptImages.length > 0 && (
+                <div className="flex items-center gap-2 overflow-x-auto py-1">
+                  {receiptImages.map((imgUrl, idx) => (
+                    <div
+                      key={idx}
+                      className="relative shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 border-teal-500 shadow-xs group"
+                    >
+                      <img
+                        src={imgUrl}
+                        alt={`發票 ${idx + 1}`}
+                        onClick={() => setPreviewImage(imgUrl)}
+                        className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveReceiptImage(idx)}
+                        className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center text-xs transition"
+                        title="移除此張發票"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                      <span className="absolute bottom-0.5 left-0.5 px-1 rounded bg-black/60 text-[9px] text-white font-mono">
+                        #{idx + 1}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Friend Bill Splitting Section */}
@@ -657,12 +834,23 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
           </form>
         )}
 
-        {/* ================= TAB 2: SCRATCHPAD (CLEAN NOTE TAKING) ================= */}
+        {/* ================= TAB 2: SCRATCHPAD (CLEAN NOTE TAKING - 免標題) ================= */}
         {activeTab === 'scratchpad' && (
           <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
-            {/* Quick Add Form */}
-            <form onSubmit={handleAddNote} className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2.5">
-              <div className="flex items-center gap-1.5">
+            {/* Quick Add Form (免標題，直接輸入內容) */}
+            <form onSubmit={handleAddNote} className="p-3.5 rounded-2xl bg-amber-50/50 dark:bg-slate-800/80 border border-amber-200/80 dark:border-slate-700 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  <span>隨手速寫便簽</span>
+                </span>
+                <span className="text-[11px] text-amber-700/80 dark:text-amber-300/80 font-medium">
+                  免填標題 · 隨手速記
+                </span>
+              </div>
+
+              {/* Category chips */}
+              <div className="flex items-center gap-1.5 flex-wrap">
                 {SCRATCHPAD_CATS.map((c) => {
                   const Icon = c.icon;
                   const isSelected = newNoteCat === c.key;
@@ -674,39 +862,43 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                       className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition border flex items-center gap-1 ${
                         isSelected
                           ? 'bg-amber-500 text-slate-950 border-amber-600 font-black shadow-xs'
-                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
                       }`}
                     >
-                      <Icon className="w-3 h-3" />
+                      <Icon className="w-3.5 h-3.5" />
                       <span>{c.label}</span>
                     </button>
                   );
                 })}
               </div>
 
-              <input
-                type="text"
-                value={newNoteLabel}
-                onChange={(e) => setNewNoteLabel(e.target.value)}
-                placeholder="標題 (如：寄物櫃代號 / 飯店大門密碼 / 新幹線座位)..."
-                className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-white outline-none focus:border-amber-500"
+              {/* Direct Content Input */}
+              <textarea
+                rows={3}
+                required
+                value={newNoteContent}
+                onChange={(e) => setNewNoteContent(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    handleAddNote(e);
+                  }
+                }}
+                placeholder="直接輸入便簽內容（例如：#28 寄物櫃密碼 5183 / 房間WiFi密碼 / 集合時間 14:30）..."
+                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 resize-none leading-relaxed"
               />
 
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  required
-                  value={newNoteContent}
-                  onChange={(e) => setNewNoteContent(e.target.value)}
-                  placeholder="內容 (如：#45 櫃密碼 9821 / 房號 1402 / 7車14A)..."
-                  className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-800 dark:text-white outline-none focus:border-amber-500"
-                />
+              <div className="flex items-center justify-between pt-0.5">
+                <span className="text-[10px] text-slate-400">
+                  按 Ctrl/Cmd + Enter 也可直接新增
+                </span>
                 <button
                   type="submit"
-                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shrink-0 transition active:scale-95 flex items-center gap-1"
+                  disabled={!newNoteContent.trim()}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 font-bold text-xs shrink-0 transition active:scale-95 flex items-center gap-1 shadow-xs"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>新增</span>
+                  <span>新增便簽</span>
                 </button>
               </div>
             </form>
@@ -718,7 +910,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               </span>
               {notes.length === 0 ? (
                 <div className="py-8 text-center text-xs text-slate-400">
-                  尚未記錄任何隨身速記，點上方按鈕立即新增！
+                  尚未記錄任何隨手便簽，在上方直接輸入內容即可儲存！
                 </div>
               ) : (
                 notes.map((note) => {
@@ -736,7 +928,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
                             <Edit2 className="w-3.5 h-3.5 text-amber-600" />
-                            <span>編輯便籤</span>
+                            <span>編輯便簽內容</span>
                           </span>
                           <div className="flex items-center gap-1">
                             <button
@@ -752,7 +944,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                               className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[11px] flex items-center gap-1 shadow-xs transition active:scale-95"
                             >
                               <Check className="w-3 h-3" />
-                              <span>儲存便籤</span>
+                              <span>儲存修改</span>
                             </button>
                           </div>
                         </div>
@@ -779,16 +971,8 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                           })}
                         </div>
 
-                        <input
-                          type="text"
-                          value={editNoteLabel}
-                          onChange={(e) => setEditNoteLabel(e.target.value)}
-                          placeholder="便籤標題 (例如：京都車站儲物櫃、房號)"
-                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-amber-500"
-                        />
-
                         <textarea
-                          rows={2}
+                          rows={3}
                           value={editNoteContent}
                           onChange={(e) => setEditNoteContent(e.target.value)}
                           onKeyDown={(e) => {
@@ -797,8 +981,9 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                               handleSaveEditNote();
                             }
                           }}
-                          placeholder="便籤內容 (例如：密碼、號碼、備忘)..."
-                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold font-mono text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-amber-500 resize-none"
+                          placeholder="便簽內容..."
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium font-mono text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-amber-500 resize-none leading-relaxed"
+                          autoFocus
                         />
                       </form>
                     );
@@ -811,7 +996,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                     >
                       <div
                         onClick={() => handleStartEditNote(note)}
-                        className="min-w-0 flex-1 space-y-1.5 cursor-pointer"
+                        className="min-w-0 flex-1 space-y-2 cursor-pointer"
                         title="點擊可直接編輯"
                       >
                         <div className="flex items-center gap-1.5">
@@ -819,11 +1004,8 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                             <Icon className="w-3 h-3" />
                             <span>{matched.label}</span>
                           </span>
-                          <h4 className="font-bold text-xs text-slate-900 dark:text-white truncate">
-                            {note.label}
-                          </h4>
                         </div>
-                        <p className="text-xs font-bold font-mono text-slate-800 dark:text-slate-100 bg-slate-50 dark:bg-slate-900 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 break-words hover:border-amber-400 dark:hover:border-amber-600 transition">
+                        <p className="text-xs sm:text-sm font-semibold font-mono text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-900 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 break-words hover:border-amber-400 dark:hover:border-amber-600 transition select-text whitespace-pre-wrap leading-relaxed">
                           {note.content}
                         </p>
                       </div>
@@ -833,7 +1015,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                           type="button"
                           onClick={() => handleCopyNote(note.content, note.id)}
                           className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition"
-                          title="複製"
+                          title="一鍵複製內容"
                         >
                           {copiedNoteId === note.id ? (
                             <Check className="w-3.5 h-3.5 text-emerald-600" />
@@ -845,7 +1027,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                           type="button"
                           onClick={() => handleStartEditNote(note)}
                           className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-slate-500 hover:text-amber-600 transition"
-                          title="編輯便籤"
+                          title="編輯便簽"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
@@ -853,7 +1035,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                           type="button"
                           onClick={() => handleDeleteNote(note.id)}
                           className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 transition"
-                          title="刪除"
+                          title="刪除此便簽"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -966,6 +1148,38 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
           </div>
         )}
       </div>
+
+      {/* Fullscreen Receipt Image Lightbox */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-60 bg-black/90 backdrop-blur-xs flex flex-col items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div className="relative max-w-2xl max-h-[85vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={previewImage}
+              alt="發票收據大圖"
+              className="max-h-[78vh] w-auto max-w-full rounded-2xl object-contain shadow-2xl border border-white/20"
+            />
+            <div className="mt-3 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setPreviewImage(null)}
+                className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs backdrop-blur-md transition active:scale-95"
+              >
+                關閉大圖
+              </button>
+              <a
+                href={previewImage}
+                download="receipt-photo.jpg"
+                className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs transition active:scale-95 shadow-xs"
+              >
+                下載照片
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

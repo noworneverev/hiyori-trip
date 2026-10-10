@@ -1168,18 +1168,34 @@ export default function App() {
         />
       )}
 
-      {/* Floating Travel Quick Action Button (FAB) */}
-      <button
-        onClick={() => {
-          setQuickActionTab('expense');
-          setShowQuickActionModal(true);
-        }}
-        className="fixed bottom-16 right-3.5 sm:bottom-6 sm:right-6 z-40 px-3.5 py-2.5 rounded-2xl bg-teal-800 hover:bg-teal-700 dark:bg-teal-700 dark:hover:bg-teal-600 text-white font-bold text-xs shadow-xl border border-teal-600/50 flex items-center gap-1.5 transition active:scale-90 group"
-        title="旅途一秒快速記帳與隨身便簽"
-      >
-        <DollarSign className="w-4 h-4 text-emerald-300 group-hover:scale-110 transition-transform" />
-        <span className="tracking-tight">一秒記帳 · 便簽</span>
-      </button>
+      {/* Floating Travel Quick Action Bar (Bottom Right - 快速記帳 & 隨手便簽) */}
+      <div className="fixed bottom-16 right-3 sm:bottom-6 sm:right-6 z-40 flex items-center bg-slate-900/90 dark:bg-slate-950/90 backdrop-blur-md rounded-2xl p-1 shadow-2xl border border-slate-700/70 ring-1 ring-white/10 gap-1 animate-in fade-in">
+        {/* Fast Expense Button */}
+        <button
+          onClick={() => {
+            setQuickActionTab('expense');
+            setShowQuickActionModal(true);
+          }}
+          className="px-3 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1.5 transition active:scale-95 shadow-xs group"
+          title="旅途快速記帳 (支援拍照與上傳發票)"
+        >
+          <DollarSign className="w-3.5 h-3.5 text-emerald-200 group-hover:scale-110 transition-transform" />
+          <span>記帳</span>
+        </button>
+
+        {/* Scratchpad Note Button */}
+        <button
+          onClick={() => {
+            setQuickActionTab('scratchpad');
+            setShowQuickActionModal(true);
+          }}
+          className="px-3 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition active:scale-95 group border border-amber-500/30"
+          title="隨手便簽 (免標題快速備忘)"
+        >
+          <FileText className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
+          <span>便簽</span>
+        </button>
+      </div>
 
       {/* Floating Toast Notification */}
       {toastMessage && (
