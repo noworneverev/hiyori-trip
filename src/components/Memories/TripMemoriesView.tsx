@@ -51,14 +51,15 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 }) => {
   const [viewMode, setViewMode] = useState<'itinerary' | 'gallery' | 'polaroid'>('itinerary');
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [selectedDayFilter, setSelectedDayFilter] = useState<number | 'all'>('all');
+  const [selectedDayFilter, setSelectedDayFilter] = useState<number | 'all' | 'custom'>('all');
   const [lightboxMemory, setLightboxMemory] = useState<TripMemoryItem | null>(null);
+  const [saveSuccessToast, setSaveSuccessToast] = useState(false);
 
   // Form State for uploading new memory photo
   const [uploadSpotId, setUploadSpotId] = useState<string>(initialSpotId || '');
   const [isCustomSpot, setIsCustomSpot] = useState<boolean>(!initialSpotId);
   const [customLocationName, setCustomLocationName] = useState<string>('');
-  const [customDayNumber, setCustomDayNumber] = useState<number | 'all'>('all');
+  const [customDayNumber, setCustomDayNumber] = useState<number | 'all'>(() => trip.days[0]?.dayNumber || 1);
   const [customDate, setCustomDate] = useState<string>('');
   const [uploadCaption, setUploadCaption] = useState('');
   const [uploadMood, setUploadMood] = useState('✨');
@@ -132,11 +133,19 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     return set.size;
   }, [allMemories]);
 
+  // Unassigned / general trip snapshots (not bound to a specific day spot or with custom dayNumber not matching days)
+  const unassignedMemories = useMemo(() => {
+    return allMemories.filter(
+      (m) => !m.dayNumber || !trip.days.some((d) => d.dayNumber === m.dayNumber)
+    );
+  }, [allMemories, trip.days]);
+
   // Filter memories
   const filteredMemories = useMemo(() => {
     if (selectedDayFilter === 'all') return allMemories;
+    if (selectedDayFilter === 'custom') return unassignedMemories;
     return allMemories.filter((m) => m.dayNumber === selectedDayFilter);
-  }, [allMemories, selectedDayFilter]);
+  }, [allMemories, selectedDayFilter, unassignedMemories]);
 
   // Handle Photo File selection
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -145,7 +154,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
     try {
       setIsProcessingImage(true);
-      const compressed = await compressImageFile(file, 1200, 0.82);
+      const compressed = await compressImageFile(file, 1000, 0.78);
       setUploadImagePreview(compressed);
     } catch (err) {
       console.error('Failed to compress photo:', err);
@@ -226,6 +235,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     setIsCustomSpot(false);
     setCustomLocationName('');
     setShowUploadModal(false);
+    setSaveSuccessToast(true);
+    setTimeout(() => setSaveSuccessToast(false), 3000);
   };
 
   // Delete memory
@@ -304,20 +315,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 shadow-2xs no-print">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
                 <Camera className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-bold text-slate-900 dark:text-white text-base sm:text-lg flex items-center gap-2">
-                  <span>{lang === 'zh' ? '旅程回憶相簿與拍立得' : 'Trip Memories & Polaroid Album'}</span>
-                  <span className="text-[11px] font-semibold text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-950/60 px-2 py-0.5 rounded-full">
-                    事後回憶 · 沖印就緒
-                  </span>
+                <h3 className="font-bold text-slate-900 dark:text-white text-base sm:text-lg">
+                  {lang === 'zh' ? '旅程回憶相簿與拍立得' : 'Trip Memories & Polaroid Album'}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   {lang === 'zh'
-                    ? '留存每一站打卡照片、心情隨筆，一鍵產出專屬相簿與照相館拍立得沖印排版'
+                    ? '留存每一站打卡照片與隨筆，一鍵產出旅程相簿與拍立得'
                     : 'Curate your journey photos and memories with authentic Polaroid print formats'}
                 </p>
               </div>
@@ -384,11 +392,15 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             {/* Upload Memory Photo Button */}
             <button
               type="button"
-              onClick={() => setShowUploadModal(true)}
+              onClick={() => {
+                setUploadSpotId('');
+                setIsCustomSpot(true);
+                setShowUploadModal(true);
+              }}
               className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95"
             >
               <Plus className="w-4 h-4" />
-              <span>{lang === 'zh' ? '上傳回憶照' : 'Add Photo'}</span>
+              <span>{lang === 'zh' ? '上傳自由隨拍' : 'Add Photo'}</span>
             </button>
           </div>
         </div>
@@ -415,10 +427,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
           <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
             <span className="text-[11px] text-slate-400 block font-medium">
-              {lang === 'zh' ? '旅程總天數' : 'Days'}
+              {lang === 'zh' ? '自由隨拍' : 'Snapshots'}
             </span>
-            <div className="font-mono font-bold text-lg text-slate-800 dark:text-slate-100 mt-0.5">
-              {trip.days.length} <span className="text-xs font-normal text-slate-400">天</span>
+            <div className="font-mono font-bold text-lg text-teal-700 dark:text-teal-300 mt-0.5">
+              {allMemories.filter((m) => !m.spotId).length} <span className="text-xs font-normal text-slate-400">張</span>
             </div>
           </div>
 
@@ -427,52 +439,40 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               {lang === 'zh' ? '沖印規格' : 'Print Size'}
             </span>
             <div className="font-bold text-xs text-rose-900 dark:text-rose-200 mt-1 flex items-center gap-1">
-              <span>🎞️ 經典拍立得</span>
+              <span>🎞️ 拍立得規格</span>
               <span className="text-[10px] text-rose-500 font-mono">(A4 / 4×6)</span>
             </div>
           </div>
         </div>
 
-        {/* Firebase Cloud Sync & Free Quota Explanation Banner */}
-        <div className="mt-4 p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-sky-50 via-teal-50 to-indigo-50 dark:from-sky-950/40 dark:via-teal-950/40 dark:to-indigo-950/40 border border-teal-200/80 dark:border-teal-800/60 text-xs">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-start gap-2.5">
-              <span className="text-xl shrink-0 mt-0.5">☁️</span>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-bold text-slate-900 dark:text-white">
-                    相片雲端同步與 Firebase 免費額度說明
-                  </span>
-                  <span className="text-[10px] bg-teal-100 dark:bg-teal-900/80 text-teal-800 dark:text-teal-200 px-2 py-0.5 rounded-full font-mono font-bold">
-                    Spark 免費方案永久可用
-                  </span>
-                </div>
-                <p className="text-slate-600 dark:text-slate-300 leading-relaxed text-[11px]">
-                  <strong>1. 免費空間上限：</strong>Firebase 免費版（Spark）提供 <strong>1 GB 雲端資料庫容量</strong>、<strong>50,000 次/日免費讀取</strong> 與 <strong>10 GB/月網路流量</strong>，無需綁定信用卡。<br />
-                  <strong>2. 智慧壓縮防爆量：</strong>App 在上傳相片時自動在瀏覽器端進行高畫質縮圖壓縮（長邊 1200px / 82% 品質，單張僅約 60~120 KB），1 GB 免費空間可輕鬆容納 <strong>超過 10,000 張</strong> 旅遊回憶相片！<br />
-                  <strong>3. 離線無縫瀏覽：</strong>即使出國在飛機上或無網路環境，相簿會優先讀取設備本機快取，零網路延遲隨時欣賞旅途點滴。
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* Day Filter Chips */}
-        {trip.days.length > 1 && (
-          <div className="flex items-center gap-1.5 overflow-x-auto pt-4 scrollbar-none">
-            <span className="text-xs font-bold text-slate-400 shrink-0 pr-1">日程篩選:</span>
+        <div className="flex items-center gap-1.5 overflow-x-auto pt-4 scrollbar-none">
+          <span className="text-xs font-bold text-slate-400 shrink-0 pr-1">篩選:</span>
+          <button
+            type="button"
+            onClick={() => setSelectedDayFilter('all')}
+            className={`px-3 py-1 rounded-xl text-xs font-bold transition shrink-0 ${
+              selectedDayFilter === 'all'
+                ? 'bg-teal-600 text-white shadow-2xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+            }`}
+          >
+            全部 ({allMemories.length})
+          </button>
+          {unassignedMemories.length > 0 && (
             <button
               type="button"
-              onClick={() => setSelectedDayFilter('all')}
+              onClick={() => setSelectedDayFilter('custom')}
               className={`px-3 py-1 rounded-xl text-xs font-bold transition shrink-0 ${
-                selectedDayFilter === 'all'
+                selectedDayFilter === 'custom'
                   ? 'bg-teal-600 text-white shadow-2xs'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                  : 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 hover:bg-teal-100'
               }`}
             >
-              全部 ({allMemories.length})
+              ✨ 漫遊隨拍 ({unassignedMemories.length})
             </button>
-            {trip.days.map((day) => {
+          )}
+          {trip.days.map((day) => {
               const countInDay = allMemories.filter((m) => m.dayNumber === day.dayNumber).length;
               return (
                 <button
@@ -489,15 +489,22 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 </button>
               );
             })}
-          </div>
-        )}
+        </div>
       </div>
 
       {/* 2. Main Content Views */}
       {viewMode === 'itinerary' ? (
         /* ================= 2A. ITINERARY SPOTS CHECK-IN & RETROSPECTIVE VIEW ================= */
         <div className="space-y-6">
-          {/* Progress / Completion Rate Card */}
+          {/* Success Toast */}
+      {saveSuccessToast && (
+        <div className="p-3 rounded-2xl bg-teal-600 text-white font-bold text-xs flex items-center gap-2 shadow-lg animate-in fade-in slide-in-from-top duration-200">
+          <Check className="w-4 h-4 text-emerald-200" />
+          <span>✨ 回憶照片已成功儲存並同步至相簿！</span>
+        </div>
+      )}
+
+      {/* Progress / Completion Rate Card */}
           <div className="p-4 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xs space-y-2.5">
             <div className="flex items-center justify-between text-xs">
               <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
@@ -531,6 +538,80 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               </button>
             </div>
           </div>
+
+          {/* Unassigned / All-trip Custom Snapshots (自由漫遊隨拍) */}
+          {unassignedMemories.length > 0 && (
+            <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-4 sm:p-5 shadow-2xs space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                <div className="flex items-center gap-2">
+                  <span className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 flex items-center justify-center font-bold text-sm">
+                    ✨
+                  </span>
+                  <div>
+                    <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>行程漫遊隨拍 · 自由探索剪影</span>
+                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-950 text-teal-700 dark:text-teal-300 font-bold">
+                        {unassignedMemories.length} 張
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-400">
+                      全行程通用的隨手打卡、街景與私房美食回憶
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUploadSpotId('');
+                    setIsCustomSpot(true);
+                    setCustomDayNumber('all');
+                    setShowUploadModal(true);
+                  }}
+                  className="text-xs font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>新增隨拍</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                {unassignedMemories.map((m) => (
+                  <div
+                    key={m.id}
+                    className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-3 shadow-2xs group"
+                  >
+                    <img
+                      src={m.imageUrl}
+                      alt={m.caption}
+                      className="w-16 h-16 rounded-xl object-cover shrink-0 cursor-pointer transition-transform group-hover:scale-105"
+                      onClick={() => setLightboxMemory(m)}
+                    />
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                          {m.spotTitle || m.location}
+                        </span>
+                        <span className="text-xs">{m.mood}</span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 italic truncate">
+                        {m.caption}
+                      </p>
+                      <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                        <span>漫遊隨拍</span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMemory(m.id)}
+                          className="text-slate-400 hover:text-rose-600 transition"
+                        >
+                          刪除
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Days Loop */}
           {trip.days.map((day) => {

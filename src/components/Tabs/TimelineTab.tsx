@@ -32,6 +32,7 @@ import {
   ShoppingBag,
   Sparkles,
   Pin,
+  Compass,
 } from 'lucide-react';
 
 interface TimelineTabProps {
@@ -70,9 +71,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   onOpenMemories,
 }) => {
   const t = TRANSLATIONS[lang];
+  const [timelineViewMode, setTimelineViewMode] = useState<'daily' | 'overview'>('daily');
   const [selectedDayNumber, setSelectedDayNumber] = useState<number>(1);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  const [isMapExpanded, setIsMapExpanded] = useState(true);
+  const [isMapExpanded, setIsMapExpanded] = useState(false);
 
   const activeDay = trip.days.find((d) => d.dayNumber === selectedDayNumber) || trip.days[0] || {
     id: 'empty',
@@ -154,82 +156,139 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Trip Overview Master Table (全程行程總覽大表) */}
-      <ItineraryOverviewTable
-        trip={trip}
-        selectedDayNumber={selectedDayNumber}
-        onSelectDay={handleSelectDay}
-        lang={lang}
-        defaultExpanded={true}
-      />
-
-      {/* Day Selector Segmented Bar */}
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex-1 min-w-0 overflow-x-auto pb-1 scrollbar-none flex items-center gap-1.5">
-          {trip.days.map((day) => {
-            const isCurrent = day.dayNumber === selectedDayNumber;
-            const completedCount = day.items.filter((i) => i.completed).length;
-            return (
-              <button
-                key={day.id}
-                onClick={() => handleSelectDay(day.dayNumber)}
-                className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
-                  isCurrent
-                    ? 'bg-teal-700 text-white shadow-xs'
-                    : 'bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-                }`}
-              >
-                <span>{t.day.replace('{n}', String(day.dayNumber))}</span>
-                <span className="text-[10px] opacity-75 font-normal">
-                  ({formatMonthDaySlash(day.date)})
-                </span>
-                {day.items.length > 0 && (
-                  <span
-                    className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                      isCurrent
-                        ? 'bg-teal-900/60 text-teal-100'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    {completedCount}/{day.items.length}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-
+      {/* View Mode Switcher: 每日時序 vs 全程總覽大表 */}
+      <div className="flex items-center justify-between gap-2 pb-1">
+        <div className="inline-flex p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 text-xs font-semibold">
           <button
-            onClick={handleAddDay}
-            className="px-2.5 py-2 rounded-xl border border-dashed border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center gap-1 shrink-0 transition"
-            title={lang === 'zh' ? '增加一天' : 'Add Day'}
+            type="button"
+            onClick={() => setTimelineViewMode('daily')}
+            className={`px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 ${
+              timelineViewMode === 'daily'
+                ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 font-bold shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>+</span>
+            <Compass className="w-3.5 h-3.5" />
+            <span>{lang === 'zh' ? '每日行程時序' : 'Daily Timeline'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setTimelineViewMode('overview')}
+            className={`px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 ${
+              timelineViewMode === 'overview'
+                ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 font-bold shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>{lang === 'zh' ? '全程 9 天總覽大表' : 'Trip Overview Table'}</span>
           </button>
         </div>
 
-        {/* Map toggle */}
-        <button
-          onClick={() => setIsMapExpanded(!isMapExpanded)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold shrink-0 transition"
-        >
-          <MapIcon className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-          <span>{isMapExpanded ? (lang === 'zh' ? '收合地圖' : 'Hide Map') : (lang === 'zh' ? '展開地圖' : 'Show Map')}</span>
-          {isMapExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-        </button>
+        {timelineViewMode === 'daily' && (
+          <button
+            onClick={() => setIsMapExpanded(!isMapExpanded)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold shrink-0 transition"
+          >
+            <MapIcon className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+            <span>{isMapExpanded ? (lang === 'zh' ? '收合地圖' : 'Hide Map') : (lang === 'zh' ? '展開地圖' : 'Show Map')}</span>
+            {isMapExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        )}
       </div>
 
-      {/* Interactive Map */}
-      {isMapExpanded && (
-        <LeafletMap
-          items={activeDay.items}
-          selectedItemId={selectedItemId}
-          onSelectItem={(it) => setSelectedItemId(it.id)}
-          isPickMode={isPickMode}
-          onPickLocation={onPickLocation}
-          pickedLocation={pickedCoords}
+      {/* If overview mode: show ItineraryOverviewTable */}
+      {timelineViewMode === 'overview' ? (
+        <ItineraryOverviewTable
+          trip={trip}
+          selectedDayNumber={selectedDayNumber}
+          onSelectDay={(dayNum) => {
+            handleSelectDay(dayNum);
+            setTimelineViewMode('daily');
+          }}
+          lang={lang}
+          defaultExpanded={true}
         />
-      )}
+      ) : (
+        <>
+          {/* Day Selector Segmented Bar */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+            {trip.days.map((day) => {
+              const isCurrent = day.dayNumber === selectedDayNumber;
+              const completedCount = day.items.filter((i) => i.completed).length;
+              return (
+                <button
+                  key={day.id}
+                  onClick={() => handleSelectDay(day.dayNumber)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
+                    isCurrent
+                      ? 'bg-teal-700 text-white shadow-xs'
+                      : 'bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
+                  }`}
+                >
+                  <span>{t.day.replace('{n}', String(day.dayNumber))}</span>
+                  <span className="text-[10px] opacity-75 font-normal">
+                    ({formatMonthDaySlash(day.date)})
+                  </span>
+                  {day.items.length > 0 && (
+                    <span
+                      className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                        isCurrent
+                          ? 'bg-teal-900/60 text-teal-100'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      {completedCount}/{day.items.length}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+
+            <button
+              onClick={handleAddDay}
+              className="px-2.5 py-2 rounded-xl border border-dashed border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center gap-1 shrink-0 transition"
+              title={lang === 'zh' ? '增加一天' : 'Add Day'}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>+</span>
+            </button>
+          </div>
+
+          {/* Interactive Map (When expanded) */}
+          {isMapExpanded && (
+            <LeafletMap
+              items={activeDay.items}
+              selectedItemId={selectedItemId}
+              onSelectItem={(it) => setSelectedItemId(it.id)}
+              isPickMode={isPickMode}
+              onPickLocation={onPickLocation}
+              pickedLocation={pickedCoords}
+            />
+          )}
+
+          {/* Day Memories Banner (if any exist) */}
+          {(() => {
+            const dayMems = (trip.memories || []).filter((m) => m.dayNumber === activeDay.dayNumber);
+            if (dayMems.length === 0) return null;
+            return (
+              <div
+                onClick={() => onOpenMemories?.()}
+                className="rounded-2xl p-3 bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200/80 dark:border-rose-900/40 flex items-center justify-between cursor-pointer hover:bg-rose-50 transition shadow-2xs group"
+              >
+                <div className="flex items-center gap-2 text-xs">
+                  <Camera className="w-4 h-4 text-rose-500" />
+                  <span className="font-bold text-rose-900 dark:text-rose-200">
+                    Day {activeDay.dayNumber} 共有 {dayMems.length} 張回憶相片與隨拍
+                  </span>
+                </div>
+                <span className="text-xs font-semibold text-rose-600 dark:text-rose-400 group-hover:translate-x-0.5 transition flex items-center gap-1">
+                  <span>前往相簿</span>
+                  <span>→</span>
+                </span>
+              </div>
+            );
+          })()}
 
       {/* Active Day Header Bar */}
       <div id="day-schedule-section" className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/90 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 scroll-mt-20">
@@ -565,6 +624,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           })}
         </div>
       )}
-    </div>
-  );
+    </>
+  )}
+</div>
+);
 };

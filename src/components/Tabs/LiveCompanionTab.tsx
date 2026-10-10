@@ -521,21 +521,24 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
         <div className="rounded-3xl bg-slate-900 dark:bg-slate-950 border border-slate-800 text-white p-5 sm:p-6 shadow-md relative overflow-hidden">
           <div className="flex items-center justify-between text-xs text-slate-300 font-semibold mb-2 flex-wrap gap-2">
             <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
+              <span className="flex items-center gap-1.5 text-xs font-bold text-teal-300">
                 <Navigation className="w-3.5 h-3.5" />
-                {t.upNext}
+                <span>{t.upNext}</span>
               </span>
               {/* Category Badge */}
               {nextItem.category && CATEGORY_TAGS[nextItem.category] && (
-                <span className="px-2 py-0.5 rounded-md bg-white/20 text-white font-bold text-[10px] flex items-center gap-1">
-                  <span>{CATEGORY_TAGS[nextItem.category].icon}</span>
-                  <span>{CATEGORY_TAGS[nextItem.category].label}</span>
-                </span>
+                <>
+                  <span aria-hidden="true" className="text-slate-500">·</span>
+                  <span className="text-xs text-teal-100 flex items-center gap-1 font-medium">
+                    <span>{CATEGORY_TAGS[nextItem.category].icon}</span>
+                    <span>{CATEGORY_TAGS[nextItem.category].label}</span>
+                  </span>
+                </>
               )}
             </div>
 
-            <span className="font-mono bg-black/20 px-2 py-0.5 rounded-md flex items-center gap-1">
-              <Clock className="w-3 h-3 text-teal-300" />
+            <span className="font-mono text-slate-300 flex items-center gap-1 text-xs">
+              <Clock className="w-3.5 h-3.5 text-teal-300" />
               <span>{nextItem.startTime}</span>
               {nextItem.endTime ? <span>~ {nextItem.endTime}</span> : ''}
             </span>
