@@ -40,6 +40,7 @@ import {
   Share2,
   UserPlus,
   Sparkles,
+  Pencil,
 } from 'lucide-react';
 import { calculateTripSplits, formatSplitsForSharing } from '../../utils/billSplitter';
 import {
@@ -89,6 +90,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
 
   // Form states
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [itemCurrency, setItemCurrency] = useState<string>(trip.currency || defaultDetectedCurrency);
@@ -154,12 +156,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
 
   // Filter & Lightbox states
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [selectedDateFilter, setSelectedDateFilter] = useState<string>('all');
   const [viewingReceiptGallery, setViewingReceiptGallery] = useState<{
     images: string[];
     currentIndex: number;
     title: string;
     amount: number;
     currency: string;
+    expenseId?: string;
   } | null>(null);
 
   // Custom categories list from trip
@@ -311,7 +315,51 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
     setShowNewCatInput(false);
   };
 
-  // Save Expense Item
+  // Open Modal to Add New Expense
+  const handleOpenAddExpense = () => {
+    setEditingExpenseId(null);
+    setTitle('');
+    setAmount('');
+    setItemCurrency(baseCurrency);
+    setCategory('food');
+    setPaymentMethod('card');
+    const defaultDate = todayStr >= trip.startDate && todayStr <= trip.endDate
+      ? todayStr
+      : (trip.startDate || todayStr);
+    setDate(defaultDate);
+    setNotes('');
+    setReceiptImages([]);
+    setItemPaidBy('我');
+    setItemSplitWith(splitMembersList);
+    setItemIsPersonal(false);
+    setShowAddModal(true);
+  };
+
+  // Open Modal to Edit Existing Expense
+  const handleOpenEditExpense = (item: ExpenseItem) => {
+    setEditingExpenseId(item.id);
+    setTitle(item.title);
+    setAmount(item.amount.toString());
+    setItemCurrency(item.currency || baseCurrency);
+    setCategory(item.category || 'food');
+    setPaymentMethod(item.paymentMethod || 'card');
+    setDate(item.date || todayStr);
+    setNotes(item.notes || '');
+
+    const imgs = item.receiptImages && item.receiptImages.length > 0
+      ? [...item.receiptImages]
+      : item.receiptImage
+      ? [item.receiptImage]
+      : [];
+    setReceiptImages(imgs);
+
+    setItemPaidBy(item.paidBy || '我');
+    setItemSplitWith(item.splitWith && item.splitWith.length > 0 ? item.splitWith : splitMembersList);
+    setItemIsPersonal(!!item.isPersonal);
+    setShowAddModal(true);
+  };
+
+  // Save Expense Item (New or Edit)
   const handleSaveExpense = (e: React.FormEvent) => {
     e.preventDefault();
     const parsedAmount = parseFloat(amount);
@@ -320,31 +368,65 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
     // calculate dayNumber if date matches a trip day
     const matchedDay = trip.days.find((d) => d.date === date);
 
-    const newExpense: ExpenseItem = {
-      id: `exp-${Date.now()}`,
-      title: title.trim(),
-      amount: parsedAmount,
-      currency: itemCurrency,
-      category,
-      paymentMethod,
-      date,
-      dayNumber: matchedDay ? matchedDay.dayNumber : undefined,
-      notes: notes.trim() || undefined,
-      receiptImages: receiptImages.length > 0 ? receiptImages : undefined,
-      receiptImage: receiptImages[0] || undefined,
-      convertedAmount: convertAmount(parsedAmount, itemCurrency, baseCurrency, trip.customExchangeRates),
-      paidBy: trip.isSplitEnabled ? itemPaidBy : undefined,
-      splitWith: trip.isSplitEnabled && !itemIsPersonal ? (itemSplitWith.length > 0 ? itemSplitWith : splitMembersList) : undefined,
-      isPersonal: trip.isSplitEnabled ? itemIsPersonal : undefined,
-    };
+    if (editingExpenseId) {
+      // Edit existing expense
+      const updatedExpenses = trip.expenses.map((exp) => {
+        if (exp.id === editingExpenseId) {
+          return {
+            ...exp,
+            title: title.trim(),
+            amount: parsedAmount,
+            currency: itemCurrency,
+            category,
+            paymentMethod,
+            date,
+            dayNumber: matchedDay ? matchedDay.dayNumber : undefined,
+            notes: notes.trim() || undefined,
+            receiptImages: receiptImages.length > 0 ? receiptImages : undefined,
+            receiptImage: receiptImages[0] || undefined,
+            convertedAmount: convertAmount(parsedAmount, itemCurrency, baseCurrency, trip.customExchangeRates),
+            paidBy: trip.isSplitEnabled ? itemPaidBy : undefined,
+            splitWith: trip.isSplitEnabled && !itemIsPersonal ? (itemSplitWith.length > 0 ? itemSplitWith : splitMembersList) : undefined,
+            isPersonal: trip.isSplitEnabled ? itemIsPersonal : undefined,
+          };
+        }
+        return exp;
+      });
 
-    onUpdateTrip({
-      ...trip,
-      expenses: [newExpense, ...trip.expenses],
-      updatedAt: Date.now(),
-    });
+      onUpdateTrip({
+        ...trip,
+        expenses: updatedExpenses,
+        updatedAt: Date.now(),
+      });
+    } else {
+      // Create new expense
+      const newExpense: ExpenseItem = {
+        id: `exp-${Date.now()}`,
+        title: title.trim(),
+        amount: parsedAmount,
+        currency: itemCurrency,
+        category,
+        paymentMethod,
+        date,
+        dayNumber: matchedDay ? matchedDay.dayNumber : undefined,
+        notes: notes.trim() || undefined,
+        receiptImages: receiptImages.length > 0 ? receiptImages : undefined,
+        receiptImage: receiptImages[0] || undefined,
+        convertedAmount: convertAmount(parsedAmount, itemCurrency, baseCurrency, trip.customExchangeRates),
+        paidBy: trip.isSplitEnabled ? itemPaidBy : undefined,
+        splitWith: trip.isSplitEnabled && !itemIsPersonal ? (itemSplitWith.length > 0 ? itemSplitWith : splitMembersList) : undefined,
+        isPersonal: trip.isSplitEnabled ? itemIsPersonal : undefined,
+      };
+
+      onUpdateTrip({
+        ...trip,
+        expenses: [newExpense, ...trip.expenses],
+        updatedAt: Date.now(),
+      });
+    }
 
     // Reset Form
+    setEditingExpenseId(null);
     setTitle('');
     setAmount('');
     setNotes('');
@@ -361,6 +443,15 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
       expenses: trip.expenses.filter((e) => e.id !== id),
       updatedAt: Date.now(),
     });
+  };
+
+  const handleDeleteCurrentlyEditing = () => {
+    if (!editingExpenseId) return;
+    if (confirm(lang === 'zh' ? '確定要刪除這筆支出明細嗎？' : 'Delete this expense record?')) {
+      handleDeleteExpense(editingExpenseId);
+      setShowAddModal(false);
+      setEditingExpenseId(null);
+    }
   };
 
   // Add a companion to splitting list
@@ -417,14 +508,36 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
     setShowRateModal(false);
   };
 
-  // Filtered expenses list
-  const filteredExpenses = trip.expenses.filter((item) => {
-    if (selectedCategoryFilter === 'all') return true;
-    if (selectedCategoryFilter === 'with_receipt') {
-      return (item.receiptImages && item.receiptImages.length > 0) || !!item.receiptImage;
-    }
-    return item.category === selectedCategoryFilter;
-  });
+  // Today's expenses count
+  const todayExpensesCount = useMemo(() => {
+    return trip.expenses.filter((e) => e.date === todayStr).length;
+  }, [trip.expenses, todayStr]);
+
+  // Filtered expenses list based on date & category
+  const filteredExpenses = useMemo(() => {
+    return trip.expenses.filter((item) => {
+      // Date filter
+      if (selectedDateFilter === 'today') {
+        if (item.date !== todayStr) return false;
+      } else if (selectedDateFilter === 'pre') {
+        if (trip.startDate && item.date >= trip.startDate) return false;
+      } else if (selectedDateFilter !== 'all') {
+        if (item.date !== selectedDateFilter) return false;
+      }
+
+      // Category filter
+      if (selectedCategoryFilter === 'all') return true;
+      if (selectedCategoryFilter === 'with_receipt') {
+        return (item.receiptImages && item.receiptImages.length > 0) || !!item.receiptImage;
+      }
+      return item.category === selectedCategoryFilter;
+    });
+  }, [trip.expenses, selectedDateFilter, selectedCategoryFilter, todayStr, trip.startDate]);
+
+  // Total for currently filtered expenses in base currency
+  const filteredTotalInBase = useMemo(() => {
+    return filteredExpenses.reduce((sum, item) => sum + getItemConvertedAmount(item), 0);
+  }, [filteredExpenses, baseCurrency, trip.customExchangeRates]);
 
   return (
     <div className="space-y-4">
@@ -535,13 +648,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
 
             {/* Add Expense Button */}
             <button
-              onClick={() => {
-                setItemCurrency(baseCurrency);
-                setItemPaidBy('我');
-                setItemSplitWith(splitMembersList);
-                setItemIsPersonal(false);
-                setShowAddModal(true);
-              }}
+              onClick={handleOpenAddExpense}
               className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5 transition active:scale-95"
             >
               <Plus className="w-4 h-4" />
@@ -575,18 +682,39 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             )}
           </div>
 
-          {/* Today's Expense Card */}
-          <div className="p-3 sm:p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-medium">
-              {lang === 'zh' ? '今日消費' : 'Today'}
-            </span>
-            <div className="font-black font-mono text-base sm:text-xl text-slate-900 dark:text-white mt-1 truncate">
+          {/* Today's Expense Card (Clickable filter) */}
+          <button
+            type="button"
+            onClick={() => {
+              setExpenseSubTab('records');
+              setSelectedDateFilter((prev) => (prev === 'today' ? 'all' : 'today'));
+            }}
+            className={`p-3 sm:p-4 rounded-2xl border text-left transition ${
+              selectedDateFilter === 'today' && expenseSubTab === 'records'
+                ? 'bg-teal-500/10 dark:bg-teal-950/60 border-teal-500 ring-2 ring-teal-500/30'
+                : 'bg-slate-50 dark:bg-slate-800/60 border-slate-100 dark:border-slate-800 hover:border-teal-300 dark:hover:border-teal-700/60'
+            }`}
+            title="點擊只檢視當日支出明細"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-slate-500 dark:text-slate-400 block font-medium">
+                {lang === 'zh' ? '今日消費' : 'Today'}
+              </span>
+              <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${
+                selectedDateFilter === 'today' && expenseSubTab === 'records'
+                  ? 'bg-teal-600 text-white'
+                  : 'bg-slate-200/80 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+              }`}>
+                {selectedDateFilter === 'today' && expenseSubTab === 'records' ? '篩選中' : '點擊查看'}
+              </span>
+            </div>
+            <div className="font-black font-mono text-base sm:text-xl text-teal-800 dark:text-teal-300 mt-1 truncate">
               {formatCurrencyAmount(todaySpentInBase, baseCurrency)}
             </div>
             <span className="text-[10px] text-slate-400 block mt-0.5">
-              {formatDateSlash(todayStr)}
+              {formatDateSlash(todayStr)} · {todayExpensesCount} 筆
             </span>
-          </div>
+          </button>
 
           {/* Records & Receipts Count */}
           <div className="p-3 sm:p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800">
@@ -1052,9 +1180,77 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             )}
           </div>
 
-          {/* Quick Filters */}
-          <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+          <button
+            type="button"
+            onClick={handleOpenAddExpense}
+            className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition self-start sm:self-auto"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>{lang === 'zh' ? '記一筆' : 'Add Expense'}</span>
+          </button>
+        </div>
+
+        {/* Filters Section: Date Filter & Category Filter */}
+        <div className="space-y-2.5 pb-2 border-b border-slate-100 dark:border-slate-800">
+          {/* 1. Date Selector Filter */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+            <span className="text-[11px] font-bold text-slate-400 shrink-0 pl-1 flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5 text-teal-600" />
+              <span>日期:</span>
+            </span>
             <button
+              type="button"
+              onClick={() => setSelectedDateFilter('all')}
+              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 ${
+                selectedDateFilter === 'all'
+                  ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-2xs'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+              }`}
+            >
+              全部日期
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedDateFilter('today')}
+              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition flex items-center gap-1 shrink-0 ${
+                selectedDateFilter === 'today'
+                  ? 'bg-teal-600 text-white shadow-2xs'
+                  : 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-100'
+              }`}
+            >
+              <span>⭐ 今日</span>
+              {todayExpensesCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-teal-800/40 text-[9px] font-mono">
+                  {todayExpensesCount}
+                </span>
+              )}
+            </button>
+
+            {/* Trip days */}
+            {trip.days.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                onClick={() => setSelectedDateFilter(d.date)}
+                className={`px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold transition shrink-0 ${
+                  selectedDateFilter === d.date
+                    ? 'bg-teal-600 text-white shadow-2xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                }`}
+              >
+                D{d.dayNumber} ({d.date.slice(5).replace('-', '/')})
+              </button>
+            ))}
+          </div>
+
+          {/* 2. Category & Receipt Quick Filter */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+            <span className="text-[11px] font-bold text-slate-400 shrink-0 pl-1 flex items-center gap-1">
+              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              <span>類別:</span>
+            </span>
+            <button
+              type="button"
               onClick={() => setSelectedCategoryFilter('all')}
               className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 ${
                 selectedCategoryFilter === 'all'
@@ -1062,9 +1258,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
               }`}
             >
-              {lang === 'zh' ? '全部' : 'All'}
+              {lang === 'zh' ? '全部分類' : 'All'}
             </button>
             <button
+              type="button"
               onClick={() => setSelectedCategoryFilter('with_receipt')}
               className={`px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1 transition shrink-0 ${
                 selectedCategoryFilter === 'with_receipt'
@@ -1084,6 +1281,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
               return (
                 <button
                   key={catKey}
+                  type="button"
                   onClick={() => setSelectedCategoryFilter(catKey)}
                   className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 ${
                     selectedCategoryFilter === catKey
@@ -1102,6 +1300,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
               return (
                 <button
                   key={catKey}
+                  type="button"
                   onClick={() => setSelectedCategoryFilter(catKey)}
                   className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 ${
                     selectedCategoryFilter === catKey
@@ -1114,6 +1313,40 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
               );
             })}
           </div>
+
+          {/* Active Filter Summary Bar if filtered */}
+          {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all') && (
+            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-teal-50/80 dark:bg-teal-950/40 border border-teal-200/60 dark:border-teal-900/60 text-xs">
+              <div className="flex items-center gap-1.5 text-teal-900 dark:text-teal-200 font-medium flex-wrap">
+                <span>正在檢視：</span>
+                <span className="font-bold underline">
+                  {selectedDateFilter === 'today'
+                    ? `今日 (${todayStr})`
+                    : selectedDateFilter !== 'all'
+                    ? selectedDateFilter
+                    : '全部日期'}
+                </span>
+                {selectedCategoryFilter !== 'all' && (
+                  <span>
+                    · 類別: {selectedCategoryFilter === 'with_receipt' ? '附發票' : (getCategoryMeta(selectedCategoryFilter).label || selectedCategoryFilter)}
+                  </span>
+                )}
+                <span className="font-mono font-bold ml-1">
+                  (共 {filteredExpenses.length} 筆 · 小計 {formatCurrencyAmount(filteredTotalInBase, baseCurrency)})
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedDateFilter('all');
+                  setSelectedCategoryFilter('all');
+                }}
+                className="text-[11px] font-bold text-teal-700 dark:text-teal-300 hover:underline shrink-0 ml-2"
+              >
+                清除篩選
+              </button>
+            </div>
+          )}
         </div>
 
         {filteredExpenses.length === 0 ? (
@@ -1134,14 +1367,21 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
               const isDiffCurrency = item.currency !== baseCurrency;
 
               return (
-                <div key={item.id} className="py-3 flex items-start justify-between gap-3 text-xs">
-                  <div className="flex items-start gap-3 min-w-0">
-                    <span className="text-base shrink-0 p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 mt-0.5">
+                <div
+                  key={item.id}
+                  className="py-3 px-2 sm:px-3 rounded-2xl hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition flex items-start justify-between gap-3 text-xs group"
+                >
+                  <div
+                    className="flex items-start gap-3 min-w-0 flex-1 cursor-pointer"
+                    onClick={() => handleOpenEditExpense(item)}
+                    title={lang === 'zh' ? '點擊編輯修改此筆記帳' : 'Click to edit'}
+                  >
+                    <span className="text-base shrink-0 p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 mt-0.5 group-hover:border-teal-300 dark:group-hover:border-teal-700 transition">
                       {catMeta.icon}
                     </span>
-                    <div className="min-w-0 space-y-1">
+                    <div className="min-w-0 space-y-1 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-bold text-slate-900 dark:text-slate-100 text-sm">
+                        <span className="font-bold text-slate-900 dark:text-slate-100 text-sm group-hover:text-teal-600 dark:group-hover:text-teal-400 transition">
                           {item.title}
                         </span>
                         <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-medium">
@@ -1151,6 +1391,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                         <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] font-mono">
                           {item.dayNumber ? `Day ${item.dayNumber}` : '行前'} · {item.date}
                         </span>
+                        {item.paidBy && trip.isSplitEnabled && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[10px]">
+                            {item.paidBy} 代墊
+                          </span>
+                        )}
                       </div>
 
                       {/* Payment & notes */}
@@ -1168,7 +1413,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
 
                       {/* Receipt Image Thumbnails Gallery Preview */}
                       {allImages.length > 0 && (
-                        <div className="flex items-center gap-1.5 pt-1">
+                        <div className="flex items-center gap-1.5 pt-1" onClick={(e) => e.stopPropagation()}>
                           {allImages.slice(0, 3).map((imgUrl, imgIdx) => (
                             <img
                               key={imgIdx}
@@ -1181,6 +1426,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                                   title: item.title,
                                   amount: item.amount,
                                   currency: item.currency,
+                                  expenseId: item.id,
                                 })
                               }
                               className="w-9 h-9 object-cover rounded-lg border border-teal-200 dark:border-teal-800 shadow-2xs cursor-pointer hover:opacity-80 transition"
@@ -1195,6 +1441,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                                   title: item.title,
                                   amount: item.amount,
                                   currency: item.currency,
+                                  expenseId: item.id,
                                 })
                               }
                               className="w-9 h-9 rounded-lg bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 text-teal-700 dark:text-teal-300 text-[10px] font-bold flex items-center justify-center hover:bg-teal-100 transition"
@@ -1210,7 +1457,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                     </div>
                   </div>
 
-                  {/* Amounts & Delete */}
+                  {/* Amounts & Actions */}
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <div className="text-right">
                       <div className="font-mono font-black text-slate-900 dark:text-white text-sm sm:text-base">
@@ -1223,13 +1470,30 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                       )}
                     </div>
 
-                    <button
-                      onClick={() => handleDeleteExpense(item.id)}
-                      className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition mt-1"
-                      title="刪除此筆支出"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1 mt-1">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenEditExpense(item);
+                        }}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition"
+                        title={lang === 'zh' ? '編輯修改此筆記帳' : 'Edit expense'}
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteExpense(item.id);
+                        }}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition"
+                        title={lang === 'zh' ? '刪除此筆支出' : 'Delete expense'}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -1241,11 +1505,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
         </>
       )}
 
-      {/* 4. Fullscreen Mobile / Centered Desktop Modal for Add Expense */}
+      {/* 4. Fullscreen Mobile / Centered Desktop Modal for Add / Edit Expense */}
       {showAddModal && (
         <div
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-0 sm:p-4"
-          onClick={() => setShowAddModal(false)}
+          onClick={() => {
+            setShowAddModal(false);
+            setEditingExpenseId(null);
+          }}
         >
           <div
             className="w-full h-full sm:h-auto sm:max-h-[92vh] sm:max-w-lg bg-white dark:bg-slate-900 sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
@@ -1253,23 +1520,34 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
           >
             {/* Modal Header */}
             <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-800/40">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-teal-100 dark:bg-teal-900/60 text-teal-700 dark:text-teal-300 flex items-center justify-center">
-                  <Plus className="w-4 h-4" />
+              <div className="flex items-center gap-2.5">
+                <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                  editingExpenseId
+                    ? 'bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300'
+                    : 'bg-teal-100 dark:bg-teal-900/60 text-teal-700 dark:text-teal-300'
+                }`}>
+                  {editingExpenseId ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                 </div>
                 <div>
                   <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
-                    {lang === 'zh' ? '記一筆新支出' : 'Add New Expense'}
+                    {editingExpenseId
+                      ? (lang === 'zh' ? '編輯支出紀錄' : 'Edit Expense Record')
+                      : (lang === 'zh' ? '記一筆新支出' : 'Add New Expense')}
                   </h3>
                   <p className="text-[10px] text-slate-400">
-                    {lang === 'zh' ? '選擇幣別、輸入金額與上傳多張收據' : 'Select currency & upload receipts'}
+                    {editingExpenseId
+                      ? (lang === 'zh' ? '修改金額、幣別、分類或更新發票相片' : 'Modify amount, category, or receipt photos')
+                      : (lang === 'zh' ? '選擇幣別、輸入金額與上傳多張收據' : 'Select currency & upload receipts')}
                   </p>
                 </div>
               </div>
 
               <button
                 type="button"
-                onClick={() => setShowAddModal(false)}
+                onClick={() => {
+                  setShowAddModal(false);
+                  setEditingExpenseId(null);
+                }}
                 className="p-2 rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
               >
                 <X className="w-5 h-5" />
@@ -1308,12 +1586,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                   ))}
                 </div>
 
-                {/* Big Numeric Amount Input */}
+                {/* Big Numeric Amount Input with Fixed Clean Prefix */}
                 <div>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono font-bold text-lg">
-                      {CURRENCY_MAP[itemCurrency]?.symbol || itemCurrency}
-                    </span>
+                  <div className="flex items-center rounded-xl bg-white dark:bg-slate-800 border-2 border-teal-200 dark:border-teal-700/80 focus-within:border-teal-600 dark:focus-within:border-teal-400 focus-within:ring-2 focus-within:ring-teal-500/20 transition overflow-hidden">
+                    <div className="px-3.5 py-3 bg-teal-50/70 dark:bg-teal-950/40 border-r border-teal-200 dark:border-teal-800/80 text-teal-800 dark:text-teal-200 font-mono font-bold text-base sm:text-lg shrink-0 select-none flex items-center gap-1">
+                      <span>{CURRENCY_MAP[itemCurrency]?.symbol || itemCurrency}</span>
+                      <span className="text-[10px] text-teal-600 dark:text-teal-400 font-normal">({itemCurrency})</span>
+                    </div>
                     <input
                       type="number"
                       step="any"
@@ -1321,7 +1600,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
                       placeholder="0"
-                      className="w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-800 rounded-xl border border-teal-200 dark:border-teal-800 text-xl font-mono font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                      className="flex-1 min-w-0 px-4 py-3 bg-transparent text-xl sm:text-2xl font-mono font-black text-slate-900 dark:text-white outline-none placeholder:text-slate-300 dark:placeholder:text-slate-600"
                     />
                   </div>
 
@@ -1665,22 +1944,44 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             </form>
 
             {/* Sticky Modal Bottom Actions */}
-            <div className="px-5 py-3.5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/80 flex items-center justify-end gap-2.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => setShowAddModal(false)}
-                className="px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition font-semibold text-xs text-slate-700 dark:text-slate-300"
-              >
-                {lang === 'zh' ? '取消' : 'Cancel'}
-              </button>
-              <button
-                type="submit"
-                form="expense-modal-form"
-                className="px-6 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl shadow-xs transition active:scale-95 flex items-center gap-1.5 text-xs"
-              >
-                <Check className="w-4 h-4" />
-                <span>{lang === 'zh' ? '確認儲存' : 'Save Expense'}</span>
-              </button>
+            <div className="px-5 py-3.5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/80 flex items-center justify-between gap-2.5 shrink-0">
+              <div>
+                {editingExpenseId && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteCurrentlyEditing}
+                    className="px-3 py-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition font-semibold text-xs flex items-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>{lang === 'zh' ? '刪除此筆' : 'Delete'}</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setEditingExpenseId(null);
+                  }}
+                  className="px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition font-semibold text-xs text-slate-700 dark:text-slate-300"
+                >
+                  {lang === 'zh' ? '取消' : 'Cancel'}
+                </button>
+                <button
+                  type="submit"
+                  form="expense-modal-form"
+                  className="px-6 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl shadow-xs transition active:scale-95 flex items-center gap-1.5 text-xs"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>
+                    {editingExpenseId
+                      ? (lang === 'zh' ? '儲存修改' : 'Save Changes')
+                      : (lang === 'zh' ? '確認儲存' : 'Save Expense')}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1867,6 +2168,22 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                 可多張左右滑動切換
               </span>
               <div className="flex items-center gap-2">
+                {viewingReceiptGallery.expenseId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const targetExp = trip.expenses.find((e) => e.id === viewingReceiptGallery.expenseId);
+                      setViewingReceiptGallery(null);
+                      if (targetExp) {
+                        handleOpenEditExpense(targetExp);
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 text-amber-800 dark:text-amber-300 font-bold flex items-center gap-1 transition"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    <span>{lang === 'zh' ? '編輯此筆記帳' : 'Edit Expense'}</span>
+                  </button>
+                )}
                 <a
                   href={viewingReceiptGallery.images[viewingReceiptGallery.currentIndex]}
                   download={`receipt-${viewingReceiptGallery.title}-${viewingReceiptGallery.currentIndex + 1}.jpg`}
