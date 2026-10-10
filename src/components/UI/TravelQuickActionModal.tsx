@@ -56,7 +56,16 @@ interface ScratchpadNote {
   label: string;
   content: string;
   createdAt: number;
+  completed?: boolean;
 }
+
+export const getLocalTodayDate = (): string => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 const CATEGORY_ITEMS = [
   { key: 'food', label: '美食餐飲', icon: Utensils },
@@ -114,11 +123,12 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   const [expenseNotes, setExpenseNotes] = useState<string>('');
   const [expenseCat, setExpenseCat] = useState<string>('food');
   const [expensePayment, setExpensePayment] = useState<PaymentMethod>('card');
-  const [expenseDate, setExpenseDate] = useState<string>(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    if (today >= trip.startDate && today <= trip.endDate) return today;
-    return trip.startDate || today;
-  });
+  const [expenseDate, setExpenseDate] = useState<string>(() => getLocalTodayDate());
+
+  // Ensure default date is always today's date when opening or switching tabs
+  useEffect(() => {
+    setExpenseDate(getLocalTodayDate());
+  }, [initialTab]);
 
   // Receipts / Invoice Upload States
   const [receiptImages, setReceiptImages] = useState<string[]>([]);
@@ -226,10 +236,11 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     setExpenseTitle('');
     setExpenseNotes('');
     setReceiptImages([]);
+    setExpenseDate(getLocalTodayDate());
     onClose();
   };
 
-  // --- 2. Scratchpad States (便簽免標題，直接快速記筆記) ---
+  // --- 2. Scratchpad States (便簽免標題，直接快速記筆記，支援打勾完成) ---
   const STORAGE_KEY_NOTES = `hiyori_scratchpad_${trip.id}`;
   const [notes, setNotes] = useState<ScratchpadNote[]>(() => {
     try {
@@ -243,6 +254,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
         label: '置物櫃',
         content: '剪票口旁 28 號置物櫃，密碼 5183',
         createdAt: Date.now(),
+        completed: false,
       },
       {
         id: '2',
@@ -250,12 +262,14 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
         label: '車次座位',
         content: '車次 7 車 14A (靠窗位)',
         createdAt: Date.now(),
+        completed: false,
       },
     ];
   });
 
   const [newNoteContent, setNewNoteContent] = useState('');
   const [newNoteCat, setNewNoteCat] = useState<'locker' | 'seat' | 'hotel' | 'other'>('other');
+  const [noteFilter, setNoteFilter] = useState<'all' | 'pending' | 'completed'>('all');
   const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -263,6 +277,23 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(notes));
     } catch {}
   }, [notes, STORAGE_KEY_NOTES]);
+
+  const handleToggleNoteComplete = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setNotes((prevNotes) =>
+      prevNotes.map((n) =>
+        n.id === id ? { ...n, completed: !n.completed } : n
+      )
+    );
+  };
+
+  const handleClearCompletedNotes = () => {
+    const remaining = notes.filter((n) => !n.completed);
+    setNotes(remaining);
+    if (onShowToast) {
+      onShowToast('已清除所有已打勾備忘');
+    }
+  };
 
   const handleAddNote = (e: React.FormEvent) => {
     e.preventDefault();
@@ -275,6 +306,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       label: matched?.label || '隨手便簽',
       content: newNoteContent.trim(),
       createdAt: Date.now(),
+      completed: false,
     };
 
     setNotes([item, ...notes]);
@@ -533,10 +565,24 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
             {/* Date & Optional Notes */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
-                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1">
-                  <Calendar className="w-3 h-3 text-slate-400" />
-                  <span>消費日期：</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                    <Calendar className="w-3 h-3 text-slate-400" />
+                    <span>消費日期：</span>
+                    <span className="text-[10px] text-teal-600 dark:text-teal-400 font-semibold bg-teal-50 dark:bg-teal-950/60 px-1.5 py-0.5 rounded-md">
+                      預設當天
+                    </span>
+                  </label>
+                  {expenseDate !== getLocalTodayDate() && (
+                    <button
+                      type="button"
+                      onClick={() => setExpenseDate(getLocalTodayDate())}
+                      className="text-[10px] text-teal-600 dark:text-teal-400 hover:underline font-bold"
+                    >
+                      設為今天
+                    </button>
+                  )}
+                </div>
                 <input
                   type="date"
                   value={expenseDate}
@@ -903,148 +949,253 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               </div>
             </form>
 
-            {/* Notes List */}
-            <div className="space-y-2.5">
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
-                已記錄的便簽 ({notes.length})：
-              </span>
-              {notes.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-400">
-                  尚未記錄任何隨手便簽，在上方直接輸入內容即可儲存！
-                </div>
-              ) : (
-                notes.map((note) => {
-                  const matched = SCRATCHPAD_CATS.find((c) => c.key === note.category) || SCRATCHPAD_CATS[3];
-                  const Icon = matched.icon;
-                  const isEditingThis = editingNoteId === note.id;
+            {/* Notes List Header & Controls */}
+            {(() => {
+              const pendingNotes = notes.filter((n) => !n.completed);
+              const completedNotes = notes.filter((n) => n.completed);
+              const displayedNotes =
+                noteFilter === 'pending'
+                  ? pendingNotes
+                  : noteFilter === 'completed'
+                  ? completedNotes
+                  : notes;
 
-                  if (isEditingThis) {
-                    return (
-                      <form
-                        key={note.id}
-                        onSubmit={handleSaveEditNote}
-                        className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-slate-800 border-2 border-amber-500 space-y-2.5 shadow-md animate-in fade-in duration-100 text-xs"
+              return (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    {/* Filter Tabs: 全部 / 待辦 / 已打勾 */}
+                    <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl text-[11px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setNoteFilter('all')}
+                        className={`px-2.5 py-1 rounded-lg transition ${
+                          noteFilter === 'all'
+                            ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
+                            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                        }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
-                            <Edit2 className="w-3.5 h-3.5 text-amber-600" />
-                            <span>編輯便簽內容</span>
-                          </span>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={handleCancelEditNote}
-                              className="px-2 py-1 rounded-lg text-slate-500 hover:bg-slate-200/60 dark:hover:bg-slate-700 text-[11px] font-medium"
-                            >
-                              取消
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSaveEditNote()}
-                              className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[11px] flex items-center gap-1 shadow-xs transition active:scale-95"
-                            >
-                              <Check className="w-3 h-3" />
-                              <span>儲存修改</span>
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Category selection */}
-                        <div className="grid grid-cols-4 gap-1">
-                          {SCRATCHPAD_CATS.map((cat) => {
-                            const CatIcon = cat.icon;
-                            return (
-                              <button
-                                key={cat.key}
-                                type="button"
-                                onClick={() => setEditNoteCat(cat.key)}
-                                className={`py-1 px-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition ${
-                                  editNoteCat === cat.key
-                                    ? 'bg-amber-500 text-slate-950 font-black'
-                                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
-                                }`}
-                              >
-                                <CatIcon className="w-3 h-3" />
-                                <span className="truncate">{cat.label}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        <textarea
-                          rows={3}
-                          value={editNoteContent}
-                          onChange={(e) => setEditNoteContent(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                              e.preventDefault();
-                              handleSaveEditNote();
-                            }
-                          }}
-                          placeholder="便簽內容..."
-                          className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium font-mono text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-amber-500 resize-none leading-relaxed"
-                          autoFocus
-                        />
-                      </form>
-                    );
-                  }
-
-                  return (
-                    <div
-                      key={note.id}
-                      className="p-3.5 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 flex items-start justify-between gap-3 shadow-2xs hover:border-amber-400 dark:hover:border-amber-600 transition group"
-                    >
-                      <div
-                        onClick={() => handleStartEditNote(note)}
-                        className="min-w-0 flex-1 space-y-2 cursor-pointer"
-                        title="點擊可直接編輯"
+                        全部 ({notes.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNoteFilter('pending')}
+                        className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1 ${
+                          noteFilter === 'pending'
+                            ? 'bg-amber-500 text-slate-950 font-black shadow-2xs'
+                            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                        }`}
                       >
-                        <div className="flex items-center gap-1.5">
-                          <span className="px-2 py-0.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-bold text-[11px] flex items-center gap-1">
-                            <Icon className="w-3 h-3" />
-                            <span>{matched.label}</span>
-                          </span>
-                        </div>
-                        <p className="text-xs sm:text-sm font-semibold font-mono text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-900 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 break-words hover:border-amber-400 dark:hover:border-amber-600 transition select-text whitespace-pre-wrap leading-relaxed">
-                          {note.content}
-                        </p>
-                      </div>
-
-                      <div className="flex flex-col gap-1 shrink-0 pt-0.5">
-                        <button
-                          type="button"
-                          onClick={() => handleCopyNote(note.content, note.id)}
-                          className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition"
-                          title="一鍵複製內容"
-                        >
-                          {copiedNoteId === note.id ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleStartEditNote(note)}
-                          className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-slate-500 hover:text-amber-600 transition"
-                          title="編輯便簽"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteNote(note.id)}
-                          className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 transition"
-                          title="刪除此便簽"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                        <span>待辦</span>
+                        <span>({pendingNotes.length})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNoteFilter('completed')}
+                        className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1 ${
+                          noteFilter === 'completed'
+                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                        }`}
+                      >
+                        <Check className="w-3 h-3" />
+                        <span>已打勾</span>
+                        <span>({completedNotes.length})</span>
+                      </button>
                     </div>
-                  );
-                })
-              )}
-            </div>
+
+                    {completedNotes.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearCompletedNotes}
+                        className="text-[11px] text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 font-semibold transition flex items-center gap-1"
+                        title="清除所有已打勾便簽"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>清除已打勾 ({completedNotes.length})</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {displayedNotes.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-slate-400">
+                      {noteFilter === 'completed'
+                        ? '目前沒有已打勾的備忘項目'
+                        : noteFilter === 'pending'
+                        ? '太棒了！所有備忘項目都已打勾完成 🎉'
+                        : '尚未記錄任何隨手便簽，在上方直接輸入內容即可儲存！'}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {displayedNotes.map((note) => {
+                        const matched = SCRATCHPAD_CATS.find((c) => c.key === note.category) || SCRATCHPAD_CATS[3];
+                        const Icon = matched.icon;
+                        const isEditingThis = editingNoteId === note.id;
+                        const isDone = !!note.completed;
+
+                        if (isEditingThis) {
+                          return (
+                            <form
+                              key={note.id}
+                              onSubmit={handleSaveEditNote}
+                              className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-slate-800 border-2 border-amber-500 space-y-2.5 shadow-md animate-in fade-in duration-100 text-xs"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                                  <Edit2 className="w-3.5 h-3.5 text-amber-600" />
+                                  <span>編輯便簽內容</span>
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={handleCancelEditNote}
+                                    className="px-2 py-1 rounded-lg text-slate-500 hover:bg-slate-200/60 dark:hover:bg-slate-700 text-[11px] font-medium"
+                                  >
+                                    取消
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveEditNote()}
+                                    className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[11px] flex items-center gap-1 shadow-xs transition active:scale-95"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                    <span>儲存修改</span>
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Category selection */}
+                              <div className="grid grid-cols-4 gap-1">
+                                {SCRATCHPAD_CATS.map((cat) => {
+                                  const CatIcon = cat.icon;
+                                  return (
+                                    <button
+                                      key={cat.key}
+                                      type="button"
+                                      onClick={() => setEditNoteCat(cat.key)}
+                                      className={`py-1 px-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition ${
+                                        editNoteCat === cat.key
+                                          ? 'bg-amber-500 text-slate-950 font-black'
+                                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
+                                      }`}
+                                    >
+                                      <CatIcon className="w-3 h-3" />
+                                      <span className="truncate">{cat.label}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              <textarea
+                                rows={3}
+                                value={editNoteContent}
+                                onChange={(e) => setEditNoteContent(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                                    e.preventDefault();
+                                    handleSaveEditNote();
+                                  }
+                                }}
+                                placeholder="便簽內容..."
+                                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium font-mono text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-amber-500 resize-none leading-relaxed"
+                                autoFocus
+                              />
+                            </form>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={note.id}
+                            className={`p-3 sm:p-3.5 rounded-2xl border transition group flex items-start gap-2.5 sm:gap-3 ${
+                              isDone
+                                ? 'bg-slate-50/70 dark:bg-slate-900/40 border-slate-200/60 dark:border-slate-800 opacity-80'
+                                : 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 shadow-2xs hover:border-amber-400 dark:hover:border-amber-600'
+                            }`}
+                          >
+                            {/* Checkbox button (打勾備忘) */}
+                            <button
+                              type="button"
+                              onClick={(e) => handleToggleNoteComplete(note.id, e)}
+                              className={`mt-0.5 shrink-0 w-6 h-6 rounded-lg flex items-center justify-center transition active:scale-90 ${
+                                isDone
+                                  ? 'bg-emerald-600 text-white shadow-xs hover:bg-emerald-700'
+                                  : 'border-2 border-slate-300 dark:border-slate-600 hover:border-amber-500 bg-white dark:bg-slate-900 text-transparent hover:text-slate-300'
+                              }`}
+                              title={isDone ? '點擊取消打勾 (標記為未完成)' : '點擊打勾 (標記為已完成)'}
+                            >
+                              <Check className={`w-3.5 h-3.5 ${isDone ? 'stroke-[3]' : 'opacity-0 hover:opacity-40'}`} />
+                            </button>
+
+                            {/* Note Content */}
+                            <div
+                              onClick={() => handleStartEditNote(note)}
+                              className="min-w-0 flex-1 space-y-1.5 cursor-pointer"
+                              title="點擊可直接編輯"
+                            >
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={`px-2 py-0.5 rounded-lg font-bold text-[11px] flex items-center gap-1 ${
+                                  isDone
+                                    ? 'bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                                    : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'
+                                }`}>
+                                  <Icon className="w-3 h-3" />
+                                  <span>{matched.label}</span>
+                                </span>
+                                {isDone && (
+                                  <span className="px-1.5 py-0.2 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold text-[10px] flex items-center gap-0.5">
+                                    <Check className="w-2.5 h-2.5" />
+                                    <span>已完成</span>
+                                  </span>
+                                )}
+                              </div>
+                              <p className={`text-xs sm:text-sm font-semibold font-mono p-2.5 rounded-xl border break-words transition select-text whitespace-pre-wrap leading-relaxed ${
+                                isDone
+                                  ? 'line-through text-slate-400 dark:text-slate-500 bg-slate-100/60 dark:bg-slate-900/60 border-slate-200/60 dark:border-slate-800/60'
+                                  : 'text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-amber-400 dark:hover:border-amber-600'
+                              }`}>
+                                {note.content}
+                              </p>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="flex flex-col gap-1 shrink-0 pt-0.5">
+                              <button
+                                type="button"
+                                onClick={() => handleCopyNote(note.content, note.id)}
+                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition"
+                                title="一鍵複製內容"
+                              >
+                                {copiedNoteId === note.id ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditNote(note)}
+                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-slate-500 hover:text-amber-600 transition"
+                                title="編輯便簽"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteNote(note.id)}
+                                className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 transition"
+                                title="刪除此便簽"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 
