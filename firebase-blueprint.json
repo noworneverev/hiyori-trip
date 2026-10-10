@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "Trip": {
+      "title": "Trip",
+      "description": "A travel itinerary record containing days, items, expenses, packing list and notes.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique trip identifier.",
+          "maxLength": 128
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "The user UID who owns this trip.",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Trip name or title.",
+          "maxLength": 200
+        },
+        "destination": {
+          "type": "string",
+          "description": "Destination city and country.",
+          "maxLength": 200
+        },
+        "startDate": {
+          "type": "string",
+          "description": "Trip start date.",
+          "maxLength": 30
+        },
+        "endDate": {
+          "type": "string",
+          "description": "Trip end date.",
+          "maxLength": 30
+        },
+        "currency": {
+          "type": "string",
+          "description": "Primary currency code.",
+          "maxLength": 10
+        },
+        "budgetTotal": {
+          "type": "number",
+          "description": "Budget total amount."
+        },
+        "coverGradient": {
+          "type": "string",
+          "description": "Tailwind gradient class for header.",
+          "maxLength": 100
+        },
+        "notes": {
+          "type": "string",
+          "description": "General trip notes and reminders.",
+          "maxLength": 10000
+        },
+        "days": {
+          "type": "array",
+          "description": "List of day plans with scheduled spots."
+        },
+        "packingList": {
+          "type": "array",
+          "description": "List of packing items."
+        },
+        "todos": {
+          "type": "array",
+          "description": "List of to-do checklist and ticket reminder items."
+        },
+        "expenses": {
+          "type": "array",
+          "description": "List of tracked expenses."
+        },
+        "emergencyContacts": {
+          "type": "array",
+          "description": "List of emergency contacts."
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Last updated epoch timestamp."
+        }
+      },
+      "required": ["id", "ownerId", "title", "destination", "startDate", "endDate", "currency", "days"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/trips/{tripId}": {
+      "schema": "Trip",
+      "description": "User private travel itinerary trips."
+    }
+  }
+}
