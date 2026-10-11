@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ItineraryItem, CategoryType } from '../../types/itinerary';
 import { searchLocationOSM } from '../../utils/geo';
 import { compressImageFile } from '../../utils/image';
+import { canUploadImages } from '../../utils/userPermissions';
 import {
   X,
   MapPin,
@@ -479,26 +480,30 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
               ))}
             </div>
 
-            <input
-              type="file"
-              ref={photoInputRef}
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={handlePhotoFiles}
-            />
+            {canUploadImages() && (
+              <>
+                <input
+                  type="file"
+                  ref={photoInputRef}
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handlePhotoFiles}
+                />
 
-            <button
-              type="button"
-              onClick={() => photoInputRef.current?.click()}
-              disabled={isUploadingPhoto}
-              className="w-full py-2.5 px-3 border-2 border-dashed border-rose-300 dark:border-rose-800/80 hover:border-rose-500 bg-white/70 dark:bg-slate-800/60 rounded-xl flex items-center justify-center gap-2 text-rose-700 dark:text-rose-300 text-xs font-semibold transition active:scale-98"
-            >
-              <ImageIcon className="w-4 h-4 text-rose-600" />
-              <span>
-                {isUploadingPhoto ? '照片壓縮處理中...' : '拍照或選取打卡回憶相片 (自動排版為相簿/拍立得)'}
-              </span>
-            </button>
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  disabled={isUploadingPhoto}
+                  className="w-full py-2.5 px-3 border-2 border-dashed border-rose-300 dark:border-rose-800/80 hover:border-rose-500 bg-white/70 dark:bg-slate-800/60 rounded-xl flex items-center justify-center gap-2 text-rose-700 dark:text-rose-300 text-xs font-semibold transition active:scale-98"
+                >
+                  <ImageIcon className="w-4 h-4 text-rose-600" />
+                  <span>
+                    {isUploadingPhoto ? '照片壓縮處理中...' : '拍照或選取打卡回憶相片 (自動排版為相簿/拍立得)'}
+                  </span>
+                </button>
+              </>
+            )}
 
             {memoryPhotos.length > 0 && (
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 pt-1">

@@ -3,6 +3,7 @@ import { Trip, TripMemoryItem, ItineraryItem } from '../../types/itinerary';
 import { formatDateSlash, formatMonthDaySlash, getDayOfWeek } from '../../utils/date';
 import { Language } from '../../utils/i18n';
 import { compressImageFile } from '../../utils/image';
+import { canUploadImages } from '../../utils/userPermissions';
 import {
   Camera,
   Upload,
@@ -126,6 +127,16 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       return a.createdAt - b.createdAt;
     });
   }, [trip.memories, trip.days, trip.createdAt]);
+
+  const [isAuthorizedUploader, setIsAuthorizedUploader] = useState(() => canUploadImages());
+
+  useEffect(() => {
+    const handleAuth = () => {
+      setIsAuthorizedUploader(canUploadImages());
+    };
+    window.addEventListener('auth_state_change', handleAuth);
+    return () => window.removeEventListener('auth_state_change', handleAuth);
+  }, []);
 
   // Count of spots that have at least one photo
   const checkedSpotsCount = useMemo(() => {
@@ -389,19 +400,21 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               </button>
             )}
 
-            {/* Upload Memory Photo Button */}
-            <button
-              type="button"
-              onClick={() => {
-                setUploadSpotId('');
-                setIsCustomSpot(true);
-                setShowUploadModal(true);
-              }}
-              className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95"
-            >
-              <Plus className="w-4 h-4" />
-              <span>{lang === 'zh' ? '上傳自由隨拍' : 'Add Photo'}</span>
-            </button>
+            {/* Upload Memory Photo Button (Only n9102125@gmail.com) */}
+            {isAuthorizedUploader && (
+              <button
+                type="button"
+                onClick={() => {
+                  setUploadSpotId('');
+                  setIsCustomSpot(true);
+                  setShowUploadModal(true);
+                }}
+                className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{lang === 'zh' ? '上傳自由隨拍' : 'Add Photo'}</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -524,18 +537,20 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               />
             </div>
             <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-              <span>{checkedSpotsCount === allSpots.length && allSpots.length > 0 ? '🎉 太棒了！全行程景點均已打卡留念！' : '點擊下方尚未打卡的景點卡片即可快速拍照上傳'}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setUploadSpotId('');
-                  setIsCustomSpot(true);
-                  setShowUploadModal(true);
-                }}
-                className="text-teal-600 dark:text-teal-400 font-bold hover:underline"
-              >
-                ＋ 新增行程外自由隨拍
-              </button>
+              <span>{checkedSpotsCount === allSpots.length && allSpots.length > 0 ? '🎉 太棒了！全行程景點均已打卡留念！' : (isAuthorizedUploader ? '點擊下方尚未打卡的景點卡片即可快速拍照上傳' : '景點打卡回憶相簿')}</span>
+              {isAuthorizedUploader && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUploadSpotId('');
+                    setIsCustomSpot(true);
+                    setShowUploadModal(true);
+                  }}
+                  className="text-teal-600 dark:text-teal-400 font-bold hover:underline"
+                >
+                  ＋ 新增行程外自由隨拍
+                </button>
+              )}
             </div>
           </div>
 
@@ -559,19 +574,21 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUploadSpotId('');
-                    setIsCustomSpot(true);
-                    setCustomDayNumber('all');
-                    setShowUploadModal(true);
-                  }}
-                  className="text-xs font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 flex items-center gap-1"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>新增隨拍</span>
-                </button>
+                {isAuthorizedUploader && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUploadSpotId('');
+                      setIsCustomSpot(true);
+                      setCustomDayNumber('all');
+                      setShowUploadModal(true);
+                    }}
+                    className="text-xs font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 flex items-center gap-1"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>新增隨拍</span>
+                  </button>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
@@ -631,20 +648,22 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       {formatDateSlash(day.date)} ({getDayOfWeek(day.date, lang)})
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUploadSpotId('');
-                      setIsCustomSpot(true);
-                      setCustomDayNumber(day.dayNumber);
-                      setCustomDate(day.date);
-                      setShowUploadModal(true);
-                    }}
-                    className="text-xs font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 flex items-center gap-1"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>新增 Day {day.dayNumber} 自由隨拍</span>
-                  </button>
+                  {isAuthorizedUploader && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUploadSpotId('');
+                        setIsCustomSpot(true);
+                        setCustomDayNumber(day.dayNumber);
+                        setCustomDate(day.date);
+                        setShowUploadModal(true);
+                      }}
+                      className="text-xs font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 flex items-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>新增 Day {day.dayNumber} 自由隨拍</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Day Spots Grid */}
@@ -694,26 +713,32 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                               </p>
                             </div>
                             <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setUploadSpotId(spot.id);
-                                  setIsCustomSpot(false);
-                                  setShowUploadModal(true);
-                                }}
-                                className="text-teal-600 font-bold hover:underline flex items-center gap-1"
-                              >
-                                <Plus className="w-3 h-3" />
-                                <span>追加相片</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteMemory(firstPhoto.id)}
-                                className="text-slate-400 hover:text-rose-600 transition"
-                                title="刪除照片"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
+                              {isAuthorizedUploader ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setUploadSpotId(spot.id);
+                                    setIsCustomSpot(false);
+                                    setShowUploadModal(true);
+                                  }}
+                                  className="text-teal-600 font-bold hover:underline flex items-center gap-1"
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  <span>追加相片</span>
+                                </button>
+                              ) : (
+                                <span className="text-slate-400 text-[10px]">打卡相簿</span>
+                              )}
+                              {isAuthorizedUploader && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteMemory(firstPhoto.id)}
+                                  className="text-slate-400 hover:text-rose-600 transition"
+                                  title="刪除照片"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -724,11 +749,15 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       <div
                         key={spot.id}
                         onClick={() => {
-                          setUploadSpotId(spot.id);
-                          setIsCustomSpot(false);
-                          setShowUploadModal(true);
+                          if (isAuthorizedUploader) {
+                            setUploadSpotId(spot.id);
+                            setIsCustomSpot(false);
+                            setShowUploadModal(true);
+                          }
                         }}
-                        className="rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-teal-500 hover:bg-teal-50/20 dark:hover:bg-teal-950/20 p-4 transition cursor-pointer flex flex-col justify-between min-h-[140px] group bg-white/50 dark:bg-slate-900/50"
+                        className={`rounded-3xl border border-slate-200 dark:border-slate-800 p-4 transition flex flex-col justify-between min-h-[130px] group bg-white/50 dark:bg-slate-900/50 ${
+                          isAuthorizedUploader ? 'hover:border-teal-500 hover:bg-teal-50/20 dark:hover:bg-teal-950/20 cursor-pointer border-dashed' : ''
+                        }`}
                       >
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between text-xs text-slate-400">
@@ -744,13 +773,15 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                             </p>
                           )}
                         </div>
-                        <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs text-teal-600 font-bold">
-                          <span className="flex items-center gap-1 text-[11px]">
-                            <Camera className="w-3.5 h-3.5" />
-                            <span>點擊上傳此景點相片</span>
-                          </span>
-                          <span className="text-base group-hover:translate-x-0.5 transition">→</span>
-                        </div>
+                        {isAuthorizedUploader && (
+                          <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs text-teal-600 font-bold">
+                            <span className="flex items-center gap-1 text-[11px]">
+                              <Camera className="w-3.5 h-3.5" />
+                              <span>點擊上傳此景點相片</span>
+                            </span>
+                            <span className="text-base group-hover:translate-x-0.5 transition">→</span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -819,13 +850,15 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 : 'Upload travel photos and captions to create a beautiful memory album and printable Polaroid cards.'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowUploadModal(true)}
-            className="px-5 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md transition active:scale-95"
-          >
-            📸 立即上傳第一張照片
-          </button>
+          {isAuthorizedUploader && (
+            <button
+              type="button"
+              onClick={() => setShowUploadModal(true)}
+              className="px-5 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md transition active:scale-95"
+            >
+              📸 立即上傳第一張照片
+            </button>
+          )}
         </div>
       ) : viewMode === 'gallery' ? (
         /* ================= 2A. EXQUISITE STORY GALLERY VIEW ================= */
@@ -996,7 +1029,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       )}
 
       {/* ================= 3. UPLOAD MEMORY PHOTO MODAL ================= */}
-      {showUploadModal && (
+      {showUploadModal && isAuthorizedUploader && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150"
           onClick={() => setShowUploadModal(false)}

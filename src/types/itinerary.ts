@@ -135,6 +135,8 @@ export interface Trip {
   lastUpdatedBy?: string;
   isSplitEnabled?: boolean;
   splitMembers?: string[];
+  initialCashAmount?: number;
+  initialCashCurrency?: string;
   memories?: TripMemoryItem[];
   createdAt: number;
   updatedAt: number;

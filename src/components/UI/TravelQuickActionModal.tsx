@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Trip, ExpenseItem, PaymentMethod } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { compressImageFile } from '../../utils/image';
+import { canUploadImages } from '../../utils/userPermissions';
 import {
   SUPPORTED_CURRENCIES,
   CURRENCY_MAP,
@@ -529,112 +530,9 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               )}
             </div>
 
-            {/* Quick Title Chips & Input */}
+            {/* 2. 付款方式 (Method) */}
             <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
-                品項名稱：
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {COMMON_EXPENSE_PRESETS.map((p) => (
-                  <button
-                    key={p.title}
-                    type="button"
-                    onClick={() => {
-                      setExpenseTitle(p.title);
-                      setExpenseCat(p.category);
-                    }}
-                    className={`px-2.5 py-1 rounded-xl text-xs font-semibold border transition active:scale-95 ${
-                      expenseTitle === p.title
-                        ? 'bg-teal-600 text-white border-teal-600 shadow-xs'
-                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700/60'
-                    }`}
-                  >
-                    {p.title}
-                  </button>
-                ))}
-              </div>
-              <input
-                type="text"
-                value={expenseTitle}
-                onChange={(e) => setExpenseTitle(e.target.value)}
-                placeholder="或手動輸入品項，如：咖啡、博物館門票、藥妝..."
-                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-teal-500 mt-1"
-              />
-            </div>
-
-            {/* Date & Optional Notes */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1">
-                    <Calendar className="w-3 h-3 text-slate-400" />
-                    <span>消費日期：</span>
-                    <span className="text-[10px] text-teal-600 dark:text-teal-400 font-semibold bg-teal-50 dark:bg-teal-950/60 px-1.5 py-0.5 rounded-md">
-                      預設當天
-                    </span>
-                  </label>
-                  {expenseDate !== getLocalTodayDate() && (
-                    <button
-                      type="button"
-                      onClick={() => setExpenseDate(getLocalTodayDate())}
-                      className="text-[10px] text-teal-600 dark:text-teal-400 hover:underline font-bold"
-                    >
-                      設為今天
-                    </button>
-                  )}
-                </div>
-                <input
-                  type="date"
-                  value={expenseDate}
-                  onChange={(e) => setExpenseDate(e.target.value)}
-                  className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-100 outline-none focus:border-teal-500"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  備註說明 (選填)：
-                </label>
-                <input
-                  type="text"
-                  value={expenseNotes}
-                  onChange={(e) => setExpenseNotes(e.target.value)}
-                  placeholder="如：店名、菜色、發票號碼..."
-                  className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-teal-500"
-                />
-              </div>
-            </div>
-
-            {/* Clean Category Selector (No emoji spam) */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
-                消費類別：
-              </label>
-              <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
-                {CATEGORY_ITEMS.map((item) => {
-                  const Icon = item.icon;
-                  const isSelected = expenseCat === item.key;
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={() => setExpenseCat(item.key)}
-                      className={`py-2 px-1 rounded-xl text-xs font-bold border transition flex flex-col items-center justify-center gap-1 ${
-                        isSelected
-                          ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
-                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60'
-                      }`}
-                    >
-                      <Icon className="w-4 h-4" />
-                      <span className="text-[11px] truncate">{item.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Payment Method Selector (No emoji spam) */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                 付款方式：
               </label>
               <div className="grid grid-cols-4 gap-1.5">
@@ -660,99 +558,186 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               </div>
             </div>
 
-            {/* Receipt / Invoice Upload Section */}
-            <div className="p-3.5 rounded-2xl bg-teal-50/70 dark:bg-slate-800/80 border border-teal-200 dark:border-teal-800/60 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-teal-900 dark:text-teal-200 flex items-center gap-1.5">
-                  <Camera className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                  <span>發票 / 收據憑證 (選填，支援多張相片)</span>
+            {/* 3. 消費種類 (Category) */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                消費種類：
+              </label>
+              <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+                {CATEGORY_ITEMS.map((item) => {
+                  const Icon = item.icon;
+                  const isSelected = expenseCat === item.key;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setExpenseCat(item.key)}
+                      className={`py-2 px-1 rounded-xl text-xs font-bold border transition flex flex-col items-center justify-center gap-1 ${
+                        isSelected
+                          ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                          : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span className="text-[11px] truncate">{item.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 4. 品項描述與備註說明 (Description) */}
+            <div className="space-y-2">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  品項描述：
                 </label>
-                {receiptImages.length > 0 && (
-                  <span className="text-[11px] font-bold text-teal-700 dark:text-teal-300">
-                    已附加 {receiptImages.length} 張發票
+                <input
+                  type="text"
+                  value={expenseTitle}
+                  onChange={(e) => setExpenseTitle(e.target.value)}
+                  placeholder="輸入消費品項描述，如：一蘭拉麵、晴空塔門票、超商飲料..."
+                  className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                  備註細節 (選填)：
+                </label>
+                <input
+                  type="text"
+                  value={expenseNotes}
+                  onChange={(e) => setExpenseNotes(e.target.value)}
+                  placeholder="如：店名、菜色、發票號碼、退稅註記..."
+                  className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-teal-500"
+                />
+              </div>
+            </div>
+
+            {/* 5. 消費日期 (Date) */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[11px] font-bold text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                  <Calendar className="w-3 h-3 text-slate-400" />
+                  <span>消費日期：</span>
+                  <span className="text-[10px] text-teal-600 dark:text-teal-400 font-semibold bg-teal-50 dark:bg-teal-950/60 px-1.5 py-0.5 rounded-md">
+                    預設當天
                   </span>
+                </label>
+                {expenseDate !== getLocalTodayDate() && (
+                  <button
+                    type="button"
+                    onClick={() => setExpenseDate(getLocalTodayDate())}
+                    className="text-[10px] text-teal-600 dark:text-teal-400 hover:underline font-bold"
+                  >
+                    設為今天
+                  </button>
                 )}
               </div>
-
-              {/* Hidden file inputs */}
               <input
-                ref={cameraInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleReceiptFiles}
-                className="hidden"
+                type="date"
+                value={expenseDate}
+                onChange={(e) => setExpenseDate(e.target.value)}
+                className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-100 outline-none focus:border-teal-500"
               />
-              <input
-                ref={receiptInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleReceiptFiles}
-                className="hidden"
-              />
-
-              {/* Action Buttons */}
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => cameraInputRef.current?.click()}
-                  disabled={isCompressingReceipts}
-                  className="flex-1 py-2 px-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 text-teal-900 dark:text-teal-200 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 transition"
-                >
-                  <Camera className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                  <span>即時拍照</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => receiptInputRef.current?.click()}
-                  disabled={isCompressingReceipts}
-                  className="flex-1 py-2 px-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 text-teal-900 dark:text-teal-200 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 transition"
-                >
-                  <ImageIcon className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                  <span>相簿選取發票</span>
-                </button>
-              </div>
-
-              {/* Compressing indicator */}
-              {isCompressingReceipts && (
-                <div className="py-1.5 flex items-center justify-center gap-2 text-xs font-bold text-teal-700 dark:text-teal-300">
-                  <Loader2 className="w-4 h-4 animate-spin text-teal-600" />
-                  <span>照片最佳化壓縮中...</span>
-                </div>
-              )}
-
-              {/* Thumbnails preview strip */}
-              {receiptImages.length > 0 && (
-                <div className="flex items-center gap-2 overflow-x-auto py-1">
-                  {receiptImages.map((imgUrl, idx) => (
-                    <div
-                      key={idx}
-                      className="relative shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 border-teal-500 shadow-xs group"
-                    >
-                      <img
-                        src={imgUrl}
-                        alt={`發票 ${idx + 1}`}
-                        onClick={() => setPreviewImage(imgUrl)}
-                        className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveReceiptImage(idx)}
-                        className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center text-xs transition"
-                        title="移除此張發票"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                      <span className="absolute bottom-0.5 left-0.5 px-1 rounded bg-black/60 text-[9px] text-white font-mono">
-                        #{idx + 1}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
+
+            {/* 6. 發票憑證上傳 (僅 n9102125@gmail.com 顯示上傳功能) */}
+            {canUploadImages() && (
+              <div className="p-3.5 rounded-2xl bg-teal-50/70 dark:bg-slate-800/80 border border-teal-200 dark:border-teal-800/60 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-teal-900 dark:text-teal-200 flex items-center gap-1.5">
+                    <Camera className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                    <span>發票 / 收據憑證 (選填，支援多張相片)</span>
+                  </label>
+                  {receiptImages.length > 0 && (
+                    <span className="text-[11px] font-bold text-teal-700 dark:text-teal-300">
+                      已附加 {receiptImages.length} 張發票
+                    </span>
+                  )}
+                </div>
+
+                {/* Hidden file inputs */}
+                <input
+                  ref={cameraInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handleReceiptFiles}
+                  className="hidden"
+                />
+                <input
+                  ref={receiptInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleReceiptFiles}
+                  className="hidden"
+                />
+
+                {/* Action Buttons */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                    disabled={isCompressingReceipts}
+                    className="flex-1 py-2 px-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 text-teal-900 dark:text-teal-200 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 transition"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                    <span>即時拍照</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => receiptInputRef.current?.click()}
+                    disabled={isCompressingReceipts}
+                    className="flex-1 py-2 px-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 text-teal-900 dark:text-teal-200 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 transition"
+                  >
+                    <ImageIcon className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                    <span>相簿選取發票</span>
+                  </button>
+                </div>
+
+                {/* Compressing indicator */}
+                {isCompressingReceipts && (
+                  <div className="py-1.5 flex items-center justify-center gap-2 text-xs font-bold text-teal-700 dark:text-teal-300">
+                    <Loader2 className="w-4 h-4 animate-spin text-teal-600" />
+                    <span>照片最佳化壓縮中...</span>
+                  </div>
+                )}
+
+                {/* Thumbnails preview strip */}
+                {receiptImages.length > 0 && (
+                  <div className="flex items-center gap-2 overflow-x-auto py-1">
+                    {receiptImages.map((imgUrl, idx) => (
+                      <div
+                        key={idx}
+                        className="relative shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 border-teal-500 shadow-xs group"
+                      >
+                        <img
+                          src={imgUrl}
+                          alt={`發票 ${idx + 1}`}
+                          onClick={() => setPreviewImage(imgUrl)}
+                          className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveReceiptImage(idx)}
+                          className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center text-xs transition"
+                          title="移除此張發票"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                        <span className="absolute bottom-0.5 left-0.5 px-1 rounded bg-black/60 text-[9px] text-white font-mono">
+                          #{idx + 1}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Friend Bill Splitting Section */}
             {trip.isSplitEnabled ? (
