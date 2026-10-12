@@ -206,14 +206,15 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       category: expenseCat,
       paymentMethod: expensePayment,
       date: expenseDate,
+      convertedAmount: convertAmount(parsedAmount, expenseCur, trip.currency || 'TWD', trip.customExchangeRates),
       notes: expenseNotes.trim() || undefined,
       receiptImages: receiptImages.length > 0 ? receiptImages : undefined,
       receiptImage: receiptImages.length > 0 ? receiptImages[0] : undefined,
-      paidBy: isSplitMode ? quickPaidBy : undefined,
-      splitWith: isSplitMode && !quickIsPersonal
+      paidBy: quickPaidBy || '我',
+      splitWith: !quickIsPersonal
         ? (quickSplitWith.length > 0 ? quickSplitWith : splitMembersList)
         : undefined,
-      isPersonal: isSplitMode ? quickIsPersonal : undefined,
+      isPersonal: quickIsPersonal,
     };
 
     onUpdateTrip({
@@ -875,9 +876,6 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                   <FileText className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                   <span>隨手速寫便簽</span>
                 </span>
-                <span className="text-[11px] text-amber-700/80 dark:text-amber-300/80 font-medium">
-                  免填標題 · 隨手速記
-                </span>
               </div>
 
               {/* Category chips */}
@@ -919,10 +917,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                 className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 resize-none leading-relaxed"
               />
 
-              <div className="flex items-center justify-between pt-0.5">
-                <span className="text-[10px] text-slate-400">
-                  按 Ctrl/Cmd + Enter 也可直接新增
-                </span>
+              <div className="flex items-center justify-end pt-0.5">
                 <button
                   type="submit"
                   disabled={!newNoteContent.trim()}

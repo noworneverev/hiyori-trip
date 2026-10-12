@@ -155,9 +155,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
 
   // Calculated splits
   const splitsResult = useMemo(() => {
-    if (!trip.isSplitEnabled) return null;
-    return calculateTripSplits(trip);
-  }, [trip]);
+    return calculateTripSplits(trip, baseCurrency, trip.customExchangeRates);
+  }, [trip, baseCurrency, trip.customExchangeRates]);
 
   // Filter & Lightbox states
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
@@ -527,9 +526,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             receiptImages: receiptImages.length > 0 ? receiptImages : undefined,
             receiptImage: receiptImages[0] || undefined,
             convertedAmount: convertAmount(parsedAmount, itemCurrency, baseCurrency, trip.customExchangeRates),
-            paidBy: trip.isSplitEnabled ? itemPaidBy : undefined,
-            splitWith: trip.isSplitEnabled && !itemIsPersonal ? (itemSplitWith.length > 0 ? itemSplitWith : splitMembersList) : undefined,
-            isPersonal: trip.isSplitEnabled ? itemIsPersonal : undefined,
+            paidBy: itemPaidBy || '我',
+            splitWith: !itemIsPersonal ? (itemSplitWith.length > 0 ? itemSplitWith : splitMembersList) : undefined,
+            isPersonal: itemIsPersonal,
           };
         }
         return exp;
@@ -555,9 +554,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
         receiptImages: receiptImages.length > 0 ? receiptImages : undefined,
         receiptImage: receiptImages[0] || undefined,
         convertedAmount: convertAmount(parsedAmount, itemCurrency, baseCurrency, trip.customExchangeRates),
-        paidBy: trip.isSplitEnabled ? itemPaidBy : undefined,
-        splitWith: trip.isSplitEnabled && !itemIsPersonal ? (itemSplitWith.length > 0 ? itemSplitWith : splitMembersList) : undefined,
-        isPersonal: trip.isSplitEnabled ? itemIsPersonal : undefined,
+        paidBy: itemPaidBy || '我',
+        splitWith: !itemIsPersonal ? (itemSplitWith.length > 0 ? itemSplitWith : splitMembersList) : undefined,
+        isPersonal: itemIsPersonal,
       };
 
       onUpdateTrip({
@@ -659,23 +658,34 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
   const filteredExpenses = useMemo(() => {
     return trip.expenses.filter((item) => {
       // Date filter
-      const itemDateStr = (item.date || '').slice(0, 10);
+      const itemDateStr = (item.date || '').slice(0, 10).replace(/\//g, '-');
       if (selectedDateFilter === 'today') {
-        if (itemDateStr !== todayStr && itemDateStr !== todayUtcStr) return false;
+        const isToday = itemDateStr === todayStr || itemDateStr === todayUtcStr;
+        if (!isToday) return false;
       } else if (selectedDateFilter === 'pre') {
-        if (trip.startDate && itemDateStr && itemDateStr >= trip.startDate.slice(0, 10)) return false;
+        const start = (trip.startDate || '').slice(0, 10).replace(/\//g, '-');
+        if (!start || itemDateStr >= start) return false;
       } else if (selectedDateFilter === 'cash_only') {
         if (item.paymentMethod !== 'cash') return false;
       } else if (selectedDateFilter !== 'all') {
-        const filterDateStr = selectedDateFilter.slice(0, 10);
-        if (itemDateStr !== filterDateStr) {
-          if ((filterDateStr === todayStr || filterDateStr === todayUtcStr) &&
-              (itemDateStr === todayStr || itemDateStr === todayUtcStr)) {
-            // Match
-          } else {
-            return false;
+        const filterDateStr = selectedDateFilter.slice(0, 10).replace(/\//g, '-');
+        let matches = itemDateStr === filterDateStr;
+
+        if (!matches) {
+          const matchedDay = (trip.days || []).find(
+            (d) => (d.date || '').slice(0, 10).replace(/\//g, '-') === filterDateStr
+          );
+          if (matchedDay) {
+            if (item.dayNumber === matchedDay.dayNumber) matches = true;
+            if ((item.date || '').slice(0, 10).replace(/\//g, '-') === (matchedDay.date || '').slice(0, 10).replace(/\//g, '-')) matches = true;
           }
         }
+
+        if (!matches && (selectedDateFilter === `D${item.dayNumber}` || selectedDateFilter === String(item.dayNumber))) {
+          matches = true;
+        }
+
+        if (!matches) return false;
       }
 
       // Category filter
@@ -685,7 +695,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
       }
       return item.category === selectedCategoryFilter;
     });
-  }, [trip.expenses, selectedDateFilter, selectedCategoryFilter, todayStr, todayUtcStr, trip.startDate]);
+  }, [trip.expenses, selectedDateFilter, selectedCategoryFilter, todayStr, todayUtcStr, trip.startDate, trip.days]);
 
   // Total for currently filtered expenses in base currency
   const filteredTotalInBase = useMemo(() => {
@@ -977,25 +987,23 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             <BarChart3 className="w-3.5 h-3.5" />
             <span>📊 統計圖表</span>
           </button>
-          {trip.isSplitEnabled && (
-            <button
-              type="button"
-              onClick={() => setExpenseSubTab('split')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
-                expenseSubTab === 'split'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
-              }`}
-            >
-              <Users className="w-3.5 h-3.5" />
-              <span>🤝 朋友分帳與結算 ({splitMembersList.length} 人)</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setExpenseSubTab('split')}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
+              expenseSubTab === 'split'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+            }`}
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>🤝 朋友分帳與結算 ({splitMembersList.length} 人)</span>
+          </button>
         </div>
       </div>
 
       {/* ================= SECTION A: FRIEND BILL SPLITTING & SETTLEMENT VIEW ================= */}
-      {trip.isSplitEnabled && expenseSubTab === 'split' && splitsResult && (
+      {expenseSubTab === 'split' && splitsResult && (
         <div className="space-y-4 animate-in fade-in duration-150">
           {/* Member Management Box */}
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 border border-slate-200/90 dark:border-slate-800 shadow-2xs space-y-3">
@@ -1206,7 +1214,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
       )}
 
       {/* ================= SECTION B: CHARTS & EXPENSES LIST ================= */}
-      {(!trip.isSplitEnabled || expenseSubTab !== 'split') && (
+      {expenseSubTab !== 'split' && (
         <>
           {/* 2. Charts Section */}
           {expenseSubTab === 'charts' && (
@@ -1783,7 +1791,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             <button
               type="button"
               onClick={() => setSelectedDateFilter('all')}
-              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 active:scale-95 ${
                 selectedDateFilter === 'all'
                   ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-2xs'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
@@ -1793,10 +1801,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             </button>
             <button
               type="button"
-              onClick={() => setSelectedDateFilter('today')}
-              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition flex items-center gap-1 shrink-0 ${
+              onClick={() => setSelectedDateFilter(selectedDateFilter === 'today' ? 'all' : 'today')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 active:scale-95 ${
                 selectedDateFilter === 'today'
-                  ? 'bg-teal-600 text-white shadow-2xs'
+                  ? 'bg-teal-600 text-white shadow-2xs ring-2 ring-teal-500/30'
                   : 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-100'
               }`}
             >
@@ -1812,8 +1820,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             {trip.expenses.some((e) => trip.startDate && e.date < trip.startDate) && (
               <button
                 type="button"
-                onClick={() => setSelectedDateFilter('pre')}
-                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 ${
+                onClick={() => setSelectedDateFilter(selectedDateFilter === 'pre' ? 'all' : 'pre')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 active:scale-95 ${
                   selectedDateFilter === 'pre'
                     ? 'bg-teal-600 text-white shadow-2xs'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
@@ -1823,27 +1831,41 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
               </button>
             )}
 
-            {/* Trip days */}
-            {trip.days.map((d) => (
-              <button
-                key={d.id}
-                type="button"
-                onClick={() => setSelectedDateFilter(d.date)}
-                className={`px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold transition shrink-0 ${
-                  selectedDateFilter === d.date
-                    ? 'bg-teal-600 text-white shadow-2xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                D{d.dayNumber} ({d.date.slice(5).replace('-', '/')})
-              </button>
-            ))}
+            {/* Trip days with daily spending tags */}
+            {trip.days.map((d) => {
+              const dayExp = dailyTableData.find((x) => x.date === d.date);
+              const dayTotal = dayExp?.totalAmount || 0;
+              const isSelected = selectedDateFilter === d.date;
+
+              return (
+                <button
+                  key={d.id}
+                  type="button"
+                  onClick={() => setSelectedDateFilter(isSelected ? 'all' : d.date)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-mono transition shrink-0 flex items-center gap-1.5 active:scale-95 ${
+                    isSelected
+                      ? 'bg-teal-600 text-white font-bold shadow-2xs ring-2 ring-teal-500/30'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <span className="font-bold">D{d.dayNumber}</span>
+                  <span className="text-[10px] opacity-75">{d.date.slice(5).replace('-', '/')}</span>
+                  {dayTotal > 0 && (
+                    <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
+                      isSelected ? 'bg-teal-700 text-teal-100' : 'bg-slate-200/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                    }`}>
+                      {formatCurrencyAmount(dayTotal, baseCurrency)}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
 
             {/* Cash Only Filter Chip */}
             <button
               type="button"
               onClick={() => setSelectedDateFilter(selectedDateFilter === 'cash_only' ? 'all' : 'cash_only')}
-              className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition flex items-center gap-1 shrink-0 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 active:scale-95 ${
                 selectedDateFilter === 'cash_only'
                   ? 'bg-emerald-600 text-white shadow-2xs'
                   : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
@@ -1981,8 +2003,49 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
         </div>
 
         {filteredExpenses.length === 0 ? (
-          <div className="py-8 text-center text-slate-400 text-xs">
-            <p>{lang === 'zh' ? '查無符合條件的支出明細' : 'No expenses match this filter'}</p>
+          <div className="py-12 px-4 text-center space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 mx-auto flex items-center justify-center">
+              <Calendar className="w-6 h-6 text-slate-400" />
+            </div>
+            <div>
+              <p className="font-bold text-sm text-slate-700 dark:text-slate-200">
+                {selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all'
+                  ? '目前篩選條件下尚無支出記錄'
+                  : '尚未有任何記帳支出'}
+              </p>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {selectedDateFilter !== 'all'
+                  ? '點擊下方按鈕可為此日期新增支出，或重設檢視全部'
+                  : '旅途中隨手記下一筆，即時換算匯率與掌握預算'}
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2 pt-1">
+              {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedDateFilter('all');
+                    setSelectedCategoryFilter('all');
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold transition active:scale-95"
+                >
+                  顯示全部明細
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  if (selectedDateFilter !== 'all' && selectedDateFilter !== 'pre' && selectedDateFilter !== 'today' && selectedDateFilter !== 'cash_only') {
+                    setDate(selectedDateFilter);
+                  }
+                  handleOpenAddExpense();
+                }}
+                className="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition shadow-xs flex items-center gap-1 active:scale-95"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{selectedDateFilter !== 'all' && selectedDateFilter !== 'today' ? '為這天記一筆' : '立即記一筆'}</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-slate-800 space-y-1">
@@ -2417,14 +2480,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                 </div>
               </div>
 
-              {/* 6. 分帳設定 (若開啟) */}
-              {trip.isSplitEnabled && (
-                <div className="p-3.5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/60 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
-                      <Users className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>{lang === 'zh' ? '朋友分帳設定' : 'Split Details'}</span>
-                    </label>
+              {/* 6. 朋友分帳設定 */}
+              <div className="p-3.5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>{lang === 'zh' ? '朋友分帳設定' : 'Split Details'}</span>
+                  </label>
                     <label className="flex items-center gap-1.5 cursor-pointer text-[11px] font-bold text-slate-600 dark:text-slate-400 select-none hover:text-indigo-600">
                       <input
                         type="checkbox"
@@ -2518,7 +2580,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                     </>
                   )}
                 </div>
-              )}
 
               {/* 7. 發票憑證上傳 (僅 n9102125@gmail.com 顯示上傳功能) */}
               {canUploadImages() && (

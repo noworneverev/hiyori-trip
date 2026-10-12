@@ -66,7 +66,47 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   onOpenQuickAction,
 }) => {
   const t = TRANSLATIONS[lang];
-  const [selectedDayNumber, setSelectedDayNumber] = useState<number>(1);
+
+  // Helper: get local today date
+  const getTodayDateStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const getInitialDayNumber = () => {
+    const today = getTodayDateStr();
+    const todayUtc = new Date().toISOString().slice(0, 10);
+    // 1. Check if today matches any day in trip (with slash/dash normalization)
+    const match = (trip.days || []).find((d) => {
+      const dayDate = (d.date || '').slice(0, 10).replace(/\//g, '-');
+      return dayDate === today || dayDate === todayUtc;
+    });
+    if (match) return match.dayNumber;
+
+    // 2. Check if today is within trip range, select closest day
+    if (trip.startDate && trip.endDate) {
+      const start = trip.startDate.slice(0, 10).replace(/\//g, '-');
+      const end = trip.endDate.slice(0, 10).replace(/\//g, '-');
+      if (today >= start && today <= end) {
+        const nextDay = (trip.days || []).find((d) => (d.date || '').slice(0, 10).replace(/\//g, '-') >= today);
+        if (nextDay) return nextDay.dayNumber;
+      }
+    }
+
+    return trip.days?.[0]?.dayNumber || 1;
+  };
+
+  const [selectedDayNumber, setSelectedDayNumber] = useState<number>(getInitialDayNumber);
+
+  // Keep auto-switched to today when component mounts or trip days update
+  useEffect(() => {
+    const targetDay = getInitialDayNumber();
+    setSelectedDayNumber(targetDay);
+  }, [trip.days, trip.startDate, trip.endDate]);
+
   const [expandedItemIds, setExpandedItemIds] = useState<Record<string, boolean>>({});
 
   // Taxi Show Card Modal state

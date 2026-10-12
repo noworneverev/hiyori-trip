@@ -1,5 +1,5 @@
 import { ExpenseItem, Trip } from '../types/itinerary';
-import { formatCurrencyAmount } from './currency';
+import { formatCurrencyAmount, convertAmount } from './currency';
 
 export interface SplitMemberSummary {
   name: string;
@@ -16,6 +16,7 @@ export interface DebtTransfer {
 
 export interface SplitCalculationResult {
   members: string[];
+  targetCurrency: string;
   totalGroupExpense: number;
   totalPersonalExpense: number;
   summaries: Record<string, SplitMemberSummary>;
@@ -25,10 +26,19 @@ export interface SplitCalculationResult {
 /**
  * Calculates group splitting balances and minimal debt transfers
  */
-export const calculateTripSplits = (trip: Trip): SplitCalculationResult => {
-  const members = trip.splitMembers && trip.splitMembers.length > 0
+export const calculateTripSplits = (
+  trip: Trip,
+  targetCurrency?: string,
+  customExchangeRates?: Record<string, number>
+): SplitCalculationResult => {
+  const baseCur = targetCurrency || trip.currency || 'TWD';
+  const rates = customExchangeRates || trip.customExchangeRates;
+
+  const rawMembers = trip.splitMembers && trip.splitMembers.length > 0
     ? trip.splitMembers
-    : ['我'];
+    : ['我', '同行夥伴'];
+  const members = Array.from(new Set(rawMembers.map((m) => m.trim()).filter(Boolean)));
+  if (members.length === 0) members.push('我');
 
   const summaries: Record<string, SplitMemberSummary> = {};
   members.forEach((m) => {
@@ -44,7 +54,8 @@ export const calculateTripSplits = (trip: Trip): SplitCalculationResult => {
   let totalPersonalExpense = 0;
 
   (trip.expenses || []).forEach((exp) => {
-    const cost = exp.convertedAmount ?? exp.amount;
+    const cost = convertAmount(exp.amount, exp.currency, baseCur, rates);
+    if (!cost || isNaN(cost)) return;
 
     // If marked as strictly personal expense
     if (exp.isPersonal) {
@@ -65,8 +76,8 @@ export const calculateTripSplits = (trip: Trip): SplitCalculationResult => {
     }
 
     // Determine who shares this expense
-    let participants = exp.splitWith && exp.splitWith.length > 0
-      ? exp.splitWith.filter((m) => summaries[m] !== undefined)
+    let participants = (exp.splitWith && exp.splitWith.length > 0)
+      ? exp.splitWith.map((m) => m.trim()).filter((m) => summaries[m] !== undefined)
       : members;
 
     if (participants.length === 0) {
@@ -86,15 +97,15 @@ export const calculateTripSplits = (trip: Trip): SplitCalculationResult => {
     summaries[m].netBalance = summaries[m].totalPaid - summaries[m].totalShare;
   });
 
-  // Calculate minimal cash transfers (greedy settlement)
+  // Calculate minimal cash transfers (greedy settlement with integer amounts)
   const debtors: { name: string; amount: number }[] = [];
   const creditors: { name: string; amount: number }[] = [];
 
   members.forEach((m) => {
     const net = Math.round(summaries[m].netBalance);
-    if (net < -0.5) {
+    if (net < 0) {
       debtors.push({ name: m, amount: -net });
-    } else if (net > 0.5) {
+    } else if (net > 0) {
       creditors.push({ name: m, amount: net });
     }
   });
@@ -112,7 +123,7 @@ export const calculateTripSplits = (trip: Trip): SplitCalculationResult => {
     const creditor = creditors[cIdx];
     const settleAmt = Math.min(debtor.amount, creditor.amount);
 
-    if (settleAmt > 0) {
+    if (settleAmt >= 1) {
       transfers.push({
         from: debtor.name,
         to: creditor.name,
@@ -123,12 +134,13 @@ export const calculateTripSplits = (trip: Trip): SplitCalculationResult => {
       creditor.amount -= settleAmt;
     }
 
-    if (debtor.amount <= 0.5) dIdx++;
-    if (creditor.amount <= 0.5) cIdx++;
+    if (debtor.amount < 1) dIdx++;
+    if (creditor.amount < 1) cIdx++;
   }
 
   return {
     members,
+    targetCurrency: baseCur,
     totalGroupExpense,
     totalPersonalExpense,
     summaries,
@@ -139,9 +151,13 @@ export const calculateTripSplits = (trip: Trip): SplitCalculationResult => {
 /**
  * Formats a clean, polite summary ready to copy & paste into LINE / WeChat / WhatsApp
  */
-export const formatSplitsForSharing = (trip: Trip): string => {
-  const result = calculateTripSplits(trip);
-  const cur = trip.currency || 'TWD';
+export const formatSplitsForSharing = (
+  trip: Trip,
+  targetCurrency?: string,
+  customExchangeRates?: Record<string, number>
+): string => {
+  const cur = targetCurrency || trip.currency || 'TWD';
+  const result = calculateTripSplits(trip, cur, customExchangeRates);
 
   let text = `✈️【${trip.title}】旅程朋友分帳結算清單\n`;
   text += `━━━━━━━━━━━━━━━━━━━━━\n`;

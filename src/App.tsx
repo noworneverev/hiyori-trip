@@ -13,8 +13,7 @@ import { useDarkMode } from './hooks/useDarkMode';
 import { TimelineTab } from './components/Tabs/TimelineTab';
 import { LiveCompanionTab } from './components/Tabs/LiveCompanionTab';
 import { ExpensesTab } from './components/Tabs/ExpensesTab';
-import { PackingTab } from './components/Tabs/PackingTab';
-import { MemoTab } from './components/Tabs/MemoTab';
+import { NotesAndPrepTab } from './components/Tabs/NotesAndPrepTab';
 import { TripMemoriesView } from './components/Memories/TripMemoriesView';
 import { TripEditModal } from './components/Modals/TripEditModal';
 import { ItemEditModal } from './components/Modals/ItemEditModal';
@@ -72,7 +71,7 @@ import {
   Eye,
 } from 'lucide-react';
 
-type TabType = 'timeline' | 'live' | 'expenses' | 'packing' | 'memories' | 'memo';
+type TabType = 'timeline' | 'live' | 'expenses' | 'prep' | 'memories';
 
 export default function App() {
   const [trips, setTrips] = useState<Trip[]>(() => {
@@ -889,15 +888,15 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('packing')}
+            onClick={() => setActiveTab('prep')}
             className={`flex-1 min-w-[85px] py-2 px-3 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 ${
-              activeTab === 'packing'
+              activeTab === 'prep'
                 ? 'bg-teal-700 text-white shadow-2xs'
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
           >
             <CheckCircle className="w-4 h-4" />
-            <span>{t.packing}</span>
+            <span>{lang === 'zh' ? '備忘清單' : 'Prep & Notes'}</span>
           </button>
 
           <button
@@ -910,18 +909,6 @@ export default function App() {
           >
             <Camera className="w-4 h-4" />
             <span>{t.memories}</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('memo')}
-            className={`flex-1 min-w-[85px] py-2 px-3 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 ${
-              activeTab === 'memo'
-                ? 'bg-teal-700 text-white shadow-2xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
-          >
-            <FileText className="w-4 h-4" />
-            <span>{t.memo}</span>
           </button>
         </div>
 
@@ -968,8 +955,8 @@ export default function App() {
             <ExpensesTab trip={currentTrip} lang={lang} onUpdateTrip={handleUpdateTrip} />
           )}
 
-          {activeTab === 'packing' && (
-            <PackingTab trip={currentTrip} lang={lang} onUpdateTrip={handleUpdateTrip} />
+          {activeTab === 'prep' && (
+            <NotesAndPrepTab trip={currentTrip} lang={lang} onUpdateTrip={handleUpdateTrip} />
           )}
 
           {activeTab === 'memories' && (
@@ -979,10 +966,6 @@ export default function App() {
               onUpdateTrip={handleUpdateTrip}
               initialSpotId={memoriesSpotId}
             />
-          )}
-
-          {activeTab === 'memo' && (
-            <MemoTab trip={currentTrip} lang={lang} onUpdateTrip={handleUpdateTrip} />
           )}
         </div>
       </main>
@@ -1013,61 +996,52 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Mobile Bottom Thumb Navigation Bar */}
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200/90 dark:border-slate-800 grid grid-cols-6 items-center h-14 px-1 shadow-lg pb-safe">
+      {/* Mobile Bottom Thumb Navigation Bar (Apple-style 5 Focused Tabs) */}
+      <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl border-t border-slate-200/60 dark:border-slate-800/60 grid grid-cols-5 items-center h-16 px-2 shadow-lg pb-safe">
         <button
           onClick={() => setActiveTab('timeline')}
-          className={`flex flex-col items-center justify-center py-1 transition ${
+          className={`flex flex-col items-center justify-center py-1 transition active:scale-95 ${
             activeTab === 'timeline' ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-400 dark:text-slate-500'
           }`}
         >
-          <Compass className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">{lang === 'zh' ? '行程' : 'Plan'}</span>
+          <Compass className="w-4.5 h-4.5" />
+          <span className="text-[10px] mt-0.5 tracking-tight">{lang === 'zh' ? '行程' : 'Plan'}</span>
         </button>
         <button
           onClick={() => setActiveTab('live')}
-          className={`flex flex-col items-center justify-center py-1 transition ${
+          className={`flex flex-col items-center justify-center py-1 transition active:scale-95 ${
             activeTab === 'live' ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-400 dark:text-slate-500'
           }`}
         >
-          <Sparkles className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">{lang === 'zh' ? '隨行' : 'Live'}</span>
+          <Sparkles className="w-4.5 h-4.5 text-amber-500" />
+          <span className="text-[10px] mt-0.5 tracking-tight">{lang === 'zh' ? '隨行' : 'Live'}</span>
         </button>
         <button
           onClick={() => setActiveTab('expenses')}
-          className={`flex flex-col items-center justify-center py-1 transition ${
+          className={`flex flex-col items-center justify-center py-1 transition active:scale-95 ${
             activeTab === 'expenses' ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-400 dark:text-slate-500'
           }`}
         >
-          <DollarSign className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">{lang === 'zh' ? '記帳' : 'Spend'}</span>
+          <DollarSign className="w-4.5 h-4.5" />
+          <span className="text-[10px] mt-0.5 tracking-tight">{lang === 'zh' ? '記帳' : 'Spend'}</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('prep')}
+          className={`flex flex-col items-center justify-center py-1 transition active:scale-95 ${
+            activeTab === 'prep' ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-400 dark:text-slate-500'
+          }`}
+        >
+          <CheckCircle className="w-4.5 h-4.5" />
+          <span className="text-[10px] mt-0.5 tracking-tight">{lang === 'zh' ? '備忘清單' : 'Notes'}</span>
         </button>
         <button
           onClick={() => setActiveTab('memories')}
-          className={`flex flex-col items-center justify-center py-1 transition ${
+          className={`flex flex-col items-center justify-center py-1 transition active:scale-95 ${
             activeTab === 'memories' ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-slate-400 dark:text-slate-500'
           }`}
         >
-          <Camera className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">{lang === 'zh' ? '相簿' : 'Photo'}</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('packing')}
-          className={`flex flex-col items-center justify-center py-1 transition ${
-            activeTab === 'packing' ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-400 dark:text-slate-500'
-          }`}
-        >
-          <CheckCircle className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">{lang === 'zh' ? '清單' : 'List'}</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('memo')}
-          className={`flex flex-col items-center justify-center py-1 transition ${
-            activeTab === 'memo' ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-400 dark:text-slate-500'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          <span className="text-[10px] mt-0.5">{lang === 'zh' ? '便籤' : 'Memo'}</span>
+          <Camera className="w-4.5 h-4.5" />
+          <span className="text-[10px] mt-0.5 tracking-tight">{lang === 'zh' ? '相簿' : 'Photo'}</span>
         </button>
       </nav>
 
