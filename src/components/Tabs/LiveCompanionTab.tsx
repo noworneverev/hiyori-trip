@@ -10,7 +10,6 @@ import {
   geocodeCity,
   getWeatherDescription,
 } from '../../utils/weather';
-import { TaxiShowCardModal } from '../UI/TaxiShowCardModal';
 import { detectTripCurrency } from '../../utils/currency';
 import {
   Navigation,
@@ -108,10 +107,6 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   }, [trip.days, trip.startDate, trip.endDate]);
 
   const [expandedItemIds, setExpandedItemIds] = useState<Record<string, boolean>>({});
-
-  // Taxi Show Card Modal state
-  const [showTaxiCard, setShowTaxiCard] = useState(false);
-  const [taxiCardItem, setTaxiCardItem] = useState<ItineraryItem | null>(null);
 
   // Live Clocks (Destination vs Home)
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -634,7 +629,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
           </div>
 
           {/* Action Buttons */}
-          <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="mt-5 grid grid-cols-2 gap-2.5">
             <a
               href={getGoogleMapsNavigationUrl(nextItem)}
               target="_blank"
@@ -644,18 +639,6 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
               <Navigation className="w-4 h-4" />
               <span>{t.navGoogle}</span>
             </a>
-
-            <button
-              onClick={() => {
-                setTaxiCardItem(nextItem);
-                setShowTaxiCard(true);
-              }}
-              className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95"
-              title="向計程車司機出示大字卡"
-            >
-              <span>🚕</span>
-              <span>司機問路卡</span>
-            </button>
 
             <button
               type="button"
@@ -768,20 +751,8 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                     </div>
                   </div>
 
-                  {/* Right actions: Navigation, Taxi card & Note expand toggle */}
+                  {/* Right actions: Navigation & Note expand toggle */}
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {(item.locationName || item.address) && (
-                      <button
-                        onClick={() => {
-                          setTaxiCardItem(item);
-                          setShowTaxiCard(true);
-                        }}
-                        className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900 transition active:scale-95 text-xs font-bold"
-                        title="司機問路大字卡"
-                      >
-                        <span>🚕</span>
-                      </button>
-                    )}
                     <a
                       href={getGoogleMapsNavigationUrl(item)}
                       target="_blank"
@@ -903,19 +874,6 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
           </a>
         </div>
       </div>
-
-      {/* Taxi Show-Card Modal */}
-      {showTaxiCard && (
-        <TaxiShowCardModal
-          trip={trip}
-          lang={lang}
-          initialItem={taxiCardItem}
-          onClose={() => {
-            setShowTaxiCard(false);
-            setTaxiCardItem(null);
-          }}
-        />
-      )}
     </div>
   );
 };

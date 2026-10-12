@@ -2401,34 +2401,19 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                 </div>
               </div>
 
-              {/* 4. 描述 (Description: Title & Notes) */}
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {lang === 'zh' ? '品項描述 / 支出名稱' : 'Title / Description'} *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder={lang === 'zh' ? '如：一蘭拉麵、晴空塔門票、超商飲料、伴手禮盒' : 'e.g. Dinner, Ticket, Flight'}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    {lang === 'zh' ? '備註細節 (選填)' : 'Notes (Optional)'}
-                  </label>
-                  <input
-                    type="text"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder={lang === 'zh' ? '如：退稅後金額、刷國外回饋卡、友人代買' : 'e.g. Tax refunded, friends split'}
-                    className="w-full px-3.5 py-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs outline-none"
-                  />
-                </div>
+              {/* 4. 品項描述 (Description) */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  {lang === 'zh' ? '品項描述 / 支出名稱' : 'Title / Description'} *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder={lang === 'zh' ? '如：一蘭拉麵、晴空塔門票、超商飲料、伴手禮盒' : 'e.g. Dinner, Ticket, Flight'}
+                  className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
+                />
               </div>
 
               {/* 5. 日期 (Date) */}

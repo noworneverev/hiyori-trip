@@ -587,33 +587,18 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               </div>
             </div>
 
-            {/* 4. 品項描述與備註說明 (Description) */}
-            <div className="space-y-2">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  品項描述：
-                </label>
-                <input
-                  type="text"
-                  value={expenseTitle}
-                  onChange={(e) => setExpenseTitle(e.target.value)}
-                  placeholder="輸入消費品項描述，如：一蘭拉麵、晴空塔門票、超商飲料..."
-                  className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-teal-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  備註細節 (選填)：
-                </label>
-                <input
-                  type="text"
-                  value={expenseNotes}
-                  onChange={(e) => setExpenseNotes(e.target.value)}
-                  placeholder="如：店名、菜色、發票號碼、退稅註記..."
-                  className="w-full px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-teal-500"
-                />
-              </div>
+            {/* 4. 品項描述 (Description) */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                品項描述：
+              </label>
+              <input
+                type="text"
+                value={expenseTitle}
+                onChange={(e) => setExpenseTitle(e.target.value)}
+                placeholder="輸入消費品項描述，如：一蘭拉麵、晴空塔門票、超商飲料..."
+                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-teal-500"
+              />
             </div>
 
             {/* 5. 消費日期 (Date) */}
