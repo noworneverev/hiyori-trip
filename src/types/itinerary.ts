@@ -124,6 +124,7 @@ export interface Trip {
   todos?: TodoItem[];
   expenses: ExpenseItem[];
   customExpenseCategories?: string[];
+  customCategoryLabels?: Record<string, string>;
   customExchangeRates?: Record<string, number>;
   emergencyContacts: EmergencyContact[];
   collabId?: string;

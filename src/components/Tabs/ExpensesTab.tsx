@@ -99,7 +99,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
   const [amount, setAmount] = useState('');
   const [itemCurrency, setItemCurrency] = useState<string>(trip.currency || defaultDetectedCurrency);
   const [category, setCategory] = useState<string>('food');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('card');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
   const [date, setDate] = useState<string>(() => {
     const today = new Date().toISOString().slice(0, 10);
     if (today >= trip.startDate && today <= trip.endDate) return today;
@@ -109,9 +109,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
   const [receiptImages, setReceiptImages] = useState<string[]>([]);
   const [isCompressingReceipts, setIsCompressingReceipts] = useState(false);
 
-  // Custom Category Add input
+  // Custom Category Add & Manage states
   const [showNewCatInput, setShowNewCatInput] = useState(false);
   const [newCatName, setNewCatName] = useState('');
+  const [isManagingCategories, setIsManagingCategories] = useState(false);
+  const [editingCategoryKey, setEditingCategoryKey] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
 
   // Exchange rate config modal & Live Market Rates
   const [showRateModal, setShowRateModal] = useState(false);
@@ -175,11 +178,15 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
 
   // Helper: get display info for a category
   const getCategoryMeta = (catKey: string) => {
+    const customLabel = trip.customCategoryLabels?.[catKey];
     if (DEFAULT_CATEGORIES[catKey]) {
-      return DEFAULT_CATEGORIES[catKey];
+      return {
+        ...DEFAULT_CATEGORIES[catKey],
+        label: customLabel || DEFAULT_CATEGORIES[catKey].label,
+      };
     }
     return {
-      label: catKey,
+      label: customLabel || catKey,
       icon: '🏷️',
       color: '#0d9488',
       bg: 'bg-teal-500/10 text-teal-700 dark:text-teal-300',
@@ -456,6 +463,64 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
     setShowNewCatInput(false);
   };
 
+  // Rename custom category or customize default category display name
+  const handleRenameCategory = (oldKey: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldKey) {
+      setEditingCategoryKey(null);
+      return;
+    }
+
+    if (DEFAULT_CATEGORIES[oldKey]) {
+      const updatedLabels = {
+        ...(trip.customCategoryLabels || {}),
+        [oldKey]: trimmed,
+      };
+      onUpdateTrip({
+        ...trip,
+        customCategoryLabels: updatedLabels,
+        updatedAt: Date.now(),
+      });
+      setEditingCategoryKey(null);
+      return;
+    }
+
+    const updatedCats = customCategories.map((c) => (c === oldKey ? trimmed : c));
+    const updatedExpenses = trip.expenses.map((e) =>
+      e.category === oldKey ? { ...e, category: trimmed } : e
+    );
+
+    onUpdateTrip({
+      ...trip,
+      customExpenseCategories: updatedCats,
+      expenses: updatedExpenses,
+      updatedAt: Date.now(),
+    });
+
+    if (category === oldKey) {
+      setCategory(trimmed);
+    }
+    setEditingCategoryKey(null);
+  };
+
+  // Delete custom category
+  const handleDeleteCategory = (catKey: string) => {
+    if (!window.confirm(`確定要刪除自訂類別「${catKey}」嗎？現有記帳記錄將被保留。`)) {
+      return;
+    }
+
+    const updatedCats = customCategories.filter((c) => c !== catKey);
+    onUpdateTrip({
+      ...trip,
+      customExpenseCategories: updatedCats,
+      updatedAt: Date.now(),
+    });
+
+    if (category === catKey) {
+      setCategory('food');
+    }
+  };
+
   // Open Modal to Add New Expense
   const handleOpenAddExpense = () => {
     setEditingExpenseId(null);
@@ -463,7 +528,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
     setAmount('');
     setItemCurrency(baseCurrency);
     setCategory('food');
-    setPaymentMethod('card');
+    setPaymentMethod('cash');
     const defaultDate = todayStr >= trip.startDate && todayStr <= trip.endDate
       ? todayStr
       : (trip.startDate || todayStr);
@@ -483,7 +548,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
     setAmount(item.amount.toString());
     setItemCurrency(item.currency || baseCurrency);
     setCategory(item.category || 'food');
-    setPaymentMethod(item.paymentMethod || 'card');
+    setPaymentMethod(item.paymentMethod || 'cash');
     setDate(item.date || todayStr);
     setNotes(item.notes || '');
 
@@ -2337,14 +2402,30 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                   <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
                     {lang === 'zh' ? '支出類別' : 'Category'}
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowNewCatInput(!showNewCatInput)}
-                    className="text-[11px] text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-0.5"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>{lang === 'zh' ? '新增自訂類別' : 'Custom Category'}</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowNewCatInput(!showNewCatInput)}
+                      className="text-[11px] text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-0.5"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>{lang === 'zh' ? '新增自訂類別' : 'Custom Category'}</span>
+                    </button>
+                    {customCategories.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setIsManagingCategories(!isManagingCategories)}
+                        className={`text-[11px] flex items-center gap-0.5 px-1.5 py-0.5 rounded transition ${
+                          isManagingCategories
+                            ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-bold'
+                            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                        }`}
+                      >
+                        <Pencil className="w-2.5 h-2.5" />
+                        <span>{isManagingCategories ? (lang === 'zh' ? '完成修改' : 'Done') : (lang === 'zh' ? '編輯修改類別' : 'Edit Categories')}</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {showNewCatInput && (
@@ -2353,8 +2434,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                       type="text"
                       value={newCatName}
                       onChange={(e) => setNewCatName(e.target.value)}
-                      placeholder="輸入新類別名稱 (如：溫泉、模型玩具)"
+                      placeholder="輸入新類別名稱 (如：溫泉、模型玩具、居酒屋)"
                       className="flex-1 px-2.5 py-1.5 bg-white dark:bg-slate-900 rounded-lg border border-slate-300 dark:border-slate-600 text-xs outline-none"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomCategory();
+                        }
+                      }}
                     />
                     <button
                       type="button"
@@ -2367,37 +2454,114 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                 )}
 
                 <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                  {Object.entries(DEFAULT_CATEGORIES).map(([catKey, info]) => (
-                    <button
-                      key={catKey}
-                      type="button"
-                      onClick={() => setCategory(catKey)}
-                      className={`p-2 rounded-xl text-left border transition flex items-center gap-1.5 ${
-                        category === catKey
-                          ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 font-bold text-teal-900 dark:text-teal-200'
-                          : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      <span className="text-sm">{info.icon}</span>
-                      <span className="truncate text-[11px]">{info.label}</span>
-                    </button>
-                  ))}
+                  {Object.entries(DEFAULT_CATEGORIES).map(([catKey, info]) => {
+                    const meta = getCategoryMeta(catKey);
+                    return (
+                      <button
+                        key={catKey}
+                        type="button"
+                        onClick={() => setCategory(catKey)}
+                        className={`p-2 rounded-xl text-left border transition flex items-center gap-1.5 ${
+                          category === catKey
+                            ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 font-bold text-teal-900 dark:text-teal-200'
+                            : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        <span className="text-sm">{meta.icon}</span>
+                        <span className="truncate text-[11px]">{meta.label}</span>
+                      </button>
+                    );
+                  })}
 
-                  {customCategories.map((catKey) => (
-                    <button
-                      key={catKey}
-                      type="button"
-                      onClick={() => setCategory(catKey)}
-                      className={`p-2 rounded-xl text-left border transition flex items-center gap-1.5 ${
-                        category === catKey
-                          ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 font-bold text-teal-900 dark:text-teal-200'
-                          : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      <span className="text-sm">🏷️</span>
-                      <span className="truncate text-[11px]">{catKey}</span>
-                    </button>
-                  ))}
+                  {customCategories.map((catKey) => {
+                    const isSelected = category === catKey;
+                    const isEditingThis = editingCategoryKey === catKey;
+
+                    if (isEditingThis) {
+                      return (
+                        <div
+                          key={catKey}
+                          className="col-span-2 p-1.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 rounded-xl flex items-center gap-1"
+                        >
+                          <input
+                            type="text"
+                            value={editingCategoryName}
+                            onChange={(e) => setEditingCategoryName(e.target.value)}
+                            className="flex-1 px-2 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded text-xs outline-none"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleRenameCategory(catKey, editingCategoryName);
+                              }
+                            }}
+                            autoFocus
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleRenameCategory(catKey, editingCategoryName)}
+                            className="p-1.5 bg-amber-600 text-white rounded text-xs"
+                            title="保存修改"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingCategoryKey(null)}
+                            className="p-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs"
+                            title="取消"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={catKey} className="relative group">
+                        <button
+                          type="button"
+                          onClick={() => setCategory(catKey)}
+                          className={`w-full p-2 rounded-xl text-left border transition flex items-center gap-1.5 ${
+                            isSelected
+                              ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 font-bold text-teal-900 dark:text-teal-200'
+                              : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          <span className="text-sm">🏷️</span>
+                          <span className="truncate text-[11px] max-w-[80%]">{catKey}</span>
+                        </button>
+
+                        {/* Edit & Delete Action Badges */}
+                        {(isManagingCategories || isSelected) && (
+                          <div className="absolute top-1 right-1 flex items-center gap-0.5 bg-white/90 dark:bg-slate-900/90 shadow-2xs rounded px-0.5 border border-slate-200 dark:border-slate-700 z-10">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingCategoryKey(catKey);
+                                setEditingCategoryName(catKey);
+                              }}
+                              className="p-0.5 text-slate-500 hover:text-amber-600 transition"
+                              title="編輯修改類別名稱"
+                            >
+                              <Pencil className="w-2.5 h-2.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteCategory(catKey);
+                              }}
+                              className="p-0.5 text-slate-500 hover:text-rose-600 transition"
+                              title="刪除此自訂類別"
+                            >
+                              <Trash2 className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

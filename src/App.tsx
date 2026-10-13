@@ -7,7 +7,7 @@ import {
   getCurrentTripId,
   setCurrentTripId,
 } from './utils/storage';
-import { formatDateSlash } from './utils/date';
+import { formatDateSlash, sortItineraryItemsByTime, findInsertionPosition } from './utils/date';
 import { Language, TRANSLATIONS, getStoredLanguage, setStoredLanguage } from './utils/i18n';
 import { useDarkMode } from './hooks/useDarkMode';
 import { TimelineTab } from './components/Tabs/TimelineTab';
@@ -37,6 +37,13 @@ import {
   fetchCollaborativeTrip,
   checkUserTripPermission,
 } from './utils/firebase';
+import {
+  mergeTrips,
+  enqueueTripSave,
+  enqueueTripDelete,
+  enqueueCollabSync,
+  flushPendingSyncQueue,
+} from './utils/syncManager';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { PWAInstallButton } from './components/PWA/PWAInstallButton';
 import { OfflineIndicator } from './components/PWA/OfflineIndicator';
@@ -95,7 +102,11 @@ export default function App() {
   const [tripModalData, setTripModalData] = useState<Trip | null>(null);
 
   const [showItemModal, setShowItemModal] = useState(false);
-  const [editingItemData, setEditingItemData] = useState<{ item?: ItineraryItem; dayNumber: number } | null>(null);
+  const [editingItemData, setEditingItemData] = useState<{
+    item?: ItineraryItem;
+    dayNumber: number;
+    initialStartTime?: string;
+  } | null>(null);
 
   const [showImportExportModal, setShowImportExportModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -220,13 +231,25 @@ export default function App() {
         // Subscribe to user cloud trips
         const unsubscribeFirestore = subscribeUserTrips(user.uid, async (cloudTrips) => {
           if (cloudTrips && cloudTrips.length > 0) {
-            setTrips(cloudTrips);
-            saveTrips(cloudTrips);
+            const currentLocal = getStoredTrips();
+            const { merged, tripsToUpload } = mergeTrips(currentLocal, cloudTrips);
+            setTrips(merged);
+            saveTrips(merged);
+
+            // If local had newer offline changes, push them to cloud
+            if (tripsToUpload.length > 0) {
+              for (const tr of tripsToUpload) {
+                saveTripToCloud(user.uid, tr).catch(() => {
+                  enqueueTripSave(user.uid, tr);
+                });
+              }
+            }
+
             const activeId = getCurrentTripId();
-            const exists = cloudTrips.find((t) => t.id === activeId);
-            if (!exists) {
-              setCurrentTripIdState(cloudTrips[0].id);
-              setCurrentTripId(cloudTrips[0].id);
+            const exists = merged.find((t) => t.id === activeId);
+            if (!exists && merged[0]) {
+              setCurrentTripIdState(merged[0].id);
+              setCurrentTripId(merged[0].id);
             }
           } else {
             // First login with empty cloud: auto-sync existing local trips to user's Firestore!
@@ -244,6 +267,22 @@ export default function App() {
     return () => unsubscribeAuth();
   }, []);
 
+  // Listen to network reconnection and flush pending offline sync queue
+  useEffect(() => {
+    const handleOnline = async () => {
+      try {
+        const { successCount } = await flushPendingSyncQueue();
+        if (successCount > 0) {
+          showToast(`網路連線已恢復，已為您自動同步 ${successCount} 筆離線變更！`);
+        }
+      } catch (e) {
+        console.warn('Online sync flush error:', e);
+      }
+    };
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, []);
+
   const handleToggleLang = () => {
     const nextLang: Language = lang === 'zh' ? 'en' : 'zh';
     setLang(nextLang);
@@ -251,6 +290,7 @@ export default function App() {
   };
 
   const handleUpdateTrip = (updatedTrip: Trip) => {
+    // 1. Immediately update React state & localStorage (works 100% offline)
     setTrips((prevTrips) => {
       const idx = prevTrips.findIndex((t) => t.id === updatedTrip.id);
       const nextTrips = idx >= 0
@@ -260,18 +300,29 @@ export default function App() {
       return nextTrips;
     });
 
-    // Sync to Collaborative Room if collaborative
+    // 2. Collab sync with offline fallback queue
     if (updatedTrip.collabId && updatedTrip.isCollaborative) {
-      syncCollaborativeTrip(updatedTrip.collabId, updatedTrip, currentUser?.displayName || undefined).catch((err) =>
-        console.error('Collab sync failed:', err)
-      );
+      const activeCollabId = updatedTrip.collabId;
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        enqueueCollabSync(activeCollabId, updatedTrip, currentUser?.displayName || undefined);
+      } else {
+        syncCollaborativeTrip(activeCollabId, updatedTrip, currentUser?.displayName || undefined).catch((err) => {
+          console.warn('Collab sync failed, enqueuing for offline reconnect:', err);
+          enqueueCollabSync(activeCollabId, updatedTrip, currentUser?.displayName || undefined);
+        });
+      }
     }
 
-    // Sync to Cloud if authenticated
+    // 3. User Cloud sync with offline fallback queue
     if (currentUser) {
-      saveTripToCloud(currentUser.uid, updatedTrip).catch((err) =>
-        console.error('Cloud save failed:', err)
-      );
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        enqueueTripSave(currentUser.uid, updatedTrip);
+      } else {
+        saveTripToCloud(currentUser.uid, updatedTrip).catch((err) => {
+          console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
+          enqueueTripSave(currentUser.uid, updatedTrip);
+        });
+      }
     }
   };
 
@@ -344,9 +395,14 @@ export default function App() {
       setCurrentTripId(newTrip.id);
 
       if (currentUser) {
-        saveTripToCloud(currentUser.uid, newTrip).catch((err) =>
-          console.error('Cloud save failed:', err)
-        );
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          enqueueTripSave(currentUser.uid, newTrip);
+        } else {
+          saveTripToCloud(currentUser.uid, newTrip).catch((err) => {
+            console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
+            enqueueTripSave(currentUser.uid, newTrip);
+          });
+        }
       }
     }
     setShowTripModal(false);
@@ -368,9 +424,14 @@ export default function App() {
     setCurrentTripId(remaining[0].id);
 
     if (currentUser) {
-      deleteTripFromCloud(currentUser.uid, tripToDeleteId).catch((err) =>
-        console.error('Cloud delete failed:', err)
-      );
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        enqueueTripDelete(currentUser.uid, tripToDeleteId);
+      } else {
+        deleteTripFromCloud(currentUser.uid, tripToDeleteId).catch((err) => {
+          console.warn('Cloud delete failed, enqueuing for offline reconnect:', err);
+          enqueueTripDelete(currentUser.uid, tripToDeleteId);
+        });
+      }
     }
   };
 
@@ -381,21 +442,35 @@ export default function App() {
     const updatedDays = currentTrip.days.map((day) => {
       if (day.dayNumber !== dayNumber) return day;
 
+      let nextItems: ItineraryItem[];
       if (existingId) {
-        return {
-          ...day,
-          items: day.items.map((it) => (it.id === existingId ? { ...itemData, id: existingId } : it)),
-        };
+        // If editing an existing item, remove it and re-insert into the right chronological position
+        const remaining = day.items.filter((it) => it.id !== existingId);
+        const updatedItem: ItineraryItem = { ...itemData, id: existingId };
+        const { targetIndex } = findInsertionPosition(remaining, updatedItem.startTime);
+        nextItems = [
+          ...remaining.slice(0, targetIndex),
+          updatedItem,
+          ...remaining.slice(targetIndex),
+        ];
       } else {
         const newItem: ItineraryItem = {
           ...itemData,
           id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
         };
-        return {
-          ...day,
-          items: [...day.items, newItem],
-        };
+        // Chronologically determine insertion position based on start time
+        const { targetIndex } = findInsertionPosition(day.items, newItem.startTime);
+        nextItems = [
+          ...day.items.slice(0, targetIndex),
+          newItem,
+          ...day.items.slice(targetIndex),
+        ];
       }
+
+      return {
+        ...day,
+        items: nextItems,
+      };
     });
 
     handleUpdateTrip({
@@ -849,14 +924,14 @@ export default function App() {
           </div>
         )}
 
-        {/* Desktop Tab Navigation Bar */}
-        <div className="hidden sm:flex items-center gap-1.5 p-1 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-2xs overflow-x-auto scrollbar-none">
+        {/* Desktop Tab Navigation Bar (Apple Frosted Glass Segmented Control) */}
+        <div className="hidden sm:flex items-center gap-1.5 p-1.5 bg-white/70 dark:bg-slate-900/70 backdrop-blur-2xl backdrop-saturate-200 rounded-2xl border border-slate-200/80 dark:border-white/10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] overflow-x-auto scrollbar-none">
           <button
             onClick={() => setActiveTab('timeline')}
-            className={`flex-1 min-w-[110px] py-2 px-3 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-w-[110px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-200 flex items-center justify-center gap-1.5 ${
               activeTab === 'timeline'
-                ? 'bg-teal-700 text-white shadow-2xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
             }`}
           >
             <Compass className="w-4 h-4" />
@@ -865,10 +940,10 @@ export default function App() {
 
           <button
             onClick={() => setActiveTab('live')}
-            className={`flex-1 min-w-[100px] py-2 px-3 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-w-[100px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-200 flex items-center justify-center gap-1.5 ${
               activeTab === 'live'
-                ? 'bg-teal-700 text-white shadow-2xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
             }`}
           >
             <Sparkles className="w-4 h-4 text-amber-300" />
@@ -877,10 +952,10 @@ export default function App() {
 
           <button
             onClick={() => setActiveTab('expenses')}
-            className={`flex-1 min-w-[85px] py-2 px-3 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-w-[85px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-200 flex items-center justify-center gap-1.5 ${
               activeTab === 'expenses'
-                ? 'bg-teal-700 text-white shadow-2xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
             }`}
           >
             <DollarSign className="w-4 h-4" />
@@ -889,10 +964,10 @@ export default function App() {
 
           <button
             onClick={() => setActiveTab('prep')}
-            className={`flex-1 min-w-[85px] py-2 px-3 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-w-[85px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-200 flex items-center justify-center gap-1.5 ${
               activeTab === 'prep'
-                ? 'bg-teal-700 text-white shadow-2xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
             }`}
           >
             <CheckCircle className="w-4 h-4" />
@@ -901,10 +976,10 @@ export default function App() {
 
           <button
             onClick={() => setActiveTab('memories')}
-            className={`flex-1 min-w-[85px] py-2 px-3 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-w-[85px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-200 flex items-center justify-center gap-1.5 ${
               activeTab === 'memories'
-                ? 'bg-rose-700 text-white shadow-2xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                ? 'bg-rose-600 text-white shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
             }`}
           >
             <Camera className="w-4 h-4" />
@@ -919,8 +994,8 @@ export default function App() {
               trip={currentTrip}
               lang={lang}
               onUpdateTrip={handleUpdateTrip}
-              onOpenAddItem={(dayNumber) => {
-                setEditingItemData({ dayNumber });
+              onOpenAddItem={(dayNumber, suggestedStartTime) => {
+                setEditingItemData({ dayNumber, initialStartTime: suggestedStartTime });
                 setShowItemModal(true);
               }}
               onOpenEditItem={(item, dayNumber) => {
@@ -996,52 +1071,80 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Mobile Bottom Thumb Navigation Bar (Apple-style 5 Focused Tabs) */}
-      <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/85 dark:bg-slate-900/85 backdrop-blur-xl border-t border-slate-200/60 dark:border-slate-800/60 grid grid-cols-5 items-center h-16 px-2 shadow-lg pb-safe">
+      {/* Mobile Bottom Thumb Navigation Bar (Apple Floating Liquid Glass Tab Bar) */}
+      <nav
+        aria-label="主要分頁導覽"
+        className="sm:hidden fixed bottom-2.5 left-2.5 right-2.5 max-w-md mx-auto z-40 bg-white/70 dark:bg-slate-900/70 backdrop-blur-3xl backdrop-saturate-200 border border-white/60 dark:border-white/12 grid grid-cols-5 items-center h-[62px] px-1.5 rounded-[26px] shadow-[0_12px_40px_-4px_rgba(0,0,0,0.18),inset_0_1px_1.5px_0_rgba(255,255,255,0.9),inset_0_-1px_1px_0_rgba(0,0,0,0.05)] dark:shadow-[0_14px_44px_-4px_rgba(0,0,0,0.65),inset_0_1px_1.5px_0_rgba(255,255,255,0.18),inset_0_-1px_1px_0_rgba(0,0,0,0.5)] relative overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-[1px] before:bg-gradient-to-r before:from-transparent before:via-white/95 before:dark:via-white/25 before:to-transparent mb-[env(safe-area-inset-bottom,0px)]"
+      >
         <button
           onClick={() => setActiveTab('timeline')}
-          className={`flex flex-col items-center justify-center py-1 transition active:scale-95 ${
-            activeTab === 'timeline' ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-400 dark:text-slate-500'
+          className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all duration-200 active:scale-90 ${
+            activeTab === 'timeline'
+              ? 'bg-gradient-to-b from-teal-500/18 to-teal-600/22 dark:from-teal-400/22 dark:to-teal-500/30 text-teal-800 dark:text-teal-200 font-bold shadow-[0_2px_8px_rgba(20,184,166,0.18)] border border-teal-500/30 dark:border-teal-400/30 backdrop-blur-md'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
-          <Compass className="w-4.5 h-4.5" />
-          <span className="text-[10px] mt-0.5 tracking-tight">{lang === 'zh' ? '行程' : 'Plan'}</span>
+          <Compass className={`w-5 h-5 transition-transform ${activeTab === 'timeline' ? 'scale-105' : ''}`} />
+          <span className="text-[10px] mt-0.5 tracking-tight font-medium">{lang === 'zh' ? '行程' : 'Plan'}</span>
+          {activeTab === 'timeline' && (
+            <span className="w-1 h-1 rounded-full bg-teal-600 dark:bg-teal-300 mt-0.5 shadow-xs" />
+          )}
         </button>
         <button
           onClick={() => setActiveTab('live')}
-          className={`flex flex-col items-center justify-center py-1 transition active:scale-95 ${
-            activeTab === 'live' ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-400 dark:text-slate-500'
+          className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all duration-200 active:scale-90 ${
+            activeTab === 'live'
+              ? 'bg-gradient-to-b from-amber-500/18 to-amber-600/22 dark:from-amber-400/22 dark:to-amber-500/30 text-amber-800 dark:text-amber-200 font-bold shadow-[0_2px_8px_rgba(245,158,11,0.18)] border border-amber-500/30 dark:border-amber-400/30 backdrop-blur-md'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
-          <Sparkles className="w-4.5 h-4.5 text-amber-500" />
-          <span className="text-[10px] mt-0.5 tracking-tight">{lang === 'zh' ? '隨行' : 'Live'}</span>
+          <Sparkles className={`w-5 h-5 text-amber-500 transition-transform ${activeTab === 'live' ? 'scale-105' : ''}`} />
+          <span className="text-[10px] mt-0.5 tracking-tight font-medium">{lang === 'zh' ? '隨行' : 'Live'}</span>
+          {activeTab === 'live' && (
+            <span className="w-1 h-1 rounded-full bg-amber-500 dark:bg-amber-300 mt-0.5 shadow-xs" />
+          )}
         </button>
         <button
           onClick={() => setActiveTab('expenses')}
-          className={`flex flex-col items-center justify-center py-1 transition active:scale-95 ${
-            activeTab === 'expenses' ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-400 dark:text-slate-500'
+          className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all duration-200 active:scale-90 ${
+            activeTab === 'expenses'
+              ? 'bg-gradient-to-b from-teal-500/18 to-teal-600/22 dark:from-teal-400/22 dark:to-teal-500/30 text-teal-800 dark:text-teal-200 font-bold shadow-[0_2px_8px_rgba(20,184,166,0.18)] border border-teal-500/30 dark:border-teal-400/30 backdrop-blur-md'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
-          <DollarSign className="w-4.5 h-4.5" />
-          <span className="text-[10px] mt-0.5 tracking-tight">{lang === 'zh' ? '記帳' : 'Spend'}</span>
+          <DollarSign className={`w-5 h-5 transition-transform ${activeTab === 'expenses' ? 'scale-105' : ''}`} />
+          <span className="text-[10px] mt-0.5 tracking-tight font-medium">{lang === 'zh' ? '記帳' : 'Spend'}</span>
+          {activeTab === 'expenses' && (
+            <span className="w-1 h-1 rounded-full bg-teal-600 dark:bg-teal-300 mt-0.5 shadow-xs" />
+          )}
         </button>
         <button
           onClick={() => setActiveTab('prep')}
-          className={`flex flex-col items-center justify-center py-1 transition active:scale-95 ${
-            activeTab === 'prep' ? 'text-teal-600 dark:text-teal-400 font-bold' : 'text-slate-400 dark:text-slate-500'
+          className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all duration-200 active:scale-90 ${
+            activeTab === 'prep'
+              ? 'bg-gradient-to-b from-teal-500/18 to-teal-600/22 dark:from-teal-400/22 dark:to-teal-500/30 text-teal-800 dark:text-teal-200 font-bold shadow-[0_2px_8px_rgba(20,184,166,0.18)] border border-teal-500/30 dark:border-teal-400/30 backdrop-blur-md'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
-          <CheckCircle className="w-4.5 h-4.5" />
-          <span className="text-[10px] mt-0.5 tracking-tight">{lang === 'zh' ? '備忘清單' : 'Notes'}</span>
+          <CheckCircle className={`w-5 h-5 transition-transform ${activeTab === 'prep' ? 'scale-105' : ''}`} />
+          <span className="text-[10px] mt-0.5 tracking-tight font-medium">{lang === 'zh' ? '備忘清單' : 'Notes'}</span>
+          {activeTab === 'prep' && (
+            <span className="w-1 h-1 rounded-full bg-teal-600 dark:bg-teal-300 mt-0.5 shadow-xs" />
+          )}
         </button>
         <button
           onClick={() => setActiveTab('memories')}
-          className={`flex flex-col items-center justify-center py-1 transition active:scale-95 ${
-            activeTab === 'memories' ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-slate-400 dark:text-slate-500'
+          className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all duration-200 active:scale-90 ${
+            activeTab === 'memories'
+              ? 'bg-gradient-to-b from-rose-500/18 to-rose-600/22 dark:from-rose-400/22 dark:to-rose-500/30 text-rose-800 dark:text-rose-200 font-bold shadow-[0_2px_8px_rgba(244,63,94,0.18)] border border-rose-500/30 dark:border-rose-400/30 backdrop-blur-md'
+              : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
           }`}
         >
-          <Camera className="w-4.5 h-4.5" />
-          <span className="text-[10px] mt-0.5 tracking-tight">{lang === 'zh' ? '相簿' : 'Photo'}</span>
+          <Camera className={`w-5 h-5 transition-transform ${activeTab === 'memories' ? 'scale-105' : ''}`} />
+          <span className="text-[10px] mt-0.5 tracking-tight font-medium">{lang === 'zh' ? '相簿' : 'Photo'}</span>
+          {activeTab === 'memories' && (
+            <span className="w-1 h-1 rounded-full bg-rose-500 dark:bg-rose-300 mt-0.5 shadow-xs" />
+          )}
         </button>
       </nav>
 
@@ -1062,6 +1165,8 @@ export default function App() {
           item={editingItemData.item}
           dayNumber={editingItemData.dayNumber}
           currency={currentTrip.currency}
+          existingDayItems={currentTrip.days.find((d) => d.dayNumber === editingItemData.dayNumber)?.items || []}
+          defaultStartTime={editingItemData.initialStartTime}
           onSave={handleSaveItem}
           onClose={() => {
             setShowItemModal(false);
@@ -1143,7 +1248,7 @@ export default function App() {
       )}
 
       {/* Floating Travel Quick Action Bar (Bottom Right - 快速記帳 & 隨手便簽) */}
-      <div className="fixed bottom-16 right-3 sm:bottom-6 sm:right-6 z-40 flex items-center bg-slate-900/90 dark:bg-slate-950/90 backdrop-blur-md rounded-2xl p-1 shadow-2xl border border-slate-700/70 ring-1 ring-white/10 gap-1 animate-in fade-in">
+      <div className="fixed bottom-[calc(5.1rem+env(safe-area-inset-bottom,0px))] right-3.5 sm:bottom-8 sm:right-8 z-40 flex items-center bg-slate-900/85 dark:bg-slate-950/85 backdrop-blur-2xl rounded-2xl p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.3)] border border-white/15 ring-1 ring-black/10 gap-1.5 animate-in fade-in">
         {/* Fast Expense Button */}
         <button
           onClick={() => {

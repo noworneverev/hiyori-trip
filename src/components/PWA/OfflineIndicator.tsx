@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { WifiOff, Cloud, HardDrive, Smartphone } from 'lucide-react';
+import { WifiOff, Cloud, HardDrive, Smartphone, CheckCircle, RefreshCw } from 'lucide-react';
 import { getStorageUsage } from '../../utils/storage';
+import { flushPendingSyncQueue, getPendingQueue } from '../../utils/syncManager';
 
 interface SyncArchitectureModalProps {
   onClose: () => void;
@@ -75,13 +76,43 @@ export const SyncArchitectureModal: React.FC<SyncArchitectureModalProps> = ({ on
 
 export const OfflineIndicator: React.FC = () => {
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [showSyncSuccess, setShowSyncSuccess] = useState(false);
+  const [syncedCount, setSyncedCount] = useState(0);
 
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    const handleOnline = async () => {
+      setIsOnline(true);
+      const pendingBefore = getPendingQueue().length;
+      try {
+        const { successCount } = await flushPendingSyncQueue();
+        if (successCount > 0 || pendingBefore > 0) {
+          setSyncedCount(successCount || pendingBefore);
+          setShowSyncSuccess(true);
+          setTimeout(() => setShowSyncSuccess(false), 3500);
+        }
+      } catch (err) {
+        console.warn('Reconnection auto-sync error:', err);
+      }
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      setShowSyncSuccess(false);
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+
+    // Initial check: if online and there are pending items from previous session, flush them
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      flushPendingSyncQueue().then(({ successCount }) => {
+        if (successCount > 0) {
+          setSyncedCount(successCount);
+          setShowSyncSuccess(true);
+          setTimeout(() => setShowSyncSuccess(false), 3000);
+        }
+      });
+    }
 
     return () => {
       window.removeEventListener('online', handleOnline);
@@ -89,19 +120,40 @@ export const OfflineIndicator: React.FC = () => {
     };
   }, []);
 
+  // When reconnected and successfully synced
+  if (showSyncSuccess) {
+    return (
+      <div className="fixed bottom-20 left-4 right-4 sm:bottom-6 sm:left-6 sm:right-auto sm:max-w-md z-50 flex items-center gap-2.5 rounded-2xl bg-emerald-950/95 text-white px-4 py-3 shadow-2xl backdrop-blur-md border border-emerald-600/70 animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+          <CheckCircle className="w-4 h-4 text-emerald-400" />
+        </div>
+        <div className="flex-1 text-xs">
+          <p className="font-bold text-emerald-300">網路已重新連線</p>
+          <p className="text-emerald-100 text-[11px]">
+            {syncedCount > 0
+              ? `已自動為您將 ${syncedCount} 筆離線變更同步至雲端！`
+              : '離線資料已成功自動同步至雲端！'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (isOnline) {
     return null;
   }
 
   return (
     /* Offline Notification Banner - Only shows when network is genuinely disconnected */
-    <div className="fixed bottom-4 left-4 right-4 md:left-6 md:right-auto md:max-w-md z-50 flex items-center gap-2.5 rounded-2xl bg-slate-900/95 text-white px-4 py-3 shadow-2xl backdrop-blur-md border border-slate-700 animate-bounce duration-1000">
+    <div className="fixed bottom-20 left-4 right-4 sm:bottom-6 sm:left-6 sm:right-auto sm:max-w-md z-50 flex items-center gap-2.5 rounded-2xl bg-slate-900/95 text-white px-4 py-3 shadow-2xl backdrop-blur-md border border-slate-700 animate-in fade-in slide-in-from-bottom-2 duration-200">
       <div className="w-8 h-8 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
         <WifiOff className="w-4 h-4" />
       </div>
       <div className="flex-1 text-xs">
         <p className="font-bold text-amber-300">離線快取模式已啟動</p>
-        <p className="text-slate-300 text-[11px]">您仍可隨時查閱已儲存的行程、景點與備忘，連線時將自動同步！</p>
+        <p className="text-slate-300 text-[11px]">
+          您的行程資料已安全保存在本機，新增與編輯隨時可用，連線時將自動同步！
+        </p>
       </div>
     </div>
   );

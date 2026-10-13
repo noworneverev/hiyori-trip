@@ -2,7 +2,13 @@ import React, { useState } from 'react';
 import { Trip, DayPlan, ItineraryItem } from '../../types/itinerary';
 import { LeafletMap, CATEGORY_COLORS } from '../Map/LeafletMap';
 import { calculateDistanceKm, formatDistance, estimateTravelTime, getGoogleMapsNavigationUrl } from '../../utils/geo';
-import { formatDateSlash, formatMonthDaySlash } from '../../utils/date';
+import {
+  formatDateSlash,
+  formatMonthDaySlash,
+  sortItineraryItemsByTime,
+  getSuggestedNextStartTime,
+  parseTimeToMinutes,
+} from '../../utils/date';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
 import { ItineraryOverviewTable } from '../Itinerary/ItineraryOverviewTable';
 import {
@@ -39,7 +45,7 @@ interface TimelineTabProps {
   trip: Trip;
   lang: Language;
   onUpdateTrip: (updatedTrip: Trip) => void;
-  onOpenAddItem: (dayNumber: number) => void;
+  onOpenAddItem: (dayNumber: number, suggestedStartTime?: string) => void;
   onOpenEditItem: (item: ItineraryItem, dayNumber: number) => void;
   isPickMode: boolean;
   onStartMapPick: () => void;
@@ -83,6 +89,25 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     items: [],
   };
 
+  const getBetweenTime = (prevItem: ItineraryItem, nextItem?: ItineraryItem): string => {
+    if (!nextItem) return getSuggestedNextStartTime([prevItem]);
+    const prevEnd = parseTimeToMinutes(prevItem.endTime || prevItem.startTime);
+    const nextStart = parseTimeToMinutes(nextItem.startTime);
+    if (prevEnd !== 99999 && nextStart !== 99999 && nextStart > prevEnd) {
+      const midMinutes = Math.floor((prevEnd + nextStart) / 2 / 15) * 15;
+      const h = Math.floor(midMinutes / 60);
+      const m = midMinutes % 60;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+    if (prevEnd !== 99999) {
+      const midMinutes = prevEnd + 30;
+      const h = Math.floor(midMinutes / 60);
+      const m = midMinutes % 60;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+    return '12:00';
+  };
+
   const handleSelectDay = (dayNum: number) => {
     setSelectedDayNumber(dayNum);
     setSelectedItemId(null);
@@ -123,6 +148,15 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     const updatedDays = trip.days.map((day) => {
       if (day.dayNumber !== selectedDayNumber) return day;
       return { ...day, items };
+    });
+    onUpdateTrip({ ...trip, days: updatedDays, updatedAt: Date.now() });
+  };
+
+  const handleSortActiveDayByTime = () => {
+    const sorted = sortItineraryItemsByTime(activeDay.items);
+    const updatedDays = trip.days.map((day) => {
+      if (day.dayNumber !== selectedDayNumber) return day;
+      return { ...day, items: sorted };
     });
     onUpdateTrip({ ...trip, days: updatedDays, updatedAt: Date.now() });
   };
@@ -313,13 +347,27 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           )}
         </div>
 
-        <button
-          onClick={() => onOpenAddItem(activeDay.dayNumber)}
-          className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>{t.addSpot}</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {activeDay.items.length >= 2 && (
+            <button
+              type="button"
+              onClick={handleSortActiveDayByTime}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition active:scale-95 border border-slate-200 dark:border-slate-700"
+              title="依開始時間先後自動排序本日所有卡片"
+            >
+              <Clock className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+              <span>{lang === 'zh' ? '依時間排序' : 'Sort Time'}</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
+            className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{t.addSpot}</span>
+          </button>
+        </div>
       </div>
 
       {/* Timeline Items List */}
@@ -329,7 +377,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             {lang === 'zh' ? '目前尚無行程，點選按鈕開始規劃' : 'No schedule yet. Tap below to add a spot.'}
           </p>
           <button
-            onClick={() => onOpenAddItem(activeDay.dayNumber)}
+            onClick={() => onOpenAddItem(activeDay.dayNumber, '09:00')}
             className="mt-3 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-1.5"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -606,22 +654,45 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   </div>
                 </div>
 
-                {/* Transit Step Connector to Next Spot */}
-                {distanceInfo && (
-                  <div className="py-1 px-4 flex items-center justify-center">
-                    <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-medium bg-slate-100/80 dark:bg-slate-800/80 px-3 py-1 rounded-full border border-slate-200/60 dark:border-slate-700/60">
-                      <Footprints className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                      <span>{t.distToNext} {distanceInfo.distStr}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>{t.walkMin.replace('{m}', String(distanceInfo.walkingMin))}</span>
-                      <span aria-hidden="true">·</span>
-                      <span>{t.driveMin.replace('{m}', String(distanceInfo.transitMin))}</span>
-                    </div>
+                {/* Transit Step Connector & Inline Spot Insertion between cards */}
+                {index < activeDay.items.length - 1 && (
+                  <div className="py-1 px-4 flex flex-col items-center justify-center gap-1.5 group/connector">
+                    {distanceInfo && (
+                      <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-medium bg-slate-100/80 dark:bg-slate-800/80 px-3 py-1 rounded-full border border-slate-200/60 dark:border-slate-700/60">
+                        <Footprints className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                        <span>{t.distToNext} {distanceInfo.distStr}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{t.walkMin.replace('{m}', String(distanceInfo.walkingMin))}</span>
+                        <span aria-hidden="true">·</span>
+                        <span>{t.driveMin.replace('{m}', String(distanceInfo.transitMin))}</span>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => onOpenAddItem(activeDay.dayNumber, getBetweenTime(item, nextItem))}
+                      className="opacity-75 sm:opacity-0 sm:group-hover/connector:opacity-100 hover:opacity-100 transition-all duration-200 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100/90 hover:bg-teal-50 dark:bg-slate-800/80 dark:hover:bg-teal-950/60 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 border border-slate-200/80 dark:border-slate-700 hover:border-teal-400 dark:hover:border-teal-600 shadow-2xs active:scale-95 cursor-pointer"
+                      title={lang === 'zh' ? `在「${item.title}」與「${nextItem.title}」之間插入行程（依時間自動排入）` : 'Insert spot here'}
+                    >
+                      <Plus className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                      <span>{lang === 'zh' ? '在此處插入景點' : 'Insert spot here'}</span>
+                    </button>
                   </div>
                 )}
               </div>
             );
           })}
+
+          {/* Quick Add Next Spot Button at Bottom of List */}
+          <div className="pt-2 text-center">
+            <button
+              type="button"
+              onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
+              className="w-full py-3 px-4 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-teal-400 dark:hover:border-teal-600 hover:bg-teal-50/40 dark:hover:bg-teal-950/20 text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 font-semibold text-xs flex items-center justify-center gap-2 transition active:scale-[0.99]"
+            >
+              <Plus className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+              <span>{lang === 'zh' ? `新增第 ${activeDay.items.length + 1} 站行程景點（自動依時間排入）` : 'Add next spot'}</span>
+            </button>
+          </div>
         </div>
       )}
     </>

@@ -90,8 +90,8 @@ const COMMON_EXPENSE_PRESETS = [
 ];
 
 const PAYMENT_METHODS: { key: PaymentMethod; label: string; icon: React.ElementType }[] = [
-  { key: 'card', label: '信用卡', icon: CreditCard },
   { key: 'cash', label: '現金', icon: Wallet },
+  { key: 'card', label: '信用卡', icon: CreditCard },
   { key: 'mobile', label: '行動支付', icon: Smartphone },
   { key: 'ic_card', label: '交通卡', icon: Tag },
 ];
@@ -123,8 +123,15 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   const [expenseTitle, setExpenseTitle] = useState<string>('');
   const [expenseNotes, setExpenseNotes] = useState<string>('');
   const [expenseCat, setExpenseCat] = useState<string>('food');
-  const [expensePayment, setExpensePayment] = useState<PaymentMethod>('card');
+  const [expensePayment, setExpensePayment] = useState<PaymentMethod>('cash');
   const [expenseDate, setExpenseDate] = useState<string>(() => getLocalTodayDate());
+
+  // Custom Category & Editing States in Quick Modal
+  const [showQuickNewCat, setShowQuickNewCat] = useState<boolean>(false);
+  const [quickNewCatName, setQuickNewCatName] = useState<string>('');
+  const [isManagingCats, setIsManagingCats] = useState<boolean>(false);
+  const [editingCatName, setEditingCatName] = useState<string | null>(null);
+  const [catRenameVal, setCatRenameVal] = useState<string>('');
 
   // Ensure default date is always today's date when opening or switching tabs
   useEffect(() => {
@@ -188,6 +195,65 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     setReceiptImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
+  const customCategories = trip.customExpenseCategories || [];
+
+  const handleAddQuickCategory = () => {
+    const trimmed = quickNewCatName.trim();
+    if (!trimmed) return;
+    if (CATEGORY_ITEMS.some((c) => c.key === trimmed) || customCategories.includes(trimmed)) {
+      setExpenseCat(trimmed);
+      setQuickNewCatName('');
+      setShowQuickNewCat(false);
+      return;
+    }
+    const updated = [...customCategories, trimmed];
+    onUpdateTrip({
+      ...trip,
+      customExpenseCategories: updated,
+      updatedAt: Date.now(),
+    });
+    setExpenseCat(trimmed);
+    setQuickNewCatName('');
+    setShowQuickNewCat(false);
+    onShowToast?.(`已新增自訂類別「${trimmed}」`);
+  };
+
+  const handleRenameQuickCategory = (oldCat: string, newCat: string) => {
+    const trimmed = newCat.trim();
+    if (!trimmed || trimmed === oldCat) {
+      setEditingCatName(null);
+      return;
+    }
+    const updatedCats = customCategories.map((c) => (c === oldCat ? trimmed : c));
+    const updatedExpenses = trip.expenses.map((e) =>
+      e.category === oldCat ? { ...e, category: trimmed } : e
+    );
+    onUpdateTrip({
+      ...trip,
+      customExpenseCategories: updatedCats,
+      expenses: updatedExpenses,
+      updatedAt: Date.now(),
+    });
+    if (expenseCat === oldCat) {
+      setExpenseCat(trimmed);
+    }
+    setEditingCatName(null);
+    onShowToast?.(`已將類別「${oldCat}」修改為「${trimmed}」`);
+  };
+
+  const handleDeleteQuickCategory = (catToDelete: string) => {
+    const updatedCats = customCategories.filter((c) => c !== catToDelete);
+    onUpdateTrip({
+      ...trip,
+      customExpenseCategories: updatedCats,
+      updatedAt: Date.now(),
+    });
+    if (expenseCat === catToDelete) {
+      setExpenseCat('food');
+    }
+    onShowToast?.(`已刪除類別「${catToDelete}」`);
+  };
+
   const parsedAmount = parseFloat(expenseAmount) || 0;
   const convertedToTwd = convertAmount(parsedAmount, expenseCur, 'TWD', trip.customExchangeRates);
 
@@ -200,7 +266,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
 
     const newExpense: ExpenseItem = {
       id: `exp-${Date.now()}`,
-      title: expenseTitle.trim() || matchedCat?.label || '旅途隨手支出',
+      title: expenseTitle.trim() || matchedCat?.label || (customCategories.includes(expenseCat) ? expenseCat : '旅途隨手支出'),
       amount: parsedAmount,
       currency: expenseCur,
       category: expenseCat,
@@ -407,13 +473,25 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               一秒快速記帳 · 隨身便簽 · 即時外幣換算
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition active:scale-95"
-            aria-label="關閉"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {activeTab === 'expense' && parsedAmount > 0 && (
+              <button
+                type="button"
+                onClick={() => handleSaveQuickExpense()}
+                className="px-3 py-1 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold text-xs flex items-center gap-1 transition active:scale-95 shadow-xs"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>儲存</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition active:scale-95"
+              aria-label="關閉"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Clean Segmented Tab Switcher (Expense is 1st & Default) */}
@@ -457,9 +535,10 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
 
         {/* ================= TAB 1: FAST EXPENSE (DEFAULT) ================= */}
         {activeTab === 'expense' && (
-          <form onSubmit={handleSaveQuickExpense} className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
-            {/* Currency Quick Bar & Amount Input */}
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-2">
+          <form onSubmit={handleSaveQuickExpense} className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+              {/* Currency Quick Bar & Amount Input */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                   記帳幣別：
@@ -561,9 +640,63 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
 
             {/* 3. 消費種類 (Category) */}
             <div className="space-y-1.5">
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                消費種類：
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  消費種類：
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickNewCat(!showQuickNewCat)}
+                    className="text-[11px] text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-0.5"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>新增自訂</span>
+                  </button>
+                  {customCategories.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsManagingCats(!isManagingCats)}
+                      className={`text-[11px] flex items-center gap-0.5 px-1.5 py-0.5 rounded transition ${
+                        isManagingCats
+                          ? 'bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 font-bold'
+                          : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+                      }`}
+                    >
+                      <Edit2 className="w-2.5 h-2.5" />
+                      <span>{isManagingCats ? '完成修改' : '編輯類別'}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Inline Add Custom Category */}
+              {showQuickNewCat && (
+                <div className="flex items-center gap-1.5 p-1.5 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 animate-in fade-in duration-100">
+                  <input
+                    type="text"
+                    value={quickNewCatName}
+                    onChange={(e) => setQuickNewCatName(e.target.value)}
+                    placeholder="輸入新類別 (如：居酒屋、扭蛋)"
+                    className="flex-1 px-2.5 py-1 bg-white dark:bg-slate-900 rounded-lg border border-slate-300 dark:border-slate-600 text-xs outline-none"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddQuickCategory();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddQuickCategory}
+                    className="px-2.5 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold"
+                  >
+                    新增
+                  </button>
+                </div>
+              )}
+
+              {/* Category Grid */}
               <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
                 {CATEGORY_ITEMS.map((item) => {
                   const Icon = item.icon;
@@ -582,6 +715,97 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                       <Icon className="w-4 h-4" />
                       <span className="text-[11px] truncate">{item.label}</span>
                     </button>
+                  );
+                })}
+
+                {/* Custom Categories */}
+                {customCategories.map((catKey) => {
+                  const isSelected = expenseCat === catKey;
+                  const isEditingThis = editingCatName === catKey;
+
+                  if (isEditingThis) {
+                    return (
+                      <div
+                        key={catKey}
+                        className="col-span-2 py-1 px-1.5 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 rounded-xl flex items-center gap-1"
+                      >
+                        <input
+                          type="text"
+                          value={catRenameVal}
+                          onChange={(e) => setCatRenameVal(e.target.value)}
+                          className="flex-1 px-1.5 py-0.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded text-xs outline-none"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleRenameQuickCategory(catKey, catRenameVal);
+                            }
+                          }}
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRenameQuickCategory(catKey, catRenameVal)}
+                          className="p-1 bg-amber-600 text-white rounded text-[10px]"
+                          title="確認修改"
+                        >
+                          <Check className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingCatName(null)}
+                          className="p-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-[10px]"
+                          title="取消"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={catKey} className="relative group">
+                      <button
+                        type="button"
+                        onClick={() => setExpenseCat(catKey)}
+                        className={`w-full py-2 px-1 rounded-xl text-xs font-bold border transition flex flex-col items-center justify-center gap-1 ${
+                          isSelected
+                            ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/60'
+                        }`}
+                      >
+                        <Tag className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                        <span className="text-[11px] truncate max-w-full px-1">{catKey}</span>
+                      </button>
+
+                      {/* Edit / Delete badges for custom category */}
+                      {(isManagingCats || isSelected) && (
+                        <div className="absolute -top-1.5 -right-1 flex items-center gap-0.5 bg-white dark:bg-slate-900 shadow-sm rounded-md border border-slate-200 dark:border-slate-700 px-0.5 z-10">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingCatName(catKey);
+                              setCatRenameVal(catKey);
+                            }}
+                            className="p-0.5 text-slate-500 hover:text-amber-600 transition"
+                            title="修改類別名稱"
+                          >
+                            <Edit2 className="w-2.5 h-2.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteQuickCategory(catKey);
+                            }}
+                            className="p-0.5 text-slate-500 hover:text-rose-600 transition"
+                            title="刪除此自訂類別"
+                          >
+                            <Trash2 className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -840,14 +1064,24 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               </div>
             )}
 
-            {/* Save Button */}
-            <button
-              type="submit"
-              className="w-full py-3 px-4 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-2 mt-2"
-            >
-              <Check className="w-4 h-4" />
-              <span>立即儲存記帳</span>
-            </button>
+            </div>
+
+            {/* Pinned Sticky Bottom Action Bar (Always visible without scrolling) */}
+            <div className="p-3.5 sm:p-4 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200/90 dark:border-slate-800 shrink-0 shadow-lg pb-safe">
+              <button
+                type="submit"
+                disabled={!parsedAmount || parsedAmount <= 0}
+                className="w-full py-3.5 px-4 rounded-2xl bg-teal-600 hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-2"
+              >
+                <Check className="w-4 h-4" />
+                <span>立即儲存記帳</span>
+                {parsedAmount > 0 && (
+                  <span className="font-mono text-xs opacity-90 ml-1">
+                    ({expenseCur} {parsedAmount.toLocaleString()})
+                  </span>
+                )}
+              </button>
+            </div>
           </form>
         )}
 

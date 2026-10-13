@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ItineraryItem, CategoryType } from '../../types/itinerary';
 import { searchLocationOSM } from '../../utils/geo';
 import { compressImageFile } from '../../utils/image';
 import { canUploadImages } from '../../utils/userPermissions';
+import { findInsertionPosition } from '../../utils/date';
 import {
   X,
   MapPin,
@@ -24,6 +25,7 @@ import {
   Camera,
   Trash2,
   Plus,
+  ArrowUpDown,
   Image as ImageIcon,
 } from 'lucide-react';
 
@@ -35,6 +37,8 @@ interface ItemEditModalProps {
   onClose: () => void;
   onStartMapPick?: () => void;
   pickedCoords?: { lat: number; lng: number } | null;
+  existingDayItems?: ItineraryItem[];
+  defaultStartTime?: string;
 }
 
 const CATEGORIES: {
@@ -60,10 +64,12 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   onClose,
   onStartMapPick,
   pickedCoords,
+  existingDayItems = [],
+  defaultStartTime,
 }) => {
   const [title, setTitle] = useState(item?.title || '');
   const [category, setCategory] = useState<CategoryType>(item?.category || 'spot');
-  const [startTime, setStartTime] = useState(item?.startTime || '09:00');
+  const [startTime, setStartTime] = useState(item?.startTime || defaultStartTime || '09:00');
   const [endTime, setEndTime] = useState(item?.endTime || '');
   const [locationName, setLocationName] = useState(item?.locationName || '');
   const [address, setAddress] = useState(item?.address || '');
@@ -137,6 +143,15 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     setSearchQuery('');
   };
 
+  // Live calculation of chronological placement relative to existing spots in the day
+  const othersInDay = useMemo(() => {
+    return existingDayItems.filter((it) => it.id !== item?.id);
+  }, [existingDayItems, item?.id]);
+
+  const insertionPreview = useMemo(() => {
+    return findInsertionPosition(othersInDay, startTime);
+  }, [othersInDay, startTime]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -187,7 +202,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
               {item ? '編輯行程景點' : `新增第 ${dayNumber} 天行程景點`}
             </h3>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400">規劃景點、時間、交通叮嚀與預約代碼</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">系統將依開始時間自動為您排定先後卡片順序</p>
           </div>
           <button
             onClick={onClose}
@@ -237,31 +252,64 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
           </div>
 
           {/* Time schedule */}
-          <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
-            <div>
-              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-teal-600" />
-                <span>開始時間</span> <span className="text-rose-500">*</span>
-              </label>
-              <input
-                type="time"
-                required
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:border-teal-500 outline-none font-medium"
-              />
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                  <span>開始時間</span> <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="time"
+                  required
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:border-teal-500 outline-none font-medium"
+                />
+              </div>
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-slate-400" />
+                  <span>結束時間 (可選)</span>
+                </label>
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:border-teal-500 outline-none font-medium"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1">
-                <Clock className="w-3.5 h-3.5 text-slate-400" />
-                <span>結束時間 (可選)</span>
-              </label>
-              <input
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 focus:border-teal-500 outline-none font-medium"
-              />
+
+            {/* Smart Chronological Placement Hint based on startTime */}
+            <div className="px-3 py-2 rounded-xl bg-teal-50/90 dark:bg-teal-950/40 border border-teal-200/80 dark:border-teal-800/60 flex items-start gap-2 text-[11px] text-teal-900 dark:text-teal-100 transition-all shadow-2xs">
+              <ArrowUpDown className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0 mt-0.5" />
+              <div className="flex-1 leading-relaxed">
+                <span>根據開始時間（<span className="font-mono font-bold">{startTime || '--:--'}</span>），將自動安排在</span>
+                <span className="font-bold text-teal-700 dark:text-teal-300 mx-1 underline decoration-teal-400">
+                  第 {insertionPreview.targetIndex + 1} 站
+                </span>
+                {insertionPreview.afterItem && insertionPreview.beforeItem && (
+                  <span className="text-slate-600 dark:text-slate-300">
+                    （在「<strong>{insertionPreview.afterItem.title}</strong>」之後、在「<strong>{insertionPreview.beforeItem.title}</strong>」之前）
+                  </span>
+                )}
+                {!insertionPreview.afterItem && insertionPreview.beforeItem && (
+                  <span className="text-slate-600 dark:text-slate-300">
+                    （在「<strong>{insertionPreview.beforeItem.title}</strong>」之前，成為本日首站）
+                  </span>
+                )}
+                {insertionPreview.afterItem && !insertionPreview.beforeItem && (
+                  <span className="text-slate-600 dark:text-slate-300">
+                    （在「<strong>{insertionPreview.afterItem.title}</strong>」之後，成為本日末站）
+                  </span>
+                )}
+                {!insertionPreview.afterItem && !insertionPreview.beforeItem && (
+                  <span className="text-slate-600 dark:text-slate-300">
+                    （本日第 1 個行程景點）
+                  </span>
+                )}
+              </div>
             </div>
           </div>
 
