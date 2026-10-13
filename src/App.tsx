@@ -646,7 +646,7 @@ export default function App() {
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-4 pb-20 sm:pb-8 space-y-4">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-4 pb-[calc(6.5rem+env(safe-area-inset-bottom,0px))] sm:pb-8 space-y-4">
         {/* Collaborative Trip Connected Alert */}
         {collabBannerTrip && (
           <div className="bg-emerald-950/90 text-white px-4 py-3.5 rounded-2xl shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-emerald-800/80 animate-in fade-in duration-200">
@@ -1074,7 +1074,8 @@ export default function App() {
       {/* Mobile Bottom Thumb Navigation Bar (Apple Floating Liquid Glass Tab Bar) */}
       <nav
         aria-label="主要分頁導覽"
-        className="sm:hidden fixed bottom-2.5 left-2.5 right-2.5 max-w-md mx-auto z-40 bg-white/70 dark:bg-slate-900/70 backdrop-blur-3xl backdrop-saturate-200 border border-white/60 dark:border-white/12 grid grid-cols-5 items-center h-[62px] px-1.5 rounded-[26px] shadow-[0_12px_40px_-4px_rgba(0,0,0,0.18),inset_0_1px_1.5px_0_rgba(255,255,255,0.9),inset_0_-1px_1px_0_rgba(0,0,0,0.05)] dark:shadow-[0_14px_44px_-4px_rgba(0,0,0,0.65),inset_0_1px_1.5px_0_rgba(255,255,255,0.18),inset_0_-1px_1px_0_rgba(0,0,0,0.5)] relative overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-[1px] before:bg-gradient-to-r before:from-transparent before:via-white/95 before:dark:via-white/25 before:to-transparent mb-[env(safe-area-inset-bottom,0px)]"
+        style={{ position: 'fixed' }}
+        className="sm:hidden fixed bottom-[calc(0.625rem+env(safe-area-inset-bottom,0px))] left-3 right-3 max-w-md mx-auto z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-3xl backdrop-saturate-200 border border-white/60 dark:border-white/15 grid grid-cols-5 items-center h-[62px] px-1.5 rounded-[26px] shadow-[0_12px_40px_-4px_rgba(0,0,0,0.22),inset_0_1px_1.5px_0_rgba(255,255,255,0.9),inset_0_-1px_1px_0_rgba(0,0,0,0.05)] dark:shadow-[0_14px_44px_-4px_rgba(0,0,0,0.7),inset_0_1px_1.5px_0_rgba(255,255,255,0.2),inset_0_-1px_1px_0_rgba(0,0,0,0.5)] overflow-hidden before:absolute before:inset-x-0 before:top-0 before:h-[1px] before:bg-gradient-to-r before:from-transparent before:via-white/95 before:dark:via-white/25 before:to-transparent"
       >
         <button
           onClick={() => setActiveTab('timeline')}
@@ -1248,7 +1249,10 @@ export default function App() {
       )}
 
       {/* Floating Travel Quick Action Bar (Bottom Right - 快速記帳 & 隨手便簽) */}
-      <div className="fixed bottom-[calc(5.1rem+env(safe-area-inset-bottom,0px))] right-3.5 sm:bottom-8 sm:right-8 z-40 flex items-center bg-slate-900/85 dark:bg-slate-950/85 backdrop-blur-2xl rounded-2xl p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.3)] border border-white/15 ring-1 ring-black/10 gap-1.5 animate-in fade-in">
+      <div
+        style={{ position: 'fixed' }}
+        className="fixed bottom-[calc(5.1rem+env(safe-area-inset-bottom,0px))] right-3.5 sm:bottom-8 sm:right-8 z-40 flex items-center bg-slate-900/85 dark:bg-slate-950/85 backdrop-blur-2xl rounded-2xl p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.3)] border border-white/15 ring-1 ring-black/10 gap-1.5 animate-in fade-in"
+      >
         {/* Fast Expense Button */}
         <button
           onClick={() => {
