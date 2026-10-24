@@ -37,6 +37,26 @@
           // Fallback if property is already defined non-configurable
         }
 
+        // Suppress harmless Vite HMR WebSocket errors in cloud reverse proxy where HMR is disabled
+        var _origConsoleError = console.error;
+        console.error = function() {
+          var first = arguments[0];
+          var str = String((first && first.message) || first || '');
+          if (str.indexOf('[vite]') !== -1 || str.indexOf('WebSocket') !== -1) {
+            return;
+          }
+          return _origConsoleError.apply(console, arguments);
+        };
+        var _origConsoleWarn = console.warn;
+        console.warn = function() {
+          var first = arguments[0];
+          var str = String((first && first.message) || first || '');
+          if (str.indexOf('[vite]') !== -1 || str.indexOf('WebSocket') !== -1) {
+            return;
+          }
+          return _origConsoleWarn.apply(console, arguments);
+        };
+
         // Suppress extension-injected and Vite HMR WebSocket errors from crashing page telemetry
         window.addEventListener('error', function(e) {
           if (e && e.filename && e.filename.indexOf('chrome-extension://') !== -1) {
@@ -44,14 +64,17 @@
             e.preventDefault();
             return true;
           }
-          if (e && ((e.message && e.message.indexOf('WebSocket') !== -1) || (e.filename && e.filename.indexOf('@vite/client') !== -1))) {
+          var msg = String(e && (e.message || (e.error && e.error.message) || ''));
+          var file = String((e && e.filename) || '');
+          if (msg.indexOf('WebSocket') !== -1 || file.indexOf('@vite/client') !== -1) {
             e.stopImmediatePropagation();
             e.preventDefault();
             return true;
           }
         }, true);
         window.addEventListener('unhandledrejection', function(e) {
-          if (e && e.reason && (String(e.reason).indexOf('WebSocket') !== -1 || String(e.reason.message || '').indexOf('WebSocket') !== -1)) {
+          var reason = String((e && (e.reason && (e.reason.message || e.reason))) || '');
+          if (reason.indexOf('WebSocket') !== -1 || reason.indexOf('[vite]') !== -1) {
             e.stopImmediatePropagation();
             e.preventDefault();
             return true;
