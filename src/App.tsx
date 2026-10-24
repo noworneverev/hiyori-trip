@@ -221,14 +221,31 @@ export default function App() {
         const currentLocal = getStoredTrips().find(
           (t) => t.collabId === activeCollabId || t.id === activeId
         );
-        if (
-          currentLocal &&
-          Math.abs((currentLocal.updatedAt || 0) - (liveTrip.updatedAt || 0)) > 2000 &&
-          hasTripContentDifference(currentLocal, liveTrip)
-        ) {
+        if (!currentLocal) return;
+
+        const localUpdated = currentLocal.updatedAt || 0;
+        const cloudUpdated = liveTrip.updatedAt || 0;
+
+        // Notion-like automatic sync: If cloud is newer or equal, adopt live trip directly
+        if (cloudUpdated >= localUpdated) {
+          setTrips((prev) => {
+            const idx = prev.findIndex((t) => t.collabId === activeCollabId || t.id === activeId);
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = liveTrip;
+              saveTrips(next);
+              return next;
+            }
+            return prev;
+          });
+          return;
+        }
+
+        // Only prompt conflict if local has newer un-synced changes that diverge from cloud
+        if (localUpdated > cloudUpdated && hasTripContentDifference(currentLocal, liveTrip)) {
           const lSummary = summarizeTripForConflict(currentLocal);
           const cSummary = summarizeTripForConflict(liveTrip);
-          const timeDiffMs = Math.abs((currentLocal.updatedAt || 0) - (liveTrip.updatedAt || 0));
+          const timeDiffMs = localUpdated - cloudUpdated;
           const timeDiffMinutes = Math.max(1, Math.round(timeDiffMs / (1000 * 60)));
           const conflict: TripConflict = {
             tripId: currentLocal.id,
@@ -239,8 +256,7 @@ export default function App() {
             localSummary: lSummary,
             cloudSummary: cSummary,
             detectedAt: Date.now(),
-            newerVersion:
-              (currentLocal.updatedAt || 0) > (liveTrip.updatedAt || 0) ? 'local' : 'cloud',
+            newerVersion: 'local',
             timeDiffMinutes,
           };
           setPendingConflicts((prev) => {
@@ -248,19 +264,7 @@ export default function App() {
             return [conflict, ...filtered];
           });
           setShowConflictModal(true);
-          return;
         }
-
-        setTrips((prev) => {
-          const idx = prev.findIndex((t) => t.collabId === activeCollabId || t.id === activeId);
-          if (idx >= 0) {
-            const next = [...prev];
-            next[idx] = liveTrip;
-            saveTrips(next);
-            return next;
-          }
-          return prev;
-        });
       }
     );
 
@@ -1295,6 +1299,8 @@ export default function App() {
         <ShareTripModal
           trip={currentTrip}
           userId={currentUser?.uid}
+          currentUser={currentUser}
+          onUpdateTrip={handleUpdateTrip}
           lang={lang}
           onClose={() => setShowShareModal(false)}
         />

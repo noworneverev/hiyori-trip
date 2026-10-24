@@ -300,21 +300,10 @@ export async function resolveTripConflict(
       ...conflict.localTrip,
       updatedAt: Date.now(),
     };
-    if (userId) {
-      await saveTripToCloud(userId, resolvedTrip).catch(() => {
-        enqueueTripSave(userId, resolvedTrip);
-      });
-    }
-    if (resolvedTrip.collabId && resolvedTrip.isCollaborative) {
-      await syncCollaborativeTrip(resolvedTrip.collabId, resolvedTrip).catch(() => {
-        enqueueCollabSync(resolvedTrip.collabId!, resolvedTrip);
-      });
-    }
   } else if (strategy === 'keep_cloud') {
     resolvedTrip = {
       ...conflict.cloudTrip,
     };
-    // No need to upload to cloud as it's already cloud version
   } else {
     // 'smart_merge'
     const merged = mergeSingleTrip(conflict.localTrip, conflict.cloudTrip);
@@ -322,22 +311,49 @@ export async function resolveTripConflict(
       ...merged,
       updatedAt: Date.now(),
     };
-    if (userId) {
-      await saveTripToCloud(userId, resolvedTrip).catch(() => {
-        enqueueTripSave(userId, resolvedTrip);
-      });
-    }
-    if (resolvedTrip.collabId && resolvedTrip.isCollaborative) {
-      await syncCollaborativeTrip(resolvedTrip.collabId, resolvedTrip).catch(() => {
-        enqueueCollabSync(resolvedTrip.collabId!, resolvedTrip);
-      });
-    }
   }
 
-  // Update local storage
+  // 1. Immediately update local storage so user has zero wait time
   const currentTrips = getStoredTrips();
   const updatedTrips = currentTrips.map((t) => (t.id === resolvedTrip.id ? resolvedTrip : t));
   saveTrips(updatedTrips);
+
+  // 2. Background non-blocking sync with timeout protection
+  if (strategy !== 'keep_cloud') {
+    const runBackgroundSync = async () => {
+      if (userId) {
+        try {
+          const timeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Cloud save timeout')), 3000)
+          );
+          await Promise.race([saveTripToCloud(userId, resolvedTrip), timeout]);
+        } catch (err) {
+          console.warn('Background cloud save delayed, enqueued in offline queue:', err);
+          enqueueTripSave(userId, resolvedTrip);
+        }
+      }
+
+      if (resolvedTrip.collabId && resolvedTrip.isCollaborative) {
+        try {
+          const timeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Collab sync timeout')), 3000)
+          );
+          await Promise.race([
+            syncCollaborativeTrip(resolvedTrip.collabId, resolvedTrip),
+            timeout,
+          ]);
+        } catch (err) {
+          console.warn('Background collab sync delayed, enqueued in offline queue:', err);
+          enqueueCollabSync(resolvedTrip.collabId, resolvedTrip);
+        }
+      }
+    };
+
+    // Non-blocking invocation
+    runBackgroundSync().catch((err) => {
+      console.warn('Trip conflict background sync encountered error:', err);
+    });
+  }
 
   return resolvedTrip;
 }
