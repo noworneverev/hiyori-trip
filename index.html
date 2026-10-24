@@ -37,9 +37,21 @@
           // Fallback if property is already defined non-configurable
         }
 
-        // Suppress extension-injected script errors from crashing page telemetry
+        // Suppress extension-injected and Vite HMR WebSocket errors from crashing page telemetry
         window.addEventListener('error', function(e) {
           if (e && e.filename && e.filename.indexOf('chrome-extension://') !== -1) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+          if (e && ((e.message && e.message.indexOf('WebSocket') !== -1) || (e.filename && e.filename.indexOf('@vite/client') !== -1))) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return true;
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function(e) {
+          if (e && e.reason && (String(e.reason).indexOf('WebSocket') !== -1 || String(e.reason.message || '').indexOf('WebSocket') !== -1)) {
             e.stopImmediatePropagation();
             e.preventDefault();
             return true;
