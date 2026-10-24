@@ -451,18 +451,34 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+
+    // Lock body scrolling and touch movement to prevent mobile background bounce and drift
+    const originalOverflow = document.body.style.overflow;
+    const originalTouchAction = document.body.style.touchAction;
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = originalOverflow;
+      document.body.style.touchAction = originalTouchAction;
+    };
   }, [onClose]);
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-xs animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150 overscroll-none"
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh]"
+        className="relative w-full sm:max-w-lg bg-white dark:bg-[#1c1c1e] rounded-t-[28px] sm:rounded-3xl shadow-2xl border-t sm:border border-slate-200/80 dark:border-white/10 overflow-hidden flex flex-col max-h-[90dvh] sm:max-h-[88vh] overscroll-contain touch-pan-y animate-in slide-in-from-bottom duration-200"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Mobile Drag Indicator Handle (visual affordance, locked to sheet) */}
+        <div className="sm:hidden pt-2.5 pb-1 bg-teal-800 dark:bg-teal-950 flex justify-center shrink-0">
+          <div className="w-10 h-1 rounded-full bg-white/30" />
+        </div>
+
         {/* Top Header */}
         <div className="px-5 py-3.5 bg-teal-800 dark:bg-teal-950 text-white flex items-center justify-between shrink-0">
           <div>

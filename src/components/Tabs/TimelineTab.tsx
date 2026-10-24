@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Trip, DayPlan, ItineraryItem } from '../../types/itinerary';
 import { LeafletMap, CATEGORY_COLORS } from '../Map/LeafletMap';
 import { calculateDistanceKm, formatDistance, estimateTravelTime, getGoogleMapsNavigationUrl } from '../../utils/geo';
@@ -39,6 +39,8 @@ import {
   Sparkles,
   Pin,
   Route,
+  Search,
+  X,
 } from 'lucide-react';
 
 interface TimelineTabProps {
@@ -81,6 +83,41 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   const [selectedDayNumber, setSelectedDayNumber] = useState<number>(1);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
+  const [spotSearchQuery, setSpotSearchQuery] = useState('');
+
+  // Global search matching across all days of the trip
+  const matchingSpots = useMemo(() => {
+    if (!spotSearchQuery.trim()) return [];
+    const q = spotSearchQuery.toLowerCase().trim();
+    const results: { dayNumber: number; date: string; item: ItineraryItem }[] = [];
+    trip.days.forEach((day) => {
+      day.items.forEach((item) => {
+        const titleMatch = item.title?.toLowerCase().includes(q);
+        const locMatch = (item.locationName || item.address)?.toLowerCase().includes(q);
+        const notesMatch = item.notes?.toLowerCase().includes(q);
+        const catMatch = item.category?.toLowerCase().includes(q);
+        if (titleMatch || locMatch || notesMatch || catMatch) {
+          results.push({ dayNumber: day.dayNumber, date: day.date, item });
+        }
+      });
+    });
+    return results;
+  }, [trip.days, spotSearchQuery]);
+
+  const handleJumpToSpot = (dayNumber: number, itemId: string) => {
+    setSelectedDayNumber(dayNumber);
+    setSelectedItemId(itemId);
+    setTimelineViewMode('daily');
+    setSpotSearchQuery('');
+    setTimeout(() => {
+      const el = document.getElementById(`spot-card-${itemId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.add('ring-2', 'ring-teal-500');
+        setTimeout(() => el.classList.remove('ring-2', 'ring-teal-500'), 2000);
+      }
+    }, 120);
+  };
 
   const activeDay = trip.days.find((d) => d.dayNumber === selectedDayNumber) || trip.days[0] || {
     id: 'empty',
@@ -195,6 +232,83 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
   return (
     <div className="space-y-4">
+      {/* 行程全景點即時搜尋列 (Instant Spot & Place Search) */}
+      <div className="relative">
+        <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-white dark:bg-[#1c1c1e] border border-slate-200/80 dark:border-white/10 shadow-2xs focus-within:ring-2 focus-within:ring-teal-500/50 focus-within:border-teal-500 transition">
+          <Search className="w-4 h-4 text-slate-400 shrink-0" />
+          <input
+            type="text"
+            value={spotSearchQuery}
+            onChange={(e) => setSpotSearchQuery(e.target.value)}
+            placeholder={lang === 'zh' ? '搜尋全行程景點、餐廳、活動、交通、備註...' : 'Search all spots, meals, activities, notes...'}
+            className="w-full bg-transparent text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden"
+          />
+          {spotSearchQuery && (
+            <button
+              type="button"
+              onClick={() => setSpotSearchQuery('')}
+              className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0"
+              aria-label="清除搜尋"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* 即時搜尋結果浮層 (Search Dropdown / Results Preview) */}
+        {spotSearchQuery.trim() && (
+          <div className="absolute top-full left-0 right-0 mt-1.5 z-30 max-h-80 overflow-y-auto rounded-2xl bg-white dark:bg-[#1c1c1e] border border-slate-200/90 dark:border-white/10 shadow-xl p-2 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
+            <div className="px-2.5 py-1 text-[11px] font-bold text-slate-400 flex items-center justify-between border-b border-slate-100 dark:border-white/5 pb-1.5">
+              <span>找到 {matchingSpots.length} 個相關景點或行程</span>
+              <span className="text-[10px] text-teal-600 dark:text-teal-400 font-semibold">點擊即刻跳轉查看</span>
+            </div>
+
+            {matchingSpots.length === 0 ? (
+              <div className="py-6 text-center text-xs text-slate-400">
+                找不到符合「{spotSearchQuery}」的景點或活動
+              </div>
+            ) : (
+              matchingSpots.map(({ dayNumber, item }) => {
+                const cat = CATEGORY_MAP[item.category] || CATEGORY_MAP.spot;
+                const CatIcon = cat.icon;
+                return (
+                  <button
+                    key={`${dayNumber}-${item.id}`}
+                    type="button"
+                    onClick={() => handleJumpToSpot(dayNumber, item.id)}
+                    className="w-full text-left p-2.5 rounded-xl hover:bg-teal-50/80 dark:hover:bg-teal-950/40 flex items-center justify-between gap-3 transition group"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0 text-slate-600 dark:text-slate-300 group-hover:bg-teal-100 dark:group-hover:bg-teal-900/60 group-hover:text-teal-700 dark:group-hover:text-teal-300 transition">
+                        <CatIcon className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-teal-700 dark:group-hover:text-teal-300">
+                            {item.title}
+                          </span>
+                          <span className="text-[10px] font-mono font-medium text-slate-500 dark:text-slate-400">
+                            Day {dayNumber} · {item.startTime || '未定時間'}
+                          </span>
+                        </div>
+                        {(item.locationName || item.address) && (
+                          <p className="text-[11px] text-slate-400 truncate mt-0.5">
+                            {item.locationName || item.address}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-[11px] font-bold text-teal-600 dark:text-teal-400 shrink-0 opacity-0 group-hover:opacity-100 transition">
+                      跳轉 →
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+
       {/* View Mode Switcher: 每日時序 vs 全程總覽大表 */}
       <div className="flex items-center justify-between gap-2 pb-1">
         <div className="inline-flex p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 text-xs font-semibold">

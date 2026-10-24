@@ -44,6 +44,7 @@ import {
   Wallet,
   Coins,
   TableProperties,
+  Search,
 } from 'lucide-react';
 import { canUploadImages } from '../../utils/userPermissions';
 import { calculateTripSplits, formatSplitsForSharing } from '../../utils/billSplitter';
@@ -148,6 +149,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
   const [newCompanionName, setNewCompanionName] = useState('');
   const [showAddCompanionInput, setShowAddCompanionInput] = useState(false);
   const [copiedSplitToast, setCopiedSplitToast] = useState(false);
+  const [expenseSearchQuery, setExpenseSearchQuery] = useState('');
 
   // Split members list
   const splitMembersList = useMemo(() => {
@@ -740,9 +742,27 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
     return trip.expenses.filter((e) => e.date === todayStr || e.date === todayUtcStr).length;
   }, [trip.expenses, todayStr, todayUtcStr]);
 
-  // Filtered expenses list based on date & category
+  // Filtered expenses list based on date, category & search query
   const filteredExpenses = useMemo(() => {
     return trip.expenses.filter((item) => {
+      // Search keyword filter
+      if (expenseSearchQuery.trim()) {
+        const q = expenseSearchQuery.toLowerCase().trim();
+        const titleMatch = (item.title || '').toLowerCase().includes(q);
+        const notesMatch = (item.notes || '').toLowerCase().includes(q);
+        const catMatch = (item.category || '').toLowerCase().includes(q);
+        const catMeta = DEFAULT_CATEGORIES[item.category];
+        const catLabelMatch = (catMeta?.label || '').toLowerCase().includes(q);
+        const payMethodMatch = (item.paymentMethod || '').toLowerCase().includes(q);
+        const payInfo = PAYMENT_LABELS[item.paymentMethod];
+        const payLabelMatch = (payInfo?.zh || '').toLowerCase().includes(q);
+        const paidByMatch = (item.paidBy || '').toLowerCase().includes(q);
+        const amountMatch = String(item.amount).includes(q) || String(item.convertedAmount || '').includes(q);
+        if (!titleMatch && !notesMatch && !catMatch && !catLabelMatch && !payMethodMatch && !payLabelMatch && !paidByMatch && !amountMatch) {
+          return false;
+        }
+      }
+
       // Date filter
       const itemDateStr = (item.date || '').slice(0, 10).replace(/\//g, '-');
       if (selectedDateFilter === 'today') {
@@ -781,12 +801,68 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
       }
       return item.category === selectedCategoryFilter;
     });
-  }, [trip.expenses, selectedDateFilter, selectedCategoryFilter, todayStr, todayUtcStr, trip.startDate, trip.days]);
+  }, [trip.expenses, expenseSearchQuery, selectedDateFilter, selectedCategoryFilter, todayStr, todayUtcStr, trip.startDate, trip.days]);
 
   // Total for currently filtered expenses in base currency
   const filteredTotalInBase = useMemo(() => {
     return filteredExpenses.reduce((sum, item) => sum + getItemConvertedAmount(item), 0);
   }, [filteredExpenses, baseCurrency, trip.customExchangeRates]);
+
+  // Group filtered expenses by date for Apple Wallet style daily cards
+  const groupedDailyExpenses = useMemo(() => {
+    const groups: {
+      date: string;
+      label: string;
+      dayNumber?: number;
+      totalInBase: number;
+      items: ExpenseItem[];
+    }[] = [];
+
+    const map = new Map<string, ExpenseItem[]>();
+    filteredExpenses.forEach((item) => {
+      const d = (item.date || '').slice(0, 10) || 'other';
+      if (!map.has(d)) map.set(d, []);
+      map.get(d)!.push(item);
+    });
+
+    // Sort dates descending (most recent date first)
+    const sortedDates = Array.from(map.keys()).sort((a, b) => b.localeCompare(a));
+
+    sortedDates.forEach((d) => {
+      const items = map.get(d)!;
+      const totalInBase = items.reduce((sum, it) => sum + getItemConvertedAmount(it), 0);
+
+      let label = d;
+      let dayNumber: number | undefined;
+
+      if (d === 'other') {
+        label = '其他 / 未定日期';
+      } else if (trip.startDate && d < trip.startDate.slice(0, 10)) {
+        label = `行前準備 (${d.slice(5).replace('-', '/')})`;
+      } else {
+        const dayIdx = trip.days.findIndex((dp) => (dp.date || '').slice(0, 10) === d);
+        if (dayIdx >= 0) {
+          dayNumber = dayIdx + 1;
+          const weekdayNames = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+          const dateObj = new Date(d);
+          const weekday = !isNaN(dateObj.getTime()) ? weekdayNames[dateObj.getDay()] : '';
+          label = `Day ${dayIdx + 1} · ${d.slice(5).replace('-', '/')} ${weekday}`;
+        } else {
+          label = d.slice(5).replace('-', '/');
+        }
+      }
+
+      groups.push({
+        date: d,
+        label,
+        dayNumber,
+        totalInBase,
+        items,
+      });
+    });
+
+    return groups;
+  }, [filteredExpenses, trip.startDate, trip.days, baseCurrency, trip.customExchangeRates]);
 
   return (
     <div className="space-y-4">
@@ -2220,6 +2296,30 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
           </button>
         </div>
 
+        {/* Instant Search Bar for Expenses */}
+        <div className="relative">
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 focus-within:ring-2 focus-within:ring-teal-500/50 focus-within:border-teal-500 transition">
+            <Search className="w-4 h-4 text-slate-400 shrink-0" />
+            <input
+              type="text"
+              value={expenseSearchQuery}
+              onChange={(e) => setExpenseSearchQuery(e.target.value)}
+              placeholder={lang === 'zh' ? '搜尋品名、店家、付款方式、備註或金額...' : 'Search expense title, payee, method, notes, amount...'}
+              className="w-full bg-transparent text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden"
+            />
+            {expenseSearchQuery && (
+              <button
+                type="button"
+                onClick={() => setExpenseSearchQuery('')}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition shrink-0"
+                aria-label="清除搜尋"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* Filters Section: Date Filter & Category Filter */}
         <div className="space-y-2.5 pb-2 border-b border-slate-100 dark:border-slate-800">
           {/* 1. Date Selector Filter */}
@@ -2407,18 +2507,21 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             })}
           </div>
 
-          {/* Active Filter Summary Bar if filtered */}
-          {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all') && (
+          {/* Active Filter Summary Bar if filtered or searched */}
+          {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all' || expenseSearchQuery.trim()) && (
             <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-teal-50/80 dark:bg-teal-950/40 border border-teal-200/60 dark:border-teal-900/60 text-xs">
               <div className="flex items-center gap-1.5 text-teal-900 dark:text-teal-200 font-medium flex-wrap">
                 <span>正在檢視：</span>
-                <span className="font-bold underline">
-                  {selectedDateFilter === 'today'
-                    ? `今日 (${todayStr})`
-                    : selectedDateFilter !== 'all'
-                    ? selectedDateFilter
-                    : '全部日期'}
-                </span>
+                {expenseSearchQuery.trim() && (
+                  <span className="font-bold underline">
+                    搜尋「{expenseSearchQuery}」
+                  </span>
+                )}
+                {selectedDateFilter !== 'all' && (
+                  <span>
+                    · 日期: {selectedDateFilter === 'today' ? `今日 (${todayStr})` : selectedDateFilter === 'pre' ? '行前準備' : selectedDateFilter === 'cash_only' ? '僅現金' : selectedDateFilter}
+                  </span>
+                )}
                 {selectedCategoryFilter !== 'all' && (
                   <span>
                     · 類別: {selectedCategoryFilter === 'with_receipt' ? '附發票' : (getCategoryMeta(selectedCategoryFilter).label || selectedCategoryFilter)}
@@ -2433,6 +2536,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                 onClick={() => {
                   setSelectedDateFilter('all');
                   setSelectedCategoryFilter('all');
+                  setExpenseSearchQuery('');
                 }}
                 className="text-[11px] font-bold text-teal-700 dark:text-teal-300 hover:underline shrink-0 ml-2"
               >
@@ -2449,23 +2553,28 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             </div>
             <div>
               <p className="font-bold text-sm text-slate-700 dark:text-slate-200">
-                {selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all'
+                {expenseSearchQuery.trim()
+                  ? `找不到符合「${expenseSearchQuery}」的記帳記錄`
+                  : selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all'
                   ? '目前篩選條件下尚無支出記錄'
                   : '尚未有任何記帳支出'}
               </p>
               <p className="text-xs text-slate-400 mt-0.5">
-                {selectedDateFilter !== 'all'
+                {expenseSearchQuery.trim()
+                  ? '可嘗試更換關鍵字，或點擊下方按鈕顯示全部明細'
+                  : selectedDateFilter !== 'all'
                   ? '點擊下方按鈕可為此日期新增支出，或重設檢視全部'
                   : '旅途中隨手記下一筆，即時換算匯率與掌握預算'}
               </p>
             </div>
             <div className="flex items-center justify-center gap-2 pt-1">
-              {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all') && (
+              {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all' || expenseSearchQuery.trim()) && (
                 <button
                   type="button"
                   onClick={() => {
                     setSelectedDateFilter('all');
                     setSelectedCategoryFilter('all');
+                    setExpenseSearchQuery('');
                   }}
                   className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold transition active:scale-95"
                 >
@@ -2488,152 +2597,119 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             </div>
           </div>
         ) : (
-          <div className="divide-y divide-slate-100 dark:divide-slate-800 space-y-1">
-            {filteredExpenses.map((item) => {
-              const catMeta = getCategoryMeta(item.category);
-              const payInfo = PAYMENT_LABELS[item.paymentMethod] || PAYMENT_LABELS.card;
-              const allImages = item.receiptImages && item.receiptImages.length > 0
-                ? item.receiptImages
-                : item.receiptImage
-                ? [item.receiptImage]
-                : [];
-              const convertedEquivalent = getItemConvertedAmount(item);
-              const isDiffCurrency = item.currency !== baseCurrency;
-
-              return (
-                <div
-                  key={item.id}
-                  className="py-3 px-2 sm:px-3 rounded-2xl hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition flex items-start justify-between gap-3 text-xs group"
-                >
-                  <div
-                    className="flex items-start gap-3 min-w-0 flex-1 cursor-pointer"
-                    onClick={() => handleOpenEditExpense(item)}
-                    title={lang === 'zh' ? '點擊編輯修改此筆記帳' : 'Click to edit'}
-                  >
-                    <span className="text-base shrink-0 p-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-800 mt-0.5 group-hover:border-teal-300 dark:group-hover:border-teal-700 transition">
-                      {catMeta.icon}
-                    </span>
-                    <div className="min-w-0 space-y-1 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="font-bold text-slate-900 dark:text-slate-100 text-sm group-hover:text-teal-600 dark:group-hover:text-teal-400 transition">
-                          {item.title}
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-medium">
-                          {catMeta.label}
-                        </span>
-                        {/* Day Tag or Date */}
-                        <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[10px] font-mono">
-                          {item.dayNumber ? `Day ${item.dayNumber}` : '行前'} · {item.date}
-                        </span>
-                        {item.paidBy && trip.isSplitEnabled && (
-                          <span className="px-1.5 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[10px]">
-                            {item.paidBy} 代墊
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Payment & notes */}
-                      <div className="flex items-center gap-2 text-[11px] text-slate-400 flex-wrap">
-                        <span>{payInfo.icon} {payInfo[lang]}</span>
-                        {item.notes && (
-                          <>
-                            <span>•</span>
-                            <span className="text-slate-600 dark:text-slate-300 italic truncate max-w-[200px]">
-                              {item.notes}
-                            </span>
-                          </>
-                        )}
-                      </div>
-
-                      {/* Receipt Image Thumbnails Gallery Preview */}
-                      {allImages.length > 0 && (
-                        <div className="flex items-center gap-1.5 pt-1" onClick={(e) => e.stopPropagation()}>
-                          {allImages.slice(0, 3).map((imgUrl, imgIdx) => (
-                            <img
-                              key={imgIdx}
-                              src={imgUrl}
-                              alt={`Receipt ${imgIdx + 1}`}
-                              onClick={() =>
-                                setViewingReceiptGallery({
-                                  images: allImages,
-                                  currentIndex: imgIdx,
-                                  title: item.title,
-                                  amount: item.amount,
-                                  currency: item.currency,
-                                  expenseId: item.id,
-                                })
-                              }
-                              className="w-9 h-9 object-cover rounded-lg border border-teal-200 dark:border-teal-800 shadow-2xs cursor-pointer hover:opacity-80 transition"
-                            />
-                          ))}
-                          {allImages.length > 3 && (
-                            <button
-                              onClick={() =>
-                                setViewingReceiptGallery({
-                                  images: allImages,
-                                  currentIndex: 0,
-                                  title: item.title,
-                                  amount: item.amount,
-                                  currency: item.currency,
-                                  expenseId: item.id,
-                                })
-                              }
-                              className="w-9 h-9 rounded-lg bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 text-teal-700 dark:text-teal-300 text-[10px] font-bold flex items-center justify-center hover:bg-teal-100 transition"
-                            >
-                              +{allImages.length - 3}
-                            </button>
-                          )}
-                          <span className="text-[10px] text-teal-600 dark:text-teal-400 font-medium ml-1">
-                            {allImages.length} 張發票
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Amounts & Actions */}
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <div className="text-right">
-                      <div className="font-mono font-black text-slate-900 dark:text-white text-sm sm:text-base">
-                        {formatCurrencyAmount(item.amount, item.currency)}
-                      </div>
-                      {isDiffCurrency && (
-                        <div className="text-[10px] text-teal-600 dark:text-teal-400 font-mono font-semibold">
-                          ≈ {formatCurrencyAmount(convertedEquivalent, baseCurrency)}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-1.5 mt-1.5">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenEditExpense(item);
-                        }}
-                        className="px-2 py-1 rounded-lg text-slate-500 hover:text-teal-700 dark:hover:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-[11px] font-semibold flex items-center gap-1 transition border border-slate-200/80 dark:border-slate-800"
-                        title={lang === 'zh' ? '編輯修改此筆記帳' : 'Edit expense'}
-                      >
-                        <Pencil className="w-3 h-3" />
-                        <span>編輯</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteExpense(item.id);
-                        }}
-                        className="px-2 py-1 rounded-lg text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 text-[11px] font-semibold flex items-center gap-1 transition border border-slate-200/80 dark:border-slate-800"
-                        title={lang === 'zh' ? '刪除此筆支出' : 'Delete expense'}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        <span>刪除</span>
-                      </button>
-                    </div>
-                  </div>
+          <div className="space-y-4 pt-1">
+            {groupedDailyExpenses.map((group) => (
+              <div key={group.date} className="space-y-1.5">
+                {/* Apple Wallet Style Date Group Header */}
+                <div className="flex items-center justify-between px-1 text-xs">
+                  <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <span>{group.label}</span>
+                    <span className="text-[11px] font-normal text-slate-400">({group.items.length} 筆)</span>
+                  </span>
+                  <span className="font-mono text-slate-500 dark:text-slate-400 font-semibold tabular-nums text-[11px]">
+                    小計 {formatCurrencyAmount(group.totalInBase, baseCurrency)}
+                  </span>
                 </div>
-              );
-            })}
+
+                {/* Apple Wallet Grouped Inset Card */}
+                <div className="rounded-2xl bg-white dark:bg-[#1c1c1e] border border-slate-200/80 dark:border-white/10 divide-y divide-slate-100 dark:divide-white/5 shadow-2xs overflow-hidden">
+                  {group.items.map((item) => {
+                    const catMeta = getCategoryMeta(item.category);
+                    const payInfo = PAYMENT_LABELS[item.paymentMethod] || PAYMENT_LABELS.card;
+                    const allImages = item.receiptImages && item.receiptImages.length > 0
+                      ? item.receiptImages
+                      : item.receiptImage
+                      ? [item.receiptImage]
+                      : [];
+                    const convertedEquivalent = getItemConvertedAmount(item);
+                    const isDiffCurrency = item.currency !== baseCurrency;
+
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => handleOpenEditExpense(item)}
+                        className="p-3 sm:px-4 hover:bg-slate-50/80 dark:hover:bg-white/5 transition flex items-center justify-between gap-3 cursor-pointer group"
+                      >
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 text-lg group-hover:scale-105 transition-transform">
+                            {catMeta.icon}
+                          </div>
+
+                          <div className="min-w-0 space-y-0.5 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm truncate group-hover:text-teal-600 dark:group-hover:text-teal-400 transition">
+                                {item.title}
+                              </span>
+                              {allImages.length > 0 && (
+                                <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold flex items-center gap-0.5 shrink-0">
+                                  <Receipt className="w-3 h-3" />
+                                  <span>{allImages.length}</span>
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2 text-[11px] text-slate-400 flex-wrap">
+                              <span>{catMeta.label}</span>
+                              <span>·</span>
+                              <span>{payInfo.icon} {payInfo[lang]}</span>
+                              {item.paidBy && trip.isSplitEnabled && (
+                                <>
+                                  <span>·</span>
+                                  <span className="text-indigo-600 dark:text-indigo-400 font-medium">
+                                    {item.paidBy} 代墊
+                                  </span>
+                                </>
+                              )}
+                              {item.notes && (
+                                <>
+                                  <span>·</span>
+                                  <span className="italic text-slate-500 dark:text-slate-400 truncate max-w-[140px] sm:max-w-[200px]">
+                                    {item.notes}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right Amount Display & Action Buttons */}
+                        <div className="flex items-center gap-3 shrink-0">
+                          <div className="text-right font-mono">
+                            <div className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-slate-100 tabular-nums">
+                              {formatCurrencyAmount(convertedEquivalent, baseCurrency)}
+                            </div>
+                            {isDiffCurrency && (
+                              <div className="text-[10px] text-teal-600 dark:text-teal-400 tabular-nums font-medium">
+                                ≈ {formatCurrencyAmount(item.amount, item.currency)}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-1 opacity-70 group-hover:opacity-100 transition" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditExpense(item)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition"
+                              title="編輯"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteExpense(item.id)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                              title="刪除"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
