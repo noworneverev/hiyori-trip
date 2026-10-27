@@ -17,6 +17,7 @@ import {
   ChevronUp,
   Image as ImageIcon,
   User,
+  ExternalLink,
 } from 'lucide-react';
 
 interface TripEditModalProps {
@@ -57,6 +58,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onCl
   const [isSoloTrip, setIsSoloTrip] = useState<boolean>(trip?.isSoloTrip ?? false);
   const [currency, setCurrency] = useState(trip?.currency || 'JPY');
   const [coverGradient, setCoverGradient] = useState(trip?.coverGradient || GRADIENTS[0].class);
+  const [googlePhotosAlbumUrl, setGooglePhotosAlbumUrl] = useState(trip?.googlePhotosAlbumUrl || '');
 
   // 2. Folded Advanced Options (AI / Paste / Preset)
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -120,6 +122,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onCl
         coverGradient,
         isSoloTrip,
         isSplitEnabled: isSoloTrip ? false : trip.isSplitEnabled,
+        googlePhotosAlbumUrl: googlePhotosAlbumUrl.trim() || undefined,
         updatedAt: Date.now(),
       });
       onClose();
@@ -153,6 +156,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onCl
       coverGradient,
       isSoloTrip,
       isSplitEnabled: !isSoloTrip,
+      googlePhotosAlbumUrl: googlePhotosAlbumUrl.trim() || undefined,
       notes: '',
       days: dayList,
       todos: [],
@@ -430,6 +434,37 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onCl
                   }`}
                 />
               </button>
+            </div>
+
+            {/* Google Photos Album Link */}
+            <div className="p-3.5 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-200/60 dark:border-teal-800/40 space-y-1.5">
+              <label className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-teal-500 inline-block" />
+                  Google 相簿整趟旅程連結 (選填)
+                </span>
+                {googlePhotosAlbumUrl.trim() && (
+                  <a
+                    href={googlePhotosAlbumUrl.trim()}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-0.5"
+                  >
+                    <span>測試開啟</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </label>
+              <input
+                type="url"
+                placeholder="例如：https://photos.app.goo.gl/... 整趟共用相簿"
+                value={googlePhotosAlbumUrl}
+                onChange={(e) => setGooglePhotosAlbumUrl(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+              />
+              <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                貼上 Google 相簿分享連結，隨行夥伴皆可一鍵檢視 4K / 原畫質雲端相簿。
+              </p>
             </div>
 
             {/* Gradient Theme Picker */}

@@ -19,6 +19,7 @@ export interface ItineraryItem {
   memoryPhotos?: string[];
   memoryNotes?: string;
   memoryMood?: string;
+  googlePhotosUrl?: string;
 }
 
 export interface DayPlan {
@@ -73,6 +74,7 @@ export interface TripMemoryItem {
   date?: string;
   mood?: string;
   location?: string;
+  googlePhotosUrl?: string;
   createdAt: number;
 }
 
@@ -140,6 +142,7 @@ export interface Trip {
   initialCashAmount?: number;
   initialCashCurrency?: string;
   memories?: TripMemoryItem[];
+  googlePhotosAlbumUrl?: string;
   createdAt: number;
   updatedAt: number;
 }

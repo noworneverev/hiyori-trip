@@ -1,13 +1,13 @@
 /**
  * Client-side image utility for receipts, travel spot check-in photos, and attachments.
- * Aggressively compresses camera photos or gallery images down to ~20-40KB
- * ensuring lightning-fast loading, smooth mobile performance, and Firestore 1MB document safety.
+ * Balances high visual clarity (960px Retina crispness) with smart optimization (~45-65KB)
+ * ensuring beautiful photo viewing, smooth mobile performance, and Firestore 1MB document safety.
  */
 
 export const compressImageFile = async (
   file: File,
-  maxWidth = 640,
-  quality = 0.55
+  maxWidth = 960,
+  quality = 0.72
 ): Promise<string> => {
   // Helper to draw and get dataUrl
   const renderToJpeg = (
@@ -36,19 +36,25 @@ export const compressImageFile = async (
     const ctx = canvas.getContext('2d');
     if (!ctx) return '';
 
+    // High quality bicubic image smoothing
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
     ctx.drawImage(source, 0, 0, width, height);
     let dataUrl = canvas.toDataURL('image/jpeg', q);
 
-    // Safeguard: if compressed output is still > 60KB (base64 length > ~80000), downscale further
-    if (dataUrl.length > 80000) {
-      const secondWidth = Math.round(width * 0.75);
-      const secondHeight = Math.round(height * 0.75);
+    // Safeguard: if compressed output is unusually large (> 95KB, base64 length > ~130000), fine-tune
+    if (dataUrl.length > 130000) {
+      const secondWidth = Math.round(width * 0.85);
+      const secondHeight = Math.round(height * 0.85);
       canvas.width = secondWidth;
       canvas.height = secondHeight;
       const ctx2 = canvas.getContext('2d');
       if (ctx2) {
+        ctx2.imageSmoothingEnabled = true;
+        ctx2.imageSmoothingQuality = 'high';
         ctx2.drawImage(source, 0, 0, secondWidth, secondHeight);
-        dataUrl = canvas.toDataURL('image/jpeg', Math.max(0.4, q - 0.15));
+        dataUrl = canvas.toDataURL('image/jpeg', Math.max(0.6, q - 0.1));
       }
     }
 

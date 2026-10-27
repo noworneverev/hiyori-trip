@@ -25,6 +25,7 @@ import {
   Check,
   Route,
   AlertCircle,
+  ExternalLink,
 } from 'lucide-react';
 
 interface TripMemoriesViewProps {
@@ -70,6 +71,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const [customDate, setCustomDate] = useState<string>('');
   const [uploadCaption, setUploadCaption] = useState('');
   const [uploadMood, setUploadMood] = useState('✨');
+  const [uploadGooglePhotosUrl, setUploadGooglePhotosUrl] = useState('');
   const [uploadImagePreviews, setUploadImagePreviews] = useState<string[]>([]);
   const [uploadLimitWarning, setUploadLimitWarning] = useState<string | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
@@ -80,10 +82,14 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     if (initialSpotId) {
       setUploadSpotId(initialSpotId);
       setIsCustomSpot(false);
+      const matched = trip.days.flatMap((d) => d.items).find((it) => it.id === initialSpotId);
+      if (matched?.googlePhotosUrl) {
+        setUploadGooglePhotosUrl(matched.googlePhotosUrl);
+      }
       setShowUploadModal(true);
       setViewMode('itinerary');
     }
-  }, [initialSpotId]);
+  }, [initialSpotId, trip.days]);
 
   // Collect all spots from the trip for the dropdown
   const allSpots = useMemo(() => {
@@ -98,7 +104,22 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
   // Aggregate memories: check both trip.memories and any spot.memoryPhotos
   const allMemories = useMemo(() => {
-    const items: TripMemoryItem[] = [...(trip.memories || [])];
+    const spotMap = new Map<string, ItineraryItem>();
+    (trip.days || []).forEach((day) => {
+      (day.items || []).forEach((item) => {
+        spotMap.set(item.id, item);
+      });
+    });
+
+    const items: TripMemoryItem[] = (trip.memories || []).map((m) => {
+      if (!m.googlePhotosUrl && m.spotId && spotMap.has(m.spotId)) {
+        return {
+          ...m,
+          googlePhotosUrl: spotMap.get(m.spotId)?.googlePhotosUrl,
+        };
+      }
+      return m;
+    });
 
     // Also pull from spot items if any exist
     (trip.days || []).forEach((day) => {
@@ -118,6 +139,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 date: day.date,
                 mood: item.memoryMood || '✨',
                 location: item.locationName || item.title,
+                googlePhotosUrl: item.googlePhotosUrl,
                 createdAt: trip.createdAt + pIdx * 1000,
               });
             }
@@ -260,8 +282,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
       const compressedList: string[] = [];
       for (const file of filesToProcess) {
-        // High quality smart compression (640px max, 0.55 quality -> ~20-35KB each, safe for Firestore 1MB limit)
-        const compressed = await compressImageFile(file, 640, 0.55);
+        // High quality smart compression (960px max, 0.72 quality -> ~45-65KB each, crisp preview + safe for Firestore 1MB limit)
+        const compressed = await compressImageFile(file, 960, 0.72);
         compressedList.push(compressed);
       }
 
@@ -343,6 +365,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       date: chosenDate,
       mood: uploadMood,
       location: finalLocation,
+      googlePhotosUrl: uploadGooglePhotosUrl.trim() || undefined,
       createdAt: now + idx * 50,
     }));
 
@@ -362,6 +385,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               memoryPhotos: merged,
               memoryNotes: uploadCaption.trim() || item.memoryNotes,
               memoryMood: uploadMood,
+              googlePhotosUrl: uploadGooglePhotosUrl.trim() || item.googlePhotosUrl,
             };
           }
           return item;
@@ -381,6 +405,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     setUploadLimitWarning(null);
     setUploadCaption('');
     setUploadSpotId('');
+    setUploadGooglePhotosUrl('');
     setIsCustomSpot(false);
     setCustomLocationName('');
     setShowUploadModal(false);
@@ -552,6 +577,20 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 <Plus className="w-4 h-4" />
                 <span>{lang === 'zh' ? '上傳自由隨拍' : 'Add Photo'}</span>
               </button>
+            )}
+
+            {/* Google Photos Whole-Trip Album Link */}
+            {trip.googlePhotosAlbumUrl && (
+              <a
+                href={trip.googlePhotosAlbumUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3.5 py-2 rounded-xl bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/60 dark:hover:bg-teal-900/80 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition active:scale-95"
+                title={lang === 'zh' ? '開啟此行程之 Google 相簿完整相簿（原始高畫質）' : 'Open Google Photos full album'}
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                <span>{lang === 'zh' ? 'Google 相簿原圖' : 'Google Photos'}</span>
+              </a>
             )}
           </div>
         </div>
@@ -876,22 +915,38 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                               </p>
                             </div>
                             <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
-                              {isAuthorizedUploader ? (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setUploadSpotId(spot.id);
-                                    setIsCustomSpot(false);
-                                    setShowUploadModal(true);
-                                  }}
-                                  className="text-teal-600 font-bold hover:underline flex items-center gap-1"
-                                >
-                                  <Plus className="w-3 h-3" />
-                                  <span>管理相片</span>
-                                </button>
-                              ) : (
-                                <span className="text-slate-400 text-[10px]">打卡相簿</span>
-                              )}
+                              <div className="flex items-center gap-2">
+                                {isAuthorizedUploader ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setUploadSpotId(spot.id);
+                                      setIsCustomSpot(false);
+                                      setUploadGooglePhotosUrl(spot.googlePhotosUrl || firstPhoto.googlePhotosUrl || '');
+                                      setShowUploadModal(true);
+                                    }}
+                                    className="text-teal-600 font-bold hover:underline flex items-center gap-1"
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                    <span>管理相片</span>
+                                  </button>
+                                ) : (
+                                  <span className="text-slate-400 text-[10px]">打卡相簿</span>
+                                )}
+                                {(spot.googlePhotosUrl || firstPhoto.googlePhotosUrl) && (
+                                  <a
+                                    href={spot.googlePhotosUrl || firstPhoto.googlePhotosUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="text-teal-600 dark:text-teal-400 hover:text-teal-700 font-bold hover:underline flex items-center gap-1 text-[10px] bg-teal-50 dark:bg-teal-950/60 px-2 py-0.5 rounded-md border border-teal-200/50 dark:border-teal-800/50"
+                                    title="開啟 Google 相簿原圖"
+                                  >
+                                    <ExternalLink className="w-2.5 h-2.5" />
+                                    <span>原圖</span>
+                                  </a>
+                                )}
+                              </div>
                               {isAuthorizedUploader && (
                                 <button
                                   type="button"
@@ -915,6 +970,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                           if (isAuthorizedUploader) {
                             setUploadSpotId(spot.id);
                             setIsCustomSpot(false);
+                            setUploadGooglePhotosUrl(spot.googlePhotosUrl || '');
                             setShowUploadModal(true);
                           }
                         }}
@@ -1533,6 +1589,36 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 />
               </div>
 
+              {/* Google Photos Original Resolution Link */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-700 dark:text-slate-300">
+                    Google 相簿連結 (可選，供日後檢視 4K / 原始照片)
+                  </label>
+                  {uploadGooglePhotosUrl && (
+                    <a
+                      href={uploadGooglePhotosUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1 font-semibold"
+                    >
+                      <span>開啟測試</span>
+                      <ExternalLink className="w-2.5 h-2.5" />
+                    </a>
+                  )}
+                </div>
+                <input
+                  type="url"
+                  value={uploadGooglePhotosUrl}
+                  onChange={(e) => setUploadGooglePhotosUrl(e.target.value)}
+                  placeholder="貼上 Google 相簿分享連結 (如 https://photos.app.goo.gl/...)"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  綁定後可在大圖燈箱中一鍵直達 Google 相簿檢視原檔
+                </p>
+              </div>
+
               {/* Submit Button */}
               <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
                 <button
@@ -1572,6 +1658,19 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           >
             {/* Top Close Button & Action Bar */}
             <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+              {(lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl) && (
+                <a
+                  href={lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-full bg-black/75 hover:bg-teal-600 text-white text-xs font-bold transition flex items-center gap-1.5 border border-white/20 shadow-md backdrop-blur-md active:scale-95"
+                  title="開啟 Google 相簿檢視 4K / 原始超高畫質相片"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-teal-300" />
+                  <span className="hidden sm:inline">開啟 Google 相簿原圖</span>
+                  <span className="sm:hidden">原圖</span>
+                </a>
+              )}
               {isAuthorizedUploader && (
                 <button
                   type="button"
@@ -1678,13 +1777,27 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={() => setLightboxMemory(null)}
-                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold shrink-0 transition"
-              >
-                關閉
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {(lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl) && (
+                  <a
+                    href={lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition active:scale-95 shadow-xs"
+                    title="開啟 Google 相簿檢視原始高畫質相片"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Google 相簿原圖</span>
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setLightboxMemory(null)}
+                  className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold shrink-0 transition"
+                >
+                  關閉
+                </button>
+              </div>
             </div>
           </div>
         </div>

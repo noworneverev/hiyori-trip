@@ -41,6 +41,7 @@ import {
   Route,
   Search,
   X,
+  ExternalLink,
 } from 'lucide-react';
 
 interface TimelineTabProps {
@@ -617,32 +618,50 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                         </p>
                       )}
 
-                      {/* Spot Memory Photos Thumbnail Badges */}
-                      {item.memoryPhotos && item.memoryPhotos.length > 0 && (
-                        <div
-                          onClick={(e) => {
-                            if (onOpenMemories) {
-                              e.stopPropagation();
-                              onOpenMemories(item.id);
-                            }
-                          }}
-                          className={`flex items-center gap-1.5 pt-1 overflow-x-auto pb-0.5 ${
-                            onOpenMemories ? 'cursor-pointer group/mem' : ''
-                          }`}
-                          title={onOpenMemories ? (lang === 'zh' ? '點擊前往相簿查看此景點回憶照' : 'View in photo album') : undefined}
-                        >
-                          {item.memoryPhotos.map((photo, pIdx) => (
-                            <img
-                              key={pIdx}
-                              src={photo}
-                              alt="Spot memory"
-                              className="w-10 h-10 rounded-lg object-cover border border-rose-200 dark:border-rose-900/60 shrink-0 group-hover/mem:scale-105 transition"
-                            />
-                          ))}
-                          <span className="text-[10px] text-rose-600 dark:text-rose-400 font-bold shrink-0 flex items-center gap-1 bg-rose-50 dark:bg-rose-950/60 px-2 py-1 rounded-lg">
-                            <Camera className="w-3 h-3" />
-                            <span>{item.memoryPhotos.length} 張回憶照 {onOpenMemories && '→'}</span>
-                          </span>
+                      {/* Spot Memory Photos Thumbnail Badges & Google Photos Original Link */}
+                      {((item.memoryPhotos && item.memoryPhotos.length > 0) || item.googlePhotosUrl) && (
+                        <div className="flex items-center gap-2 pt-1 flex-wrap">
+                          {item.memoryPhotos && item.memoryPhotos.length > 0 && (
+                            <div
+                              onClick={(e) => {
+                                if (onOpenMemories) {
+                                  e.stopPropagation();
+                                  onOpenMemories(item.id);
+                                }
+                              }}
+                              className={`flex items-center gap-1.5 overflow-x-auto pb-0.5 ${
+                                onOpenMemories ? 'cursor-pointer group/mem' : ''
+                              }`}
+                              title={onOpenMemories ? (lang === 'zh' ? '點擊前往相簿查看此景點回憶照' : 'View in photo album') : undefined}
+                            >
+                              {item.memoryPhotos.map((photo, pIdx) => (
+                                <img
+                                  key={pIdx}
+                                  src={photo}
+                                  alt="Spot memory"
+                                  className="w-10 h-10 rounded-lg object-cover border border-rose-200 dark:border-rose-900/60 shrink-0 group-hover/mem:scale-105 transition"
+                                />
+                              ))}
+                              <span className="text-[10px] text-rose-600 dark:text-rose-400 font-bold shrink-0 flex items-center gap-1 bg-rose-50 dark:bg-rose-950/60 px-2 py-1 rounded-lg">
+                                <Camera className="w-3 h-3" />
+                                <span>{item.memoryPhotos.length} 張回憶照 {onOpenMemories && '→'}</span>
+                              </span>
+                            </div>
+                          )}
+
+                          {item.googlePhotosUrl && (
+                            <a
+                              href={item.googlePhotosUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 text-[11px] font-bold transition shadow-2xs"
+                              title={lang === 'zh' ? '前往 Google 相簿檢視原始高畫質相片' : 'View original in Google Photos'}
+                            >
+                              <ExternalLink className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                              <span>{lang === 'zh' ? 'Google 相簿原圖' : 'Google Photos'}</span>
+                            </a>
+                          )}
                         </div>
                       )}
 

@@ -649,6 +649,7 @@ export default function App() {
           mood: sanitizedItemData.memoryMood || updatedMemories[existingMemIndex].mood || '✨',
           location: sanitizedItemData.locationName || sanitizedItemData.title,
           caption: sanitizedItemData.notes || sanitizedItemData.title,
+          googlePhotosUrl: sanitizedItemData.googlePhotosUrl || updatedMemories[existingMemIndex].googlePhotosUrl,
         };
       } else {
         updatedMemories.push({
@@ -661,6 +662,7 @@ export default function App() {
           date: targetDate,
           mood: sanitizedItemData.memoryMood || '✨',
           location: sanitizedItemData.locationName || sanitizedItemData.title,
+          googlePhotosUrl: sanitizedItemData.googlePhotosUrl,
           createdAt: Date.now() + pIdx * 10,
         });
       }

@@ -33,6 +33,7 @@ import {
   Map,
   Sparkle,
   Footprints,
+  ExternalLink,
 } from 'lucide-react';
 
 interface ItemEditModalProps {
@@ -90,6 +91,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     item?.notes ||
     item?.bookingCode ||
     item?.cost ||
+    item?.googlePhotosUrl ||
     (item?.memoryPhotos && item.memoryPhotos.length > 0)
   );
   const [showMoreDetails, setShowMoreDetails] = useState(hasExistingExtraDetails);
@@ -108,6 +110,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   const [costPaid, setCostPaid] = useState(item?.costPaid || false);
   const [memoryPhotos, setMemoryPhotos] = useState<string[]>(item?.memoryPhotos || []);
   const [memoryMood, setMemoryMood] = useState<string>(item?.memoryMood || '✨');
+  const [googlePhotosUrl, setGooglePhotosUrl] = useState<string>(item?.googlePhotosUrl || '');
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
@@ -136,7 +139,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
       const compressed: string[] = [];
       const countToProcess = Math.min(files.length, remainingSlots);
       for (let i = 0; i < countToProcess; i++) {
-        const url = await compressImageFile(files[i], 640, 0.55);
+        const url = await compressImageFile(files[i], 960, 0.72);
         compressed.push(url);
       }
       setMemoryPhotos((prev) => [...prev, ...compressed].slice(0, 3));
@@ -224,6 +227,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
         costPaid,
         memoryPhotos: memoryPhotos.length > 0 ? memoryPhotos : undefined,
         memoryMood: memoryMood || '✨',
+        googlePhotosUrl: googlePhotosUrl.trim() || undefined,
         completed: item?.completed || false,
       },
       item?.id
@@ -750,6 +754,37 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                       ))}
                     </div>
                   )}
+
+                  {/* Google Photos Original Resolution Link */}
+                  <div className="pt-2.5 border-t border-rose-200/70 dark:border-rose-900/40 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <ExternalLink className="w-3 h-3 text-rose-600" />
+                        <span>Google 相簿連結 (檢視 4K / 原始照片)</span>
+                      </label>
+                      {googlePhotosUrl && (
+                        <a
+                          href={googlePhotosUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1 font-semibold"
+                        >
+                          <span>開啟測試</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      )}
+                    </div>
+                    <input
+                      type="url"
+                      value={googlePhotosUrl}
+                      onChange={(e) => setGooglePhotosUrl(e.target.value)}
+                      placeholder="貼上 Google 相簿分享連結 (如 https://photos.app.goo.gl/...)"
+                      className="w-full px-3 py-1.5 rounded-xl border border-rose-200/90 dark:border-rose-900/60 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs outline-none focus:ring-2 focus:ring-rose-400 placeholder:text-slate-400"
+                    />
+                    <p className="text-[10px] text-slate-400">
+                      填入後可於大圖燈箱一鍵開啟 Google 相簿無損原圖
+                    </p>
+                  </div>
                 </div>
               </div>
             )}
