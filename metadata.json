@@ -1,0 +1,6 @@
+{
+  "name": "日和手帳 Hiyori - 隨身旅遊手帖與行程規劃",
+  "description": "日和手帳 Hiyori：自由行隨身旅行手帖。支援行程總覽大表、路線地圖導覽、隨行即時天氣、多幣別即時換算記帳、發票拍照管理、行前待辦與離線 PDF 隨行手冊。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

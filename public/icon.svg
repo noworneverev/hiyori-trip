@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradient: Serene Japanese Dawn Deep Slate & Teal -->
+    <linearGradient id="hiyori-sky" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0b1e2e" />
+      <stop offset="55%" stop-color="#11353e" />
+      <stop offset="100%" stop-color="#0e2a2c" />
+    </linearGradient>
+
+    <!-- Rising Sun Gradient: Hiyori Warm Dawn Solar Glow (日和之陽) -->
+    <linearGradient id="hiyori-sun" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#e11d48" />
+      <stop offset="40%" stop-color="#f97316" />
+      <stop offset="85%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#fef08a" />
+    </linearGradient>
+
+    <!-- Mountain Horizon Gradient -->
+    <linearGradient id="hiyori-mountain-back" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#164e63" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#083344" />
+    </linearGradient>
+
+    <linearGradient id="hiyori-mountain-fore" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0f766e" />
+      <stop offset="100%" stop-color="#042f2e" />
+    </linearGradient>
+
+    <!-- Winding Journey Trail Gradient (旅跡) -->
+    <linearGradient id="hiyori-trail" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95" />
+      <stop offset="60%" stop-color="#fed7aa" stop-opacity="0.85" />
+      <stop offset="100%" stop-color="#fde047" stop-opacity="0.3" />
+    </linearGradient>
+
+    <!-- Sun Glow Filter -->
+    <filter id="sun-glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- iOS-grade Squircle Canvas -->
+  <rect width="512" height="512" rx="116" fill="url(#hiyori-sky)" />
+
+  <!-- Subtle Morning Atmosphere Aura -->
+  <circle cx="256" cy="224" r="160" fill="#f97316" opacity="0.12" filter="url(#sun-glow)" />
+  <circle cx="256" cy="224" r="110" fill="#fbbf24" opacity="0.18" filter="url(#sun-glow)" />
+
+  <!-- The Rising Sun of Hiyori (旅行日和の朝陽) -->
+  <circle cx="256" cy="224" r="76" fill="url(#hiyori-sun)" filter="url(#sun-glow)" />
+
+  <!-- Distant Mountain Horizon (山並みの尾根) -->
+  <path d="M 40 400 Q 150 290 256 310 T 472 400 L 472 512 L 40 512 Z" fill="url(#hiyori-mountain-back)" />
+
+  <!-- Near Ridge / Rolling Foothills (穏やかな丘陵) -->
+  <path d="M 40 430 Q 180 340 320 370 Q 400 385 472 440 L 472 512 L 40 512 Z" fill="url(#hiyori-mountain-fore)" />
+
+  <!-- Serene Journey Pathway / 旅の小径 (Trail connecting traveler to the horizon) -->
+  <path d="M 256 310 C 250 350, 290 390, 240 440 C 205 475, 175 490, 155 512 L 210 512 C 235 490, 275 465, 295 435 C 335 385, 280 345, 256 310 Z" fill="url(#hiyori-trail)" />
+
+  <!-- Traveler Morning Star / 旅の晨星 (Zen Spark of Wandering) -->
+  <g transform="translate(372, 116)" fill="#ffffff" opacity="0.9">
+    <path d="M 0 -14 Q 0 0 14 0 Q 0 0 0 14 Q 0 0 -14 0 Q 0 0 0 -14 Z" />
+    <circle cx="0" cy="0" r="2.5" fill="#fef08a" />
+  </g>
+  <circle cx="120" cy="148" r="3" fill="#ffffff" opacity="0.65" />
+</svg>
