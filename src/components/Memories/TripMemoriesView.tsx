@@ -26,6 +26,7 @@ import {
   Route,
   AlertCircle,
   ExternalLink,
+  Edit2,
 } from 'lucide-react';
 
 interface TripMemoriesViewProps {
@@ -144,6 +145,24 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               });
             }
           });
+        } else if (item.googlePhotosUrl) {
+          // Spot has googlePhotosUrl without local photos
+          const exists = items.some((m) => m.spotId === item.id);
+          if (!exists) {
+            items.push({
+              id: `spot-mem-gphoto-${item.id}`,
+              imageUrl: item.googlePhotosUrl,
+              caption: item.memoryNotes || item.title,
+              spotId: item.id,
+              spotTitle: item.title,
+              dayNumber: day.dayNumber,
+              date: day.date,
+              mood: item.memoryMood || '✨',
+              location: item.locationName || item.title,
+              googlePhotosUrl: item.googlePhotosUrl,
+              createdAt: trip.createdAt + 1000,
+            });
+          }
         }
       });
     });
@@ -218,21 +237,63 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     }
   };
 
-  // Keyboard navigation for Lightbox
+  // Lightbox inline edit states & high-res error handling
+  const [isEditingLightboxUrl, setIsEditingLightboxUrl] = useState(false);
+  const [lightboxEditUrl, setLightboxEditUrl] = useState('');
+  const [lightboxHighResFailed, setLightboxHighResFailed] = useState(false);
+
   useEffect(() => {
+    setIsEditingLightboxUrl(false);
+    setLightboxEditUrl(lightboxMemory?.googlePhotosUrl || '');
+    setLightboxHighResFailed(false);
+  }, [lightboxMemory?.id]);
+
+  const handleSaveLightboxGoogleUrl = () => {
     if (!lightboxMemory) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') {
-        handlePrevLightbox();
-      } else if (e.key === 'ArrowRight') {
-        handleNextLightbox();
-      } else if (e.key === 'Escape') {
-        setLightboxMemory(null);
-      }
+    const finalUrl = lightboxEditUrl.trim();
+
+    // 1. Update current lightboxMemory in-memory
+    const updatedMem = {
+      ...lightboxMemory,
+      googlePhotosUrl: finalUrl || undefined,
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [lightboxMemory, currentLightboxIndex, lightboxPlaylist]);
+    setLightboxMemory(updatedMem);
+
+    // 2. Update trip.memories
+    const updatedMemories = (trip.memories || []).map((m) =>
+      m.id === lightboxMemory.id || (lightboxMemory.spotId && m.spotId === lightboxMemory.spotId)
+        ? { ...m, googlePhotosUrl: finalUrl || undefined }
+        : m
+    );
+
+    // 3. Update spot in trip.days if spotId is present
+    let updatedDays = trip.days;
+    if (lightboxMemory.spotId) {
+      updatedDays = trip.days.map((d) => ({
+        ...d,
+        items: d.items.map((item) => {
+          if (item.id === lightboxMemory.spotId) {
+            return {
+              ...item,
+              googlePhotosUrl: finalUrl || undefined,
+            };
+          }
+          return item;
+        }),
+      }));
+    }
+
+    onUpdateTrip({
+      ...trip,
+      days: updatedDays,
+      memories: updatedMemories,
+      updatedAt: Date.now(),
+    });
+
+    setIsEditingLightboxUrl(false);
+    setSaveSuccessToast(true);
+    setTimeout(() => setSaveSuccessToast(false), 2500);
+  };
 
   // Touch swipe within Lightbox
   const lightboxTouchStartX = useRef<number | null>(null);
@@ -330,10 +391,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     });
   };
 
-  // Submit and save new memories
+  // Submit and save new memories or update Google Photos link
   const handleSaveMemory = (e: React.FormEvent) => {
     e.preventDefault();
-    if (uploadImagePreviews.length === 0) return;
+    const hasNewPhotos = uploadImagePreviews.length > 0;
+    const hasGoogleUrl = Boolean(uploadGooglePhotosUrl.trim());
+    if (!hasNewPhotos && !hasGoogleUrl && !uploadCaption.trim()) return;
 
     const isCustom = isCustomSpot || !uploadSpotId;
     const matchedSpotObj = !isCustom ? allSpots.find((s) => s.spot.id === uploadSpotId) : null;
@@ -355,23 +418,71 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       : (matchedSpotObj?.spot.locationName || matchedSpotObj?.spot.title || trip.destination);
 
     const now = Date.now();
-    const newMemories: TripMemoryItem[] = uploadImagePreviews.map((imgUrl, idx) => ({
-      id: `mem-${now}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
-      imageUrl: imgUrl,
-      caption: uploadCaption.trim() || finalTitle,
-      spotId: !isCustom ? uploadSpotId : undefined,
-      spotTitle: finalTitle,
-      dayNumber: chosenDayNum,
-      date: chosenDate,
-      mood: uploadMood,
-      location: finalLocation,
-      googlePhotosUrl: uploadGooglePhotosUrl.trim() || undefined,
-      createdAt: now + idx * 50,
-    }));
+    let updatedMemories = [...(trip.memories || [])];
 
-    const updatedMemories = [...newMemories, ...(trip.memories || [])];
+    if (hasNewPhotos) {
+      const newMemories: TripMemoryItem[] = uploadImagePreviews.map((imgUrl, idx) => ({
+        id: `mem-${now}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+        imageUrl: imgUrl,
+        caption: uploadCaption.trim() || finalTitle,
+        spotId: !isCustom ? uploadSpotId : undefined,
+        spotTitle: finalTitle,
+        dayNumber: chosenDayNum,
+        date: chosenDate,
+        mood: uploadMood,
+        location: finalLocation,
+        googlePhotosUrl: uploadGooglePhotosUrl.trim() || undefined,
+        createdAt: now + idx * 50,
+      }));
+      updatedMemories = [...newMemories, ...updatedMemories];
+    } else if (hasGoogleUrl) {
+      // User only updated/added googlePhotosUrl without uploading files
+      if (!isCustom && uploadSpotId) {
+        // Check if memories already exist for this spot
+        const spotMems = updatedMemories.filter((m) => m.spotId === uploadSpotId);
+        if (spotMems.length > 0) {
+          updatedMemories = updatedMemories.map((m) =>
+            m.spotId === uploadSpotId
+              ? {
+                  ...m,
+                  googlePhotosUrl: uploadGooglePhotosUrl.trim() || undefined,
+                  caption: uploadCaption.trim() || m.caption,
+                  mood: uploadMood || m.mood,
+                }
+              : m
+          );
+        } else {
+          updatedMemories.unshift({
+            id: `mem-gphoto-${now}`,
+            imageUrl: uploadGooglePhotosUrl.trim(),
+            caption: uploadCaption.trim() || finalTitle,
+            spotId: uploadSpotId,
+            spotTitle: finalTitle,
+            dayNumber: chosenDayNum,
+            date: chosenDate,
+            mood: uploadMood,
+            location: finalLocation,
+            googlePhotosUrl: uploadGooglePhotosUrl.trim(),
+            createdAt: now,
+          });
+        }
+      } else {
+        // Custom snap with Google Photos URL
+        updatedMemories.unshift({
+          id: `mem-custom-gphoto-${now}`,
+          imageUrl: uploadGooglePhotosUrl.trim(),
+          caption: uploadCaption.trim() || finalTitle,
+          dayNumber: chosenDayNum,
+          date: chosenDate,
+          mood: uploadMood,
+          location: finalLocation,
+          googlePhotosUrl: uploadGooglePhotosUrl.trim(),
+          createdAt: now,
+        });
+      }
+    }
 
-    // Also update spot's memoryPhotos if spot is selected (enforce max 3 per spot)
+    // Also update spot in trip.days if not custom
     let updatedDays = trip.days;
     if (!isCustom && uploadSpotId) {
       updatedDays = trip.days.map((d) => ({
@@ -379,13 +490,15 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         items: d.items.map((item) => {
           if (item.id === uploadSpotId) {
             const existing = item.memoryPhotos || [];
-            const merged = [...existing, ...uploadImagePreviews].slice(0, 3);
+            const merged = hasNewPhotos
+              ? [...existing, ...uploadImagePreviews].slice(0, 3)
+              : existing;
             return {
               ...item,
-              memoryPhotos: merged,
+              memoryPhotos: merged.length > 0 ? merged : undefined,
               memoryNotes: uploadCaption.trim() || item.memoryNotes,
               memoryMood: uploadMood,
-              googlePhotosUrl: uploadGooglePhotosUrl.trim() || item.googlePhotosUrl,
+              googlePhotosUrl: uploadGooglePhotosUrl.trim() || item.googlePhotosUrl || undefined,
             };
           }
           return item;
@@ -690,7 +803,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       {saveSuccessToast && (
         <div className="p-3 rounded-2xl bg-teal-600 text-white font-bold text-xs flex items-center gap-2 shadow-lg animate-in fade-in slide-in-from-top duration-200">
           <Check className="w-4 h-4 text-emerald-200" />
-          <span>✨ 回憶照片已成功儲存並同步至相簿！</span>
+          <span>✨ 回憶照片已成功儲存並同步至雲端，電腦與手機隨時保持一致！</span>
         </div>
       )}
 
@@ -1423,12 +1536,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     const existingCount = curSpot?.memoryPhotos?.length || 0;
                     if (!isCustomSpot && uploadSpotId && existingCount >= 3) {
                       return (
-                        <div className="p-5 rounded-2xl border-2 border-dashed border-amber-300 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 text-center space-y-1">
-                          <p className="font-bold text-amber-800 dark:text-amber-200 text-xs">
-                            此景點相片已達上限
+                        <div className="p-4 rounded-2xl border-2 border-dashed border-teal-300 dark:border-teal-800 bg-teal-50/50 dark:bg-teal-950/20 text-center space-y-1">
+                          <p className="font-bold text-teal-800 dark:text-teal-200 text-xs flex items-center justify-center gap-1.5">
+                            <Check className="w-3.5 h-3.5 text-teal-600" />
+                            <span>景點照片已達 3 張上限</span>
                           </p>
                           <p className="text-[11px] text-slate-500">
-                            請在上方點擊垃圾桶移除既有照片後，即可上傳新的打卡照片。
+                            您仍可在下方更新隨筆心得，或貼上 Google 相簿 4K 原圖連結並直接儲存！
                           </p>
                         </div>
                       );
@@ -1630,11 +1744,16 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={uploadImagePreviews.length === 0 || isProcessingImage}
+                  disabled={
+                    (uploadImagePreviews.length === 0 && !uploadGooglePhotosUrl.trim() && !uploadCaption.trim()) ||
+                    isProcessingImage
+                  }
                   className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-bold shadow-xs transition active:scale-95 flex items-center gap-1.5"
                 >
                   <Check className="w-4 h-4" />
-                  <span>儲存相片至旅程相簿</span>
+                  <span>
+                    {uploadImagePreviews.length > 0 ? '儲存相片至旅程相簿' : '儲存變更 / Google 相簿連結'}
+                  </span>
                 </button>
               </div>
             </form>
@@ -1658,6 +1777,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           >
             {/* Top Close Button & Action Bar */}
             <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+              {isAuthorizedUploader && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingLightboxUrl(!isEditingLightboxUrl)}
+                  className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/90 text-teal-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-white/20 shadow-sm"
+                  title="編輯此照片的 Google 相簿連結"
+                >
+                  <Edit2 className="w-3 h-3" />
+                  <span className="hidden sm:inline">{isEditingLightboxUrl ? '收合編輯' : '修改原圖連結'}</span>
+                </button>
+              )}
               {(lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl) && (
                 <a
                   href={lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl}
@@ -1694,6 +1824,36 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               </button>
             </div>
 
+            {/* Quick Inline Edit Bar for Google Photos URL */}
+            {isEditingLightboxUrl && (
+              <div className="p-3 bg-slate-800/95 border-b border-slate-700 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 z-20 mt-12 sm:mt-14">
+                <input
+                  type="url"
+                  value={lightboxEditUrl}
+                  onChange={(e) => setLightboxEditUrl(e.target.value)}
+                  placeholder="貼上 Google 相簿分享或原始照片連結 (如 https://photos.app.goo.gl/...)"
+                  className="flex-1 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-600 text-white text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-500"
+                />
+                <div className="flex items-center gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSaveLightboxGoogleUrl}
+                    className="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center gap-1"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>儲存連結</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingLightboxUrl(false)}
+                    className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Main Image Area with Prev/Next Controls */}
             <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden min-h-[300px] select-none">
               {/* Prev Button */}
@@ -1711,11 +1871,35 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 </button>
               )}
 
-              <img
-                src={lightboxMemory.imageUrl}
-                alt={lightboxMemory.caption}
-                className="max-h-[65vh] w-auto max-w-full object-contain pointer-events-none"
-              />
+              {/* Display original high-resolution photo from googlePhotosUrl if available and not failed */}
+              {lightboxMemory.googlePhotosUrl && !lightboxHighResFailed ? (
+                <div className="relative flex items-center justify-center max-h-[65vh]">
+                  <img
+                    src={lightboxMemory.googlePhotosUrl}
+                    alt={lightboxMemory.caption}
+                    onError={() => setLightboxHighResFailed(true)}
+                    className="max-h-[65vh] w-auto max-w-full object-contain pointer-events-none"
+                  />
+                  <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-bold text-teal-300 border border-teal-500/30 flex items-center gap-1.5 shadow-sm">
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                    <span>Google 相簿高解析度原圖</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="relative flex items-center justify-center max-h-[65vh]">
+                  <img
+                    src={lightboxMemory.imageUrl}
+                    alt={lightboxMemory.caption}
+                    className="max-h-[65vh] w-auto max-w-full object-contain pointer-events-none"
+                  />
+                  {lightboxMemory.googlePhotosUrl && (
+                    <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-bold text-amber-300 border border-amber-500/30 flex items-center gap-1.5 shadow-sm">
+                      <ExternalLink className="w-3 h-3 text-amber-400" />
+                      <span>已連結 Google 相簿相簿</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Next Button */}
               {lightboxPlaylist.length > 1 && (

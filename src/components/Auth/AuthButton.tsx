@@ -83,9 +83,9 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
       <div className="flex items-center gap-1">
         <button
           onClick={handleLogin}
-          className="h-9 px-2 sm:px-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center justify-center gap-1.5 transition shadow-2xs active:scale-95"
-          title={lang === 'zh' ? '使用 Google 帳號登入同步行程' : 'Sign in with Google to sync trips'}
-          aria-label="Google 登入"
+          className="h-9 px-2 sm:px-2.5 rounded-xl border border-teal-300 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 text-xs font-bold text-teal-800 dark:text-teal-200 flex items-center justify-center gap-1.5 transition shadow-2xs active:scale-95"
+          title={lang === 'zh' ? '使用 Google 帳號登入同步行程 (電腦與手機雙向即時一致)' : 'Sign in with Google to sync trips'}
+          aria-label="Google 登入同步"
         >
           <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
             <path
@@ -105,7 +105,7 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
               d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
             />
           </svg>
-          <span className="hidden sm:inline">{lang === 'zh' ? 'Google 登入' : 'Sign In'}</span>
+          <span className="text-[11px] font-bold">{lang === 'zh' ? '登入同步' : 'Sign In'}</span>
         </button>
         <button
           onClick={() => setActiveUserEmail(ADMIN_UPLOAD_EMAIL)}
@@ -137,9 +137,14 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
             <UserIcon className="w-3 h-3" />
           </div>
         )}
-        <span className="hidden sm:inline max-w-[75px] truncate text-[11px] font-bold">
+        <span className="inline-block max-w-[60px] sm:max-w-[85px] truncate text-[11px] font-bold">
           {user?.displayName?.split(' ')[0] || (hasUploadAccess ? '管理員' : '已登入')}
         </span>
+        {user ? (
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" title="雲端連線同步中" />
+        ) : (
+          <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" title="本機單機模式" />
+        )}
         {hasUploadAccess ? (
           <ShieldCheck className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
         ) : (
@@ -148,21 +153,48 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
       </button>
 
       {showDropdown && (
-        <div className="absolute right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-2 z-50 text-xs animate-in fade-in zoom-in-95 duration-100">
-          <div className="px-2.5 py-2 border-b border-slate-100 dark:border-slate-800 space-y-1">
-            <p className="font-bold text-slate-800 dark:text-slate-100 truncate">
-              {user?.displayName || (hasUploadAccess ? '主要管理員' : '使用者')}
-            </p>
-            <p className="text-[10px] text-slate-400 truncate">{activeEmail}</p>
+        <div className="absolute right-0 top-full mt-1.5 w-72 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-2.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 space-y-2">
+          <div className="px-2 py-1.5 border-b border-slate-100 dark:border-slate-800 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <p className="font-bold text-slate-800 dark:text-slate-100 truncate">
+                {user?.displayName || (hasUploadAccess ? '主要管理員' : '使用者')}
+              </p>
+              {user && (
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  已同步
+                </span>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-400 truncate font-mono">{activeEmail || '未綁定 Email'}</p>
+
+            {user ? (
+              <div className="flex items-center gap-1.5 p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-[10px] text-emerald-800 dark:text-emerald-300 font-semibold border border-emerald-200/80 dark:border-emerald-800">
+                <CloudCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>雲端雙向即時連線：電腦與手機內容 100% 一致</span>
+              </div>
+            ) : (
+              <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 text-[10px] text-amber-900 dark:text-amber-200 space-y-1">
+                <p className="font-bold flex items-center gap-1">
+                  <span>⚠️ 目前為本機單機模式</span>
+                </p>
+                <p className="text-amber-700 dark:text-amber-300">
+                  登入 Google 帳號即可與電腦版雙向即時同步照片與行程！
+                </p>
+                <button
+                  onClick={handleLogin}
+                  className="w-full mt-1 py-1.5 px-2 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs"
+                >
+                  <UserIcon className="w-3.5 h-3.5" />
+                  <span>立即登入 Google 帳號同步</span>
+                </button>
+              </div>
+            )}
             
-            {hasUploadAccess ? (
+            {hasUploadAccess && (
               <div className="flex items-center gap-1.5 p-1.5 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-[10px] text-teal-800 dark:text-teal-300 font-bold border border-teal-200 dark:border-teal-800">
                 <ShieldCheck className="w-3.5 h-3.5 text-teal-600 shrink-0" />
                 <span>相片上傳權限：已啟用 (n9102125@gmail.com)</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-500 font-medium">
-                <span>相片上傳：僅管理員可用 (未授權)</span>
               </div>
             )}
           </div>

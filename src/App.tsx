@@ -341,12 +341,16 @@ export default function App() {
             // Notion-style silent background smart merge
             const { merged, tripsToUpload } = mergeTrips(currentLocal, filteredCloud);
 
-            // Avoid unnecessary re-renders if merged content matches current local state
+            // Symmetrical change detection ensures all device edits (photos, spots, notes) are applied immediately
             const hasChange =
               merged.length !== currentLocal.length ||
               merged.some((m) => {
                 const l = currentLocal.find((x) => x.id === m.id);
                 return !l || hasTripContentDifference(m, l);
+              }) ||
+              currentLocal.some((l) => {
+                const m = merged.find((x) => x.id === l.id);
+                return !m || hasTripContentDifference(m, l);
               });
 
             if (hasChange) {
@@ -627,34 +631,71 @@ export default function App() {
     const photoSet = new Set(sanitizedPhotos);
     const retainedMemories = existingMemories.filter((m) => {
       if (m.spotId === targetItemId) {
-        return photoSet.has(m.imageUrl);
+        if (sanitizedPhotos.length > 0) {
+          return photoSet.has(m.imageUrl);
+        }
+        // If no local photos, retain if this memory represents the spot's googlePhotosUrl
+        return Boolean(sanitizedItemData.googlePhotosUrl);
       }
       return true;
     });
 
-    // 2. Add or update memories for each photo in sanitizedPhotos
+    // 2. Add or update memories for each photo in sanitizedPhotos or pure googlePhotosUrl
     const updatedMemories = [...retainedMemories];
-    sanitizedPhotos.forEach((photoUrl, pIdx) => {
-      const existingMemIndex = updatedMemories.findIndex(
-        (m) => m.imageUrl === photoUrl || (m.spotId === targetItemId && m.imageUrl === photoUrl)
-      );
+    if (sanitizedPhotos.length > 0) {
+      sanitizedPhotos.forEach((photoUrl, pIdx) => {
+        const existingMemIndex = updatedMemories.findIndex(
+          (m) => m.imageUrl === photoUrl || (m.spotId === targetItemId && m.imageUrl === photoUrl)
+        );
 
-      if (existingMemIndex >= 0) {
-        updatedMemories[existingMemIndex] = {
-          ...updatedMemories[existingMemIndex],
+        if (existingMemIndex >= 0) {
+          updatedMemories[existingMemIndex] = {
+            ...updatedMemories[existingMemIndex],
+            spotId: targetItemId,
+            spotTitle: sanitizedItemData.title,
+            dayNumber: dayNumber,
+            date: targetDate,
+            mood: sanitizedItemData.memoryMood || updatedMemories[existingMemIndex].mood || '✨',
+            location: sanitizedItemData.locationName || sanitizedItemData.title,
+            caption: sanitizedItemData.notes || sanitizedItemData.title,
+            googlePhotosUrl: sanitizedItemData.googlePhotosUrl || undefined,
+          };
+        } else {
+          updatedMemories.push({
+            id: `mem-${targetItemId}-${Date.now()}-${pIdx}`,
+            imageUrl: photoUrl,
+            caption: sanitizedItemData.notes || sanitizedItemData.title,
+            spotId: targetItemId,
+            spotTitle: sanitizedItemData.title,
+            dayNumber: dayNumber,
+            date: targetDate,
+            mood: sanitizedItemData.memoryMood || '✨',
+            location: sanitizedItemData.locationName || sanitizedItemData.title,
+            googlePhotosUrl: sanitizedItemData.googlePhotosUrl || undefined,
+            createdAt: Date.now() + pIdx * 10,
+          });
+        }
+      });
+    } else if (sanitizedItemData.googlePhotosUrl) {
+      // Spot has googlePhotosUrl without local photos
+      const existingGoogleMemIndex = updatedMemories.findIndex((m) => m.spotId === targetItemId);
+      if (existingGoogleMemIndex >= 0) {
+        updatedMemories[existingGoogleMemIndex] = {
+          ...updatedMemories[existingGoogleMemIndex],
           spotId: targetItemId,
           spotTitle: sanitizedItemData.title,
           dayNumber: dayNumber,
           date: targetDate,
-          mood: sanitizedItemData.memoryMood || updatedMemories[existingMemIndex].mood || '✨',
+          mood: sanitizedItemData.memoryMood || '✨',
           location: sanitizedItemData.locationName || sanitizedItemData.title,
           caption: sanitizedItemData.notes || sanitizedItemData.title,
-          googlePhotosUrl: sanitizedItemData.googlePhotosUrl || updatedMemories[existingMemIndex].googlePhotosUrl,
+          imageUrl: sanitizedItemData.googlePhotosUrl,
+          googlePhotosUrl: sanitizedItemData.googlePhotosUrl,
         };
       } else {
         updatedMemories.push({
-          id: `mem-${targetItemId}-${Date.now()}-${pIdx}`,
-          imageUrl: photoUrl,
+          id: `mem-${targetItemId}-${Date.now()}`,
+          imageUrl: sanitizedItemData.googlePhotosUrl,
           caption: sanitizedItemData.notes || sanitizedItemData.title,
           spotId: targetItemId,
           spotTitle: sanitizedItemData.title,
@@ -663,10 +704,10 @@ export default function App() {
           mood: sanitizedItemData.memoryMood || '✨',
           location: sanitizedItemData.locationName || sanitizedItemData.title,
           googlePhotosUrl: sanitizedItemData.googlePhotosUrl,
-          createdAt: Date.now() + pIdx * 10,
+          createdAt: Date.now(),
         });
       }
-    });
+    }
 
     handleUpdateTrip({
       ...currentTrip,
@@ -679,6 +720,16 @@ export default function App() {
     setEditingItemData(null);
     setIsPickMode(false);
     setPickedCoords(null);
+
+    if (sanitizedPhotos.length > 0 || sanitizedItemData.googlePhotosUrl) {
+      if (currentUser) {
+        showToast(lang === 'zh' ? '景點與照片已儲存並即時同步至雲端！' : 'Spot & photos saved and synced to cloud!');
+      } else {
+        showToast(lang === 'zh' ? '景點與照片已儲存於本機。登入 Google 帳號可跨裝置即時同步！' : 'Saved locally. Sign in with Google to sync across devices!');
+      }
+    } else {
+      showToast(lang === 'zh' ? '景點已成功儲存' : 'Spot saved');
+    }
   };
 
   const handleStartMapPick = () => {

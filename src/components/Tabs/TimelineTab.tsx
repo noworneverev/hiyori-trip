@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Trip, DayPlan, ItineraryItem } from '../../types/itinerary';
 import { LeafletMap, CATEGORY_COLORS } from '../Map/LeafletMap';
 import { calculateDistanceKm, formatDistance, estimateTravelTime, getGoogleMapsNavigationUrl } from '../../utils/geo';
@@ -42,6 +42,9 @@ import {
   Search,
   X,
   ExternalLink,
+  ChevronLeft,
+  ChevronRight,
+  Check,
 } from 'lucide-react';
 
 interface TimelineTabProps {
@@ -85,6 +88,53 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [spotSearchQuery, setSpotSearchQuery] = useState('');
+
+  // High-Resolution Photo Overlay State for intercepting thumbnail clicks & displaying original high-res URL
+  const [overlaySpotPhoto, setOverlaySpotPhoto] = useState<{
+    item: ItineraryItem;
+    photoIndex: number;
+  } | null>(null);
+  const [overlayHighResFailed, setOverlayHighResFailed] = useState(false);
+  const [isEditingOverlayGoogleUrl, setIsEditingOverlayGoogleUrl] = useState(false);
+  const [overlayEditUrl, setOverlayEditUrl] = useState('');
+
+  useEffect(() => {
+    setOverlayHighResFailed(false);
+    setIsEditingOverlayGoogleUrl(false);
+    setOverlayEditUrl(overlaySpotPhoto?.item.googlePhotosUrl || '');
+  }, [overlaySpotPhoto?.item.id, overlaySpotPhoto?.photoIndex]);
+
+  const handleSaveOverlayGoogleUrl = () => {
+    if (!overlaySpotPhoto) return;
+    const finalUrl = overlayEditUrl.trim();
+    const targetItemId = overlaySpotPhoto.item.id;
+
+    // Update spot in trip.days
+    const updatedDays = trip.days.map((d) => ({
+      ...d,
+      items: d.items.map((it) => (it.id === targetItemId ? { ...it, googlePhotosUrl: finalUrl || undefined } : it)),
+    }));
+
+    // Update memories if present
+    const updatedMemories = (trip.memories || []).map((m) =>
+      m.spotId === targetItemId ? { ...m, googlePhotosUrl: finalUrl || undefined } : m
+    );
+
+    const updatedTrip = {
+      ...trip,
+      days: updatedDays,
+      memories: updatedMemories,
+      updatedAt: Date.now(),
+    };
+    onUpdateTrip(updatedTrip);
+
+    // Update local overlay state
+    setOverlaySpotPhoto({
+      ...overlaySpotPhoto,
+      item: { ...overlaySpotPhoto.item, googlePhotosUrl: finalUrl || undefined },
+    });
+    setIsEditingOverlayGoogleUrl(false);
+  };
 
   // Global search matching across all days of the trip
   const matchingSpots = useMemo(() => {
@@ -622,45 +672,53 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                       {((item.memoryPhotos && item.memoryPhotos.length > 0) || item.googlePhotosUrl) && (
                         <div className="flex items-center gap-2 pt-1 flex-wrap">
                           {item.memoryPhotos && item.memoryPhotos.length > 0 && (
-                            <div
-                              onClick={(e) => {
-                                if (onOpenMemories) {
-                                  e.stopPropagation();
-                                  onOpenMemories(item.id);
-                                }
-                              }}
-                              className={`flex items-center gap-1.5 overflow-x-auto pb-0.5 ${
-                                onOpenMemories ? 'cursor-pointer group/mem' : ''
-                              }`}
-                              title={onOpenMemories ? (lang === 'zh' ? '點擊前往相簿查看此景點回憶照' : 'View in photo album') : undefined}
-                            >
+                            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 select-none">
                               {item.memoryPhotos.map((photo, pIdx) => (
-                                <img
+                                <button
                                   key={pIdx}
-                                  src={photo}
-                                  alt="Spot memory"
-                                  className="w-10 h-10 rounded-lg object-cover border border-rose-200 dark:border-rose-900/60 shrink-0 group-hover/mem:scale-105 transition"
-                                />
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOverlaySpotPhoto({ item, photoIndex: pIdx });
+                                  }}
+                                  className="relative group/thumb cursor-pointer transition hover:scale-105 active:scale-95 shrink-0"
+                                  title="點擊開啟高畫質大圖檢視"
+                                >
+                                  <img
+                                    src={photo}
+                                    alt="Spot memory"
+                                    className="w-10 h-10 rounded-lg object-cover border border-rose-200 dark:border-rose-900/60 shadow-xs"
+                                  />
+                                </button>
                               ))}
-                              <span className="text-[10px] text-rose-600 dark:text-rose-400 font-bold shrink-0 flex items-center gap-1 bg-rose-50 dark:bg-rose-950/60 px-2 py-1 rounded-lg">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOverlaySpotPhoto({ item, photoIndex: 0 });
+                                }}
+                                className="text-[10px] text-rose-600 dark:text-rose-400 font-bold shrink-0 flex items-center gap-1 bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 dark:hover:bg-rose-900/60 px-2 py-1 rounded-lg transition active:scale-95 cursor-pointer"
+                                title="點擊開啟相片檢視大圖"
+                              >
                                 <Camera className="w-3 h-3" />
-                                <span>{item.memoryPhotos.length} 張回憶照 {onOpenMemories && '→'}</span>
-                              </span>
+                                <span>{item.memoryPhotos.length} 張回憶照</span>
+                              </button>
                             </div>
                           )}
 
                           {item.googlePhotosUrl && (
-                            <a
-                              href={item.googlePhotosUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 text-[11px] font-bold transition shadow-2xs"
-                              title={lang === 'zh' ? '前往 Google 相簿檢視原始高畫質相片' : 'View original in Google Photos'}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOverlaySpotPhoto({ item, photoIndex: 0 });
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 text-[11px] font-bold transition shadow-2xs active:scale-95 cursor-pointer"
+                              title="點擊開啟 Google 相簿原始高畫質照片"
                             >
                               <ExternalLink className="w-3 h-3 text-teal-600 dark:text-teal-400" />
-                              <span>{lang === 'zh' ? 'Google 相簿原圖' : 'Google Photos'}</span>
-                            </a>
+                              <span>Google 相簿原圖</span>
+                            </button>
                           )}
                         </div>
                       )}
@@ -823,6 +881,216 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
         </div>
       )}
     </>
+  )}
+
+  {/* High-Resolution Photo Overlay for Timeline */}
+  {overlaySpotPhoto && (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-black/95 backdrop-blur-md animate-in fade-in duration-150"
+      onClick={() => setOverlaySpotPhoto(null)}
+    >
+      <div
+        className="max-w-4xl w-full bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-700/80 flex flex-col max-h-[95vh] relative"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Top Close Button & Action Bar */}
+        <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsEditingOverlayGoogleUrl(!isEditingOverlayGoogleUrl)}
+            className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/90 text-teal-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-white/20 shadow-sm"
+            title="編輯此景點的 Google 相簿連結"
+          >
+            <Edit2 className="w-3 h-3" />
+            <span className="hidden sm:inline">{isEditingOverlayGoogleUrl ? '收合編輯' : '修改原圖連結'}</span>
+          </button>
+
+          {overlaySpotPhoto.item.googlePhotosUrl && (
+            <a
+              href={overlaySpotPhoto.item.googlePhotosUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-full bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center gap-1.5 border border-white/20 shadow-md backdrop-blur-md active:scale-95"
+              title="開啟 Google 相簿檢視 4K / 原始超高畫質相片"
+            >
+              <ExternalLink className="w-3.5 h-3.5 text-white" />
+              <span className="hidden sm:inline">在 Google 相簿開啟 (4K)</span>
+              <span className="sm:hidden">4K 原圖</span>
+            </a>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setOverlaySpotPhoto(null)}
+            className="p-2 rounded-full bg-black/60 text-white hover:bg-black/90 transition shadow-sm"
+            title="關閉"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Quick Inline Edit Bar for Google Photos URL */}
+        {isEditingOverlayGoogleUrl && (
+          <div className="p-3 bg-slate-800/95 border-b border-slate-700 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 z-20 mt-12 sm:mt-14">
+            <input
+              type="url"
+              value={overlayEditUrl}
+              onChange={(e) => setOverlayEditUrl(e.target.value)}
+              placeholder="貼上 Google 相簿分享或原始照片連結 (如 https://photos.app.goo.gl/...)"
+              className="flex-1 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-600 text-white text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-500"
+            />
+            <div className="flex items-center gap-2 justify-end">
+              <button
+                type="button"
+                onClick={handleSaveOverlayGoogleUrl}
+                className="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center gap-1"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>儲存連結</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsEditingOverlayGoogleUrl(false)}
+                className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Main Image Area with High-Resolution Source */}
+        <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden min-h-[300px] select-none p-2 sm:p-4">
+          {/* Prev Button if multiple photos */}
+          {overlaySpotPhoto.item.memoryPhotos && overlaySpotPhoto.item.memoryPhotos.length > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                const photos = overlaySpotPhoto.item.memoryPhotos!;
+                const nextIdx = (overlaySpotPhoto.photoIndex - 1 + photos.length) % photos.length;
+                setOverlaySpotPhoto({ ...overlaySpotPhoto, photoIndex: nextIdx });
+              }}
+              className="absolute left-2 sm:left-4 z-10 w-10 h-10 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition active:scale-90 border border-white/10"
+              title="上一張"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+          )}
+
+          {/* High-Resolution Image Display */}
+          {(() => {
+            const currentLocal = overlaySpotPhoto.item.memoryPhotos?.[overlaySpotPhoto.photoIndex];
+            const highResUrl = overlaySpotPhoto.item.googlePhotosUrl;
+            const canUseHighRes = Boolean(highResUrl) && !overlayHighResFailed;
+            const activeSrc = canUseHighRes ? highResUrl! : (currentLocal || highResUrl || '');
+
+            return (
+              <div className="relative flex items-center justify-center max-h-[65vh]">
+                <img
+                  src={activeSrc}
+                  alt={overlaySpotPhoto.item.title}
+                  onError={() => {
+                    if (canUseHighRes) setOverlayHighResFailed(true);
+                  }}
+                  className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl"
+                />
+                {canUseHighRes ? (
+                  <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-bold text-teal-300 border border-teal-500/30 flex items-center gap-1.5 shadow-sm">
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
+                    <span>Google 相簿高解析度原圖</span>
+                  </div>
+                ) : highResUrl ? (
+                  <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-bold text-amber-300 border border-amber-500/30 flex items-center gap-1.5 shadow-sm">
+                    <ExternalLink className="w-3 h-3 text-amber-400" />
+                    <span>已連結 Google 相簿相簿</span>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })()}
+
+          {/* Next Button if multiple photos */}
+          {overlaySpotPhoto.item.memoryPhotos && overlaySpotPhoto.item.memoryPhotos.length > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                const photos = overlaySpotPhoto.item.memoryPhotos!;
+                const nextIdx = (overlaySpotPhoto.photoIndex + 1) % photos.length;
+                setOverlaySpotPhoto({ ...overlaySpotPhoto, photoIndex: nextIdx });
+              }}
+              className="absolute right-2 sm:right-4 z-10 w-10 h-10 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition active:scale-90 border border-white/10"
+              title="下一張"
+            >
+              <ChevronRight className="w-6 h-6" />
+            </button>
+          )}
+        </div>
+
+        {/* Thumbnail Strip if multiple photos */}
+        {overlaySpotPhoto.item.memoryPhotos && overlaySpotPhoto.item.memoryPhotos.length > 1 && (
+          <div className="px-4 py-2 bg-slate-950/80 border-t border-slate-800 flex items-center justify-center gap-2 overflow-x-auto">
+            {overlaySpotPhoto.item.memoryPhotos.map((photo, pIdx) => (
+              <button
+                key={pIdx}
+                type="button"
+                onClick={() => setOverlaySpotPhoto({ ...overlaySpotPhoto, photoIndex: pIdx })}
+                className={`relative w-12 h-12 rounded-xl overflow-hidden shrink-0 transition border-2 ${
+                  pIdx === overlaySpotPhoto.photoIndex
+                    ? 'border-teal-400 scale-105 shadow-md'
+                    : 'border-transparent opacity-60 hover:opacity-100'
+                }`}
+              >
+                <img src={photo} alt="" className="w-full h-full object-cover" />
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Bottom Info Bar */}
+        <div className="p-3.5 sm:p-4 bg-slate-900 text-white flex items-center justify-between gap-3 border-t border-slate-800">
+          <div className="space-y-0.5 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-base">{overlaySpotPhoto.item.memoryMood || '✨'}</span>
+              <h4 className="font-bold text-sm text-white truncate">
+                {overlaySpotPhoto.item.title}
+              </h4>
+              <span className="text-[10px] font-mono bg-teal-900/80 text-teal-200 px-2 py-0.5 rounded-full shrink-0">
+                {overlaySpotPhoto.item.startTime}
+              </span>
+            </div>
+            {(overlaySpotPhoto.item.notes || overlaySpotPhoto.item.memoryNotes) && (
+              <p className="text-xs text-slate-300 italic truncate">
+                「{overlaySpotPhoto.item.memoryNotes || overlaySpotPhoto.item.notes}」
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {onOpenMemories && (
+              <button
+                type="button"
+                onClick={() => {
+                  const id = overlaySpotPhoto.item.id;
+                  setOverlaySpotPhoto(null);
+                  onOpenMemories(id);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold shrink-0 transition flex items-center gap-1"
+              >
+                <Camera className="w-3.5 h-3.5 text-rose-400" />
+                <span>相簿專區</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setOverlaySpotPhoto(null)}
+              className="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-xs font-bold shrink-0 transition shadow-xs"
+            >
+              關閉
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   )}
 </div>
 );

@@ -128,6 +128,39 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     }
   }, [pickedCoords]);
 
+  // Sync state when item prop changes
+  useEffect(() => {
+    if (item) {
+      setTitle(item.title || '');
+      setCategory(item.category || 'spot');
+      setStartTime(item.startTime || defaultStartTime || '09:00');
+      setEndTime(item.endTime || '');
+      setShowEndTimeInput(Boolean(item.endTime));
+      setLocationName(item.locationName || '');
+      setAddress(item.address || '');
+      setLat(item.lat);
+      setLng(item.lng);
+      setTransportNote(item.transportNote || '');
+      setNotes(item.notes || '');
+      setBookingCode(item.bookingCode || '');
+      setCost(item.cost ? String(item.cost) : '');
+      setCostPaid(item.costPaid || false);
+      setMemoryPhotos(item.memoryPhotos || []);
+      setMemoryMood(item.memoryMood || '✨');
+      setGooglePhotosUrl(item.googlePhotosUrl || '');
+      if (
+        item.googlePhotosUrl ||
+        item.locationName ||
+        item.address ||
+        item.transportNote ||
+        item.notes ||
+        (item.memoryPhotos && item.memoryPhotos.length > 0)
+      ) {
+        setShowMoreDetails(true);
+      }
+    }
+  }, [item, defaultStartTime]);
+
   const handlePhotoFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;

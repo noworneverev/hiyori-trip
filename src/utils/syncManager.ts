@@ -207,9 +207,17 @@ export function summarizeTripForConflict(trip: Trip): TripConflictSummary {
 }
 
 /**
- * Check if two trips have substantive content differences (not just noise)
+ * Check if two trips have substantive content differences (not just noise).
+ * Accurately tracks photos, Google Photos URLs, memories, notes, and timestamps
+ * ensuring multi-device real-time consistency.
  */
 export function hasTripContentDifference(a: Trip, b: Trip): boolean {
+  // 1. If timestamps differ, versions are distinct
+  if ((a.updatedAt || 0) !== (b.updatedAt || 0)) {
+    return true;
+  }
+
+  // 2. High-level metric summary check
   const aSummary = summarizeTripForConflict(a);
   const bSummary = summarizeTripForConflict(b);
 
@@ -223,18 +231,69 @@ export function hasTripContentDifference(a: Trip, b: Trip): boolean {
     a.startDate !== b.startDate ||
     a.endDate !== b.endDate ||
     (a.notes || '') !== (b.notes || '') ||
+    a.googlePhotosAlbumUrl !== b.googlePhotosAlbumUrl ||
+    a.isSoloTrip !== b.isSoloTrip ||
+    a.isSplitEnabled !== b.isSplitEnabled ||
+    a.coverGradient !== b.coverGradient ||
     (a.memories || []).length !== (b.memories || []).length
   ) {
     return true;
   }
 
-  // Check day by day items
-  if ((a.days || []).length !== (b.days || []).length) return true;
-  for (let i = 0; i < (a.days || []).length; i++) {
-    const dayA = a.days[i];
-    const dayB = b.days[i];
+  // 3. Deep check memories content (photos, links, captions)
+  const aMems = a.memories || [];
+  const bMems = b.memories || [];
+  for (let m = 0; m < aMems.length; m++) {
+    const ma = aMems[m];
+    const mb = bMems[m];
+    if (
+      ma.id !== mb.id ||
+      ma.imageUrl !== mb.imageUrl ||
+      ma.googlePhotosUrl !== mb.googlePhotosUrl ||
+      ma.caption !== mb.caption ||
+      ma.spotId !== mb.spotId ||
+      ma.mood !== mb.mood
+    ) {
+      return true;
+    }
+  }
+
+  // 4. Deep check day-by-day items & their photos/URLs
+  const daysA = a.days || [];
+  const daysB = b.days || [];
+  if (daysA.length !== daysB.length) return true;
+
+  for (let i = 0; i < daysA.length; i++) {
+    const dayA = daysA[i];
+    const dayB = daysB[i];
     if (!dayB) return true;
-    if ((dayA.items || []).length !== (dayB.items || []).length) return true;
+    const itemsA = dayA.items || [];
+    const itemsB = dayB.items || [];
+    if (itemsA.length !== itemsB.length) return true;
+
+    for (let j = 0; j < itemsA.length; j++) {
+      const itA = itemsA[j];
+      const itB = itemsB[j];
+      if (
+        itA.id !== itB.id ||
+        itA.title !== itB.title ||
+        itA.startTime !== itB.startTime ||
+        itA.endTime !== itB.endTime ||
+        itA.notes !== itB.notes ||
+        itA.googlePhotosUrl !== itB.googlePhotosUrl ||
+        itA.memoryNotes !== itB.memoryNotes
+      ) {
+        return true;
+      }
+
+      // Check photos attached to spot
+      const photosA = itA.memoryPhotos || [];
+      const photosB = itB.memoryPhotos || [];
+      if (photosA.length !== photosB.length) return true;
+      for (let p = 0; p < photosA.length; p++) {
+        if (photosA[p] !== photosB[p]) return true;
+      }
+    }
   }
 
   return false;
@@ -396,14 +455,23 @@ export function mergeTrips(
       const localUpdated = lTrip.updatedAt || 0;
       const cloudUpdated = existing.updatedAt || 0;
 
-      if (cloudUpdated >= localUpdated) {
-        // Cloud is newer or equal (e.g. edited on computer): adopt cloud version directly on mobile!
+      if (cloudUpdated > localUpdated) {
+        // Cloud is strictly newer (e.g. edited on another device): adopt cloud version!
         mergedMap.set(lTrip.id, existing);
-      } else {
-        // Local has newer un-synced edits made on this device: smart merge and push to cloud in background
+      } else if (localUpdated > cloudUpdated) {
+        // Local has newer un-synced edits made on this device: smart merge and push to cloud
         const mergedTrip = mergeSingleTrip(lTrip, existing);
         mergedMap.set(lTrip.id, mergedTrip);
         tripsToUpload.push(mergedTrip);
+      } else {
+        // Equal timestamps: check if content differs (e.g. photos added locally or concurrent sync)
+        if (hasTripContentDifference(lTrip, existing)) {
+          const mergedTrip = mergeSingleTrip(lTrip, existing);
+          mergedMap.set(lTrip.id, mergedTrip);
+          tripsToUpload.push(mergedTrip);
+        } else {
+          mergedMap.set(lTrip.id, existing);
+        }
       }
     }
   }
