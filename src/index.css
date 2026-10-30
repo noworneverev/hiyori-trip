@@ -56,3 +56,70 @@ body {
 .marker-pulse {
   animation: markerPulse 2s infinite;
 }
+
+/* ==========================================================================
+   Accessibility: Typography & Display Scaling Engine
+   ========================================================================== */
+
+:root {
+  --app-font-multiplier: 1.0;
+}
+
+/* 1. Comfortable Tier (115% scale) */
+html[data-text-scale="comfortable"] {
+  font-size: 110%;
+}
+
+html[data-text-scale="comfortable"] body {
+  line-height: 1.6;
+}
+
+/* 2. Extra Large Tier (130% scale, High Contrast, Enlarged Controls) */
+html[data-text-scale="senior"] {
+  font-size: 122%;
+}
+
+html[data-text-scale="senior"] body {
+  line-height: 1.65;
+  letter-spacing: 0.01em;
+}
+
+/* High Contrast text overrides for enhanced visibility in extra large tier */
+html[data-text-scale="senior"] .text-slate-400,
+html[data-text-scale="senior"] .text-zinc-400,
+html[data-text-scale="senior"] .text-slate-500,
+html[data-text-scale="senior"] .text-zinc-500 {
+  color: #1e293b !important;
+  font-weight: 500;
+}
+
+html.dark[data-text-scale="senior"] .text-slate-400,
+html.dark[data-text-scale="senior"] .text-zinc-400,
+html.dark[data-text-scale="senior"] .text-slate-500,
+html.dark[data-text-scale="senior"] .text-zinc-500 {
+  color: #f1f5f9 !important;
+  font-weight: 500;
+}
+
+/* Clear card borders and larger touch targets in Senior mode */
+html[data-text-scale="senior"] .border-slate-200,
+html[data-text-scale="senior"] .border-slate-100 {
+  border-color: #cbd5e1 !important;
+}
+
+html.dark[data-text-scale="senior"] .border-slate-800,
+html.dark[data-text-scale="senior"] .border-zinc-800 {
+  border-color: #475569 !important;
+}
+
+/* Thicker divider lines for easier visual tracking */
+html[data-text-scale="senior"] hr,
+html[data-text-scale="senior"] .divide-y > * {
+  border-color: #94a3b8;
+}
+
+/* Larger clickable area for tabs and primary buttons */
+html[data-text-scale="senior"] button,
+html[data-text-scale="senior"] a {
+  touch-action: manipulation;
+}

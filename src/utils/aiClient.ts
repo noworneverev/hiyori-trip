@@ -1,11 +1,12 @@
 import { Trip } from '../types/itinerary';
 import { parseTextItinerary } from './storage';
 
-const STORAGE_KEY_USER_GEMINI_KEY = 'wayfarer_user_gemini_key';
+const STORAGE_KEY_USER_GEMINI_KEY = 'hiyori_user_gemini_key';
+const LEGACY_STORAGE_KEY_USER_GEMINI_KEY = 'wayfarer_user_gemini_key';
 
 export function getCustomGeminiKey(): string {
   try {
-    return localStorage.getItem(STORAGE_KEY_USER_GEMINI_KEY) || '';
+    return localStorage.getItem(STORAGE_KEY_USER_GEMINI_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY_USER_GEMINI_KEY) || '';
   } catch {
     return '';
   }
@@ -17,6 +18,7 @@ export function setCustomGeminiKey(key: string): void {
       localStorage.setItem(STORAGE_KEY_USER_GEMINI_KEY, key.trim());
     } else {
       localStorage.removeItem(STORAGE_KEY_USER_GEMINI_KEY);
+      localStorage.removeItem(LEGACY_STORAGE_KEY_USER_GEMINI_KEY);
     }
   } catch (e) {
     console.error('Failed to save key:', e);

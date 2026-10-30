@@ -27,12 +27,16 @@ import {
   AlertCircle,
   ExternalLink,
   Edit2,
+  Compass,
 } from 'lucide-react';
 
 interface TripMemoriesViewProps {
   trip: Trip;
+  allTrips?: Trip[];
   lang: Language;
   onUpdateTrip: (updatedTrip: Trip) => void;
+  onSelectTrip?: (tripId: string) => void;
+  onOpenGlobalHub?: () => void;
   initialSpotId?: string;
 }
 
@@ -51,8 +55,11 @@ const PRESET_MOODS = [
 
 export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   trip,
+  allTrips,
   lang,
   onUpdateTrip,
+  onSelectTrip,
+  onOpenGlobalHub,
   initialSpotId,
 }) => {
   const [viewMode, setViewMode] = useState<'itinerary' | 'gallery' | 'polaroid'>('itinerary');
@@ -621,6 +628,19 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
           {/* Action Buttons */}
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Global Multi-Trip Footprint Hub Trigger */}
+            {onOpenGlobalHub && (
+              <button
+                type="button"
+                onClick={onOpenGlobalHub}
+                className="px-3.5 py-1.5 rounded-2xl bg-teal-50 dark:bg-teal-950/70 hover:bg-teal-100 dark:hover:bg-teal-900/80 text-teal-800 dark:text-teal-200 border border-teal-200/80 dark:border-teal-800/80 text-xs font-bold flex items-center gap-1.5 transition shadow-2xs active:scale-95 cursor-pointer"
+                title="探索跨旅程回憶與月曆足跡"
+              >
+                <Compass className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                <span>跨旅程足跡時光庫</span>
+              </button>
+            )}
+
             {/* View Mode Switcher */}
             <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl text-xs font-semibold">
               <button

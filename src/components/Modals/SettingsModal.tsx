@@ -6,6 +6,9 @@ import { auth, loginWithGoogle, logoutFirebase, saveTripToCloud } from '../../ut
 import { Trip } from '../../types/itinerary';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { APP_VERSION, BUILD_DATE } from '../../constants/version';
+import { getSavedAccessibilityScale, applyAccessibilityScale, AccessibilityScale, ACCESSIBILITY_OPTIONS } from '../../utils/accessibility';
+import { performAppUpdate, UpdateState } from '../../utils/pwaUpdater';
 import {
   X,
   Key,
@@ -21,6 +24,8 @@ import {
   LogOut,
   RefreshCw,
   User as UserIcon,
+  Eye,
+  RotateCcw,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -45,6 +50,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isSavedKey, setIsSavedKey] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncDone, setSyncDone] = useState(false);
+  const [scale, setScale] = useState<AccessibilityScale>(getSavedAccessibilityScale);
+  const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle' });
   const storageInfo = getStorageUsage();
 
   useEffect(() => {
@@ -308,6 +315,90 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </button>
               )}
             </div>
+          </div>
+
+          {/* Accessibility & Typography Scale */}
+          <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-200/70 dark:border-teal-900/50 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-1.5 text-xs">
+                <Eye className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                <span>{lang === 'zh' ? '文字大小' : 'Text Size'}</span>
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-300">
+                {scale === 'senior' ? '特大 130%' : scale === 'comfortable' ? '放大 115%' : '標準 100%'}
+              </span>
+            </div>
+
+            <p className="text-slate-600 dark:text-zinc-300 text-[11px] leading-relaxed">
+              {lang === 'zh'
+                ? '自由調整介面字體大小，特大模式提供更高對比度與寬敞排版，閱覽更輕鬆。'
+                : 'Adjust interface typography size. Extra large mode provides enhanced contrast and spacious layout.'}
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {ACCESSIBILITY_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    setScale(opt.id);
+                    applyAccessibilityScale(opt.id);
+                  }}
+                  className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-1.5 ${
+                    scale === opt.id
+                      ? 'border-teal-500 bg-white dark:bg-slate-800 ring-2 ring-teal-500/30 shadow-xs'
+                      : 'border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/60 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-1">
+                      {opt.label}
+                    </span>
+                    <span className="text-[10px] font-mono font-bold text-teal-600 dark:text-teal-400">
+                      {opt.badge}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-tight">
+                    {opt.description}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* System Version & Update Engine */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/90 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-900 dark:text-white text-xs">
+                  {lang === 'zh' ? '系統版本資訊' : 'App Version'}
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-mono text-[10px] font-bold">
+                  {APP_VERSION}
+                </span>
+              </div>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                {lang === 'zh' ? `構建日期：${BUILD_DATE} • PWA 離線快取支援` : `Build Date: ${BUILD_DATE} • PWA Cache`}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              disabled={updateState.status === 'checking' || updateState.status === 'updating'}
+              onClick={async () => {
+                await performAppUpdate((s) => setUpdateState(s));
+              }}
+              className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs disabled:opacity-60 cursor-pointer self-start sm:self-auto"
+            >
+              <RotateCcw className={`w-3.5 h-3.5 ${updateState.status === 'checking' || updateState.status === 'updating' ? 'animate-spin' : ''}`} />
+              <span>
+                {updateState.status === 'checking'
+                  ? (lang === 'zh' ? '檢查中...' : 'Checking...')
+                  : updateState.status === 'updating'
+                  ? (lang === 'zh' ? '載入新版...' : 'Loading...')
+                  : (lang === 'zh' ? '檢查更新 / 重新整理' : 'Check for Updates')}
+              </span>
+            </button>
           </div>
 
           {/* AI Parser Key (Optional) */}

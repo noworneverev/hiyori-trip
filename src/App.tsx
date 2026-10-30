@@ -18,6 +18,7 @@ import { LiveCompanionTab } from './components/Tabs/LiveCompanionTab';
 import { ExpensesTab } from './components/Tabs/ExpensesTab';
 import { NotesAndPrepTab } from './components/Tabs/NotesAndPrepTab';
 import { TripMemoriesView } from './components/Memories/TripMemoriesView';
+import { GlobalTravelHubModal } from './components/Memories/GlobalTravelHubModal';
 import { TripEditModal } from './components/Modals/TripEditModal';
 import { ItemEditModal } from './components/Modals/ItemEditModal';
 import { ImportExportModal } from './components/Modals/ImportExportModal';
@@ -56,6 +57,8 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { PWAInstallButton } from './components/PWA/PWAInstallButton';
 import { OfflineIndicator } from './components/PWA/OfflineIndicator';
 import { HiyoriLogo } from './components/UI/HiyoriLogo';
+import { initAccessibilityScale } from './utils/accessibility';
+import { UpdateNotificationBanner } from './components/UI/UpdateNotificationBanner';
 import {
   Route,
   Calendar,
@@ -87,6 +90,7 @@ import {
   ShieldCheck,
   Eye,
   AlertTriangle,
+  Compass,
 } from 'lucide-react';
 
 type TabType = 'timeline' | 'live' | 'expenses' | 'prep' | 'memories';
@@ -125,6 +129,7 @@ export default function App() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [showCollabModal, setShowCollabModal] = useState(false);
   const [showDeleteTripModal, setShowDeleteTripModal] = useState(false);
+  const [showGlobalHubModal, setShowGlobalHubModal] = useState(false);
   const [showQuickActionModal, setShowQuickActionModal] = useState(false);
   const [quickActionTab, setQuickActionTab] = useState<'expense' | 'scratchpad' | 'calc'>('expense');
   const [showFabNote, setShowFabNote] = useState(false);
@@ -180,8 +185,9 @@ export default function App() {
     currentUserRef.current = currentUser;
   }, [currentUser]);
 
-  // Global unmount timer cleanup
+  // Global unmount timer cleanup & accessibility initialization
   useEffect(() => {
+    initAccessibilityScale();
     return () => {
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
       if (fabLongPressTimerRef.current) clearTimeout(fabLongPressTimerRef.current);
@@ -753,7 +759,7 @@ export default function App() {
   if (!currentTrip) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300">
-        <p>Loading Wayfarer...</p>
+        <p>日和手帳載入中...</p>
       </div>
     );
   }
@@ -838,10 +844,35 @@ export default function App() {
                         </div>
                       ))}
                     </div>
+
+                    {/* Quick Access to Global Travel Memory Hub */}
+                    <div className="pt-1.5 mt-1 border-t border-slate-100 dark:border-slate-800">
+                      <button
+                        onClick={() => {
+                          setShowTripSwitcher(false);
+                          setShowGlobalHubModal(true);
+                        }}
+                        className="w-full py-1.5 px-2 rounded-xl bg-teal-50/80 hover:bg-teal-100 dark:bg-teal-950/60 dark:hover:bg-teal-900/80 text-teal-800 dark:text-teal-200 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                      >
+                        <Compass className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                        <span>跨行程搜尋與足跡時光庫</span>
+                      </button>
+                    </div>
                   </div>
                 </>
               )}
             </div>
+
+            {/* Global Travel Memory & Footprint Hub Trigger in Header */}
+            <button
+              onClick={() => setShowGlobalHubModal(true)}
+              className="h-9 w-9 sm:w-auto flex items-center justify-center gap-1.5 sm:px-3 rounded-xl border border-teal-200/80 dark:border-teal-800/80 bg-teal-50/70 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/70 text-teal-800 dark:text-teal-200 transition shadow-2xs active:scale-95 text-xs font-bold shrink-0 cursor-pointer"
+              title="搜尋所有過往旅程與月曆足跡"
+              aria-label="跨旅程足跡"
+            >
+              <Compass className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+              <span className="hidden sm:inline">足跡時光庫</span>
+            </button>
 
             {/* Primary Action: New Trip (Icon-only on mobile, full text on sm+) */}
             <button
@@ -872,7 +903,7 @@ export default function App() {
               <Github className="w-4 h-4" />
             </a>
 
-            {/* Unified App Menu (Dark mode, Language, Import/Export, PDF, Share, PWA, Settings) */}
+            {/* Unified App Menu (Display preferences, Trip tools, System updates, Storage) */}
             <AppMenu
               lang={lang}
               onSelectLang={(selectedLang) => {
@@ -885,7 +916,10 @@ export default function App() {
               onOpenExportPDF={() => setShowPDFExportModal(true)}
               onOpenShareTrip={() => setShowShareModal(true)}
               onOpenCollaborate={() => setShowCollabModal(true)}
-              onOpenSettings={() => setShowSettingsModal(true)}
+              onResetData={() => {
+                localStorage.clear();
+                window.location.reload();
+              }}
             />
           </div>
         </div>
@@ -1283,8 +1317,11 @@ export default function App() {
           {activeTab === 'memories' && (
             <TripMemoriesView
               trip={currentTrip}
+              allTrips={trips}
               lang={lang}
               onUpdateTrip={handleUpdateTrip}
+              onSelectTrip={handleSelectTrip}
+              onOpenGlobalHub={() => setShowGlobalHubModal(true)}
               initialSpotId={memoriesSpotId}
             />
           )}
@@ -1547,6 +1584,24 @@ export default function App() {
         />
       )}
 
+      {/* Global Travel Memory & Footprint Hub Modal */}
+      {showGlobalHubModal && (
+        <GlobalTravelHubModal
+          trips={trips}
+          currentTripId={currentTrip.id}
+          lang={lang}
+          onSelectTrip={(selectedId) => {
+            handleSelectTrip(selectedId);
+            setShowGlobalHubModal(false);
+            const found = trips.find((t) => t.id === selectedId);
+            if (found) {
+              showToast(lang === 'zh' ? `已切換至旅程：【${found.title}】` : `Switched to ${found.title}`);
+            }
+          }}
+          onClose={() => setShowGlobalHubModal(false)}
+        />
+      )}
+
       {/* Floating Travel Quick Action Button (Single Clean FAB) */}
       <div
         style={{ position: 'fixed', transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)', zIndex: 40 }}
@@ -1616,6 +1671,9 @@ export default function App() {
 
       {/* Floating Offline Indicator */}
       <OfflineIndicator />
+
+      {/* Proactive PWA Update Notification Banner */}
+      <UpdateNotificationBanner lang={lang} />
     </div>
   );
 }

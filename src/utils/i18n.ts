@@ -554,11 +554,12 @@ export const LANGUAGE_OPTIONS: { code: Language; name: string; flag: string }[] 
   { code: 'zh-CN', name: '简体中文', flag: '🇨🇳' },
 ];
 
-const LANG_KEY = 'wayfarer_preferred_lang';
+const LANG_KEY = 'hiyori_preferred_lang';
+const LEGACY_LANG_KEY = 'wayfarer_preferred_lang';
 
 export function getStoredLanguage(): Language {
   try {
-    const saved = localStorage.getItem(LANG_KEY) as Language;
+    const saved = (localStorage.getItem(LANG_KEY) || localStorage.getItem(LEGACY_LANG_KEY)) as Language;
     if (saved && TRANSLATIONS[saved]) return saved;
   } catch {}
   return 'zh';

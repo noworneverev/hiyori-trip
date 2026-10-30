@@ -316,7 +316,7 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
         {/* Footer */}
         <div className="px-5 py-3 border-t border-slate-100 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/40 flex items-center justify-between">
           <span className="text-[11px] text-slate-400 dark:text-zinc-500">
-            Wayfarer 即時協作分享
+            日和手帳 Hiyori 即時協作分享
           </span>
           <button
             type="button"

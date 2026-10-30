@@ -443,7 +443,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
         {/* Footer */}
         <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex items-center justify-between">
           <span className="text-[11px] text-slate-400">
-            Wayfarer 權限型多人協同編輯
+            日和手帳 Hiyori 權限型多人協同編輯
           </span>
           <button
             type="button"

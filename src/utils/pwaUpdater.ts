@@ -1,4 +1,4 @@
-// Utility for triggering PWA updates with proper tactile feedback and iOS standalone compatibility
+// Utility for triggering PWA updates with proper tactile feedback, cache clearing, and iOS standalone compatibility
 
 export interface UpdateState {
   status: 'idle' | 'checking' | 'updating' | 'latest' | 'error';
@@ -25,19 +25,14 @@ export const performAppUpdate = async (onStatusChange?: (state: UpdateState) => 
   onStatusChange?.({ status: 'checking', message: '正在檢查最新版本...' });
 
   try {
-    let hasNewWorker = false;
-
-    // 2. Safely check service worker registrations
+    // 2. Safely check and trigger service worker update
     if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
       const registrations = await navigator.serviceWorker.getRegistrations();
       for (const reg of registrations) {
         try {
           await reg.update();
           if (reg.waiting) {
-            hasNewWorker = true;
             reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-          } else if (reg.installing) {
-            hasNewWorker = true;
           }
         } catch (regErr) {
           console.warn('SW reg update error:', regErr);
@@ -45,7 +40,22 @@ export const performAppUpdate = async (onStatusChange?: (state: UpdateState) => 
       }
     }
 
-    // 3. Trigger VitePWA updateSW if available
+    // 3. Purge outdated Workbox & browser cache storage so the newest bundle loads cleanly
+    if (typeof window !== 'undefined' && 'caches' in window) {
+      try {
+        const cacheKeys = await caches.keys();
+        for (const key of cacheKeys) {
+          // Keep map tiles cache if possible, clear application bundles
+          if (!key.includes('osm-tiles')) {
+            await caches.delete(key);
+          }
+        }
+      } catch (cErr) {
+        console.warn('Cache purge error:', cErr);
+      }
+    }
+
+    // 4. Trigger VitePWA updateSW if available
     if (globalUpdateSW) {
       try {
         await globalUpdateSW(true);
@@ -59,7 +69,7 @@ export const performAppUpdate = async (onStatusChange?: (state: UpdateState) => 
     // Give a short visible transition (400ms) so the user experiences the press confirmation
     await new Promise((resolve) => setTimeout(resolve, 450));
 
-    // 4. Safe reload with cache buster instead of crashing iOS standalone PWA
+    // 5. Safe reload with cache buster instead of crashing iOS standalone PWA
     const currentUrl = new URL(window.location.href);
     currentUrl.searchParams.set('_v', Date.now().toString());
     window.location.replace(currentUrl.toString());

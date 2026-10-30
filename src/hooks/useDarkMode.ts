@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 
-const DARK_KEY = 'wayfarer_theme_dark';
+const DARK_KEY = 'hiyori_theme_dark';
+const LEGACY_DARK_KEY = 'wayfarer_theme_dark';
 
 export function useDarkMode() {
   const [isDark, setIsDark] = useState<boolean>(() => {
     try {
-      const saved = localStorage.getItem(DARK_KEY);
+      const saved = localStorage.getItem(DARK_KEY) ?? localStorage.getItem(LEGACY_DARK_KEY);
       if (saved !== null) {
         return saved === 'true';
       }

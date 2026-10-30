@@ -2,12 +2,17 @@ import { Trip, DayPlan, ItineraryItem, CategoryType } from '../types/itinerary';
 import { PRESET_TRIPS } from '../data/presetTrips';
 import { HOKURIKU_CHUBU_9DAYS_TRIP } from '../data/hokurikuMasterpieceTrip';
 
-const STORAGE_KEY_TRIPS = 'wayfarer_trips_data_v1';
-const STORAGE_KEY_CURRENT_ID = 'wayfarer_current_trip_id_v1';
+const STORAGE_KEY_TRIPS = 'hiyori_trips_data_v1';
+const LEGACY_STORAGE_KEY_TRIPS = 'wayfarer_trips_data_v1';
+const STORAGE_KEY_CURRENT_ID = 'hiyori_current_trip_id_v1';
+const LEGACY_STORAGE_KEY_CURRENT_ID = 'wayfarer_current_trip_id_v1';
 
 export function getStoredTrips(): Trip[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_TRIPS);
+    let raw = localStorage.getItem(STORAGE_KEY_TRIPS);
+    if (!raw) {
+      raw = localStorage.getItem(LEGACY_STORAGE_KEY_TRIPS);
+    }
     if (!raw) {
       // First run: load presets into local storage
       localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(PRESET_TRIPS));
@@ -68,7 +73,7 @@ export function saveTrips(trips: Trip[]): void {
 
 export function getCurrentTripId(): string {
   try {
-    const id = localStorage.getItem(STORAGE_KEY_CURRENT_ID);
+    const id = localStorage.getItem(STORAGE_KEY_CURRENT_ID) || localStorage.getItem(LEGACY_STORAGE_KEY_CURRENT_ID);
     if (id) return id;
     const trips = getStoredTrips();
     if (trips.length > 0) return trips[0].id;
@@ -82,11 +87,12 @@ export function setCurrentTripId(id: string): void {
   localStorage.setItem(STORAGE_KEY_CURRENT_ID, id);
 }
 
-const STORAGE_KEY_DELETED_IDS = 'wayfarer_deleted_trip_ids_v1';
+const STORAGE_KEY_DELETED_IDS = 'hiyori_deleted_trip_ids_v1';
+const LEGACY_STORAGE_KEY_DELETED_IDS = 'wayfarer_deleted_trip_ids_v1';
 
 export function getDeletedTripIds(): string[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_DELETED_IDS);
+    const raw = localStorage.getItem(STORAGE_KEY_DELETED_IDS) || localStorage.getItem(LEGACY_STORAGE_KEY_DELETED_IDS);
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
