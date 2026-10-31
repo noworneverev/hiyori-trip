@@ -84,14 +84,60 @@ const CATEGORY_ICONS: Record<CategoryType, React.ComponentType<{ className?: str
   other: Circle,
 };
 
-const CATEGORY_COLORS: Record<CategoryType, { bg: string; text: string; bar: string }> = {
-  spot: { bg: 'bg-teal-50 dark:bg-teal-950/60', text: 'text-teal-700 dark:text-teal-300', bar: 'bg-teal-500' },
-  food: { bg: 'bg-amber-50 dark:bg-amber-950/60', text: 'text-amber-700 dark:text-amber-300', bar: 'bg-amber-500' },
-  transport: { bg: 'bg-sky-50 dark:bg-sky-950/60', text: 'text-sky-700 dark:text-sky-300', bar: 'bg-sky-500' },
-  hotel: { bg: 'bg-indigo-50 dark:bg-indigo-950/60', text: 'text-indigo-700 dark:text-indigo-300', bar: 'bg-indigo-500' },
-  shopping: { bg: 'bg-rose-50 dark:bg-rose-950/60', text: 'text-rose-700 dark:text-rose-300', bar: 'bg-rose-500' },
-  activity: { bg: 'bg-emerald-50 dark:bg-emerald-950/60', text: 'text-emerald-700 dark:text-emerald-300', bar: 'bg-emerald-500' },
-  other: { bg: 'bg-slate-50 dark:bg-slate-800', text: 'text-slate-700 dark:text-slate-300', bar: 'bg-slate-400' },
+// High contrast WCAG AA compliant colors for dark and light themes
+const CATEGORY_COLORS: Record<
+  CategoryType,
+  { bg: string; border: string; text: string; iconColor: string; bar: string }
+> = {
+  spot: {
+    bg: 'bg-teal-50/70 dark:bg-teal-950/40',
+    border: 'border-teal-200/90 dark:border-teal-800/70',
+    text: 'text-teal-900 dark:text-teal-200',
+    iconColor: 'text-teal-700 dark:text-teal-400',
+    bar: 'bg-teal-600 dark:bg-teal-400',
+  },
+  food: {
+    bg: 'bg-amber-50/70 dark:bg-amber-950/40',
+    border: 'border-amber-200/90 dark:border-amber-800/70',
+    text: 'text-amber-900 dark:text-amber-200',
+    iconColor: 'text-amber-700 dark:text-amber-400',
+    bar: 'bg-amber-600 dark:bg-amber-400',
+  },
+  transport: {
+    bg: 'bg-sky-50/70 dark:bg-sky-950/40',
+    border: 'border-sky-200/90 dark:border-sky-800/70',
+    text: 'text-sky-900 dark:text-sky-200',
+    iconColor: 'text-sky-700 dark:text-sky-400',
+    bar: 'bg-sky-600 dark:bg-sky-400',
+  },
+  hotel: {
+    bg: 'bg-indigo-50/70 dark:bg-indigo-950/40',
+    border: 'border-indigo-200/90 dark:border-indigo-800/70',
+    text: 'text-indigo-900 dark:text-indigo-200',
+    iconColor: 'text-indigo-700 dark:text-indigo-400',
+    bar: 'bg-indigo-600 dark:bg-indigo-400',
+  },
+  shopping: {
+    bg: 'bg-rose-50/70 dark:bg-rose-950/40',
+    border: 'border-rose-200/90 dark:border-rose-800/70',
+    text: 'text-rose-900 dark:text-rose-200',
+    iconColor: 'text-rose-700 dark:text-rose-400',
+    bar: 'bg-rose-600 dark:bg-rose-400',
+  },
+  activity: {
+    bg: 'bg-emerald-50/70 dark:bg-emerald-950/40',
+    border: 'border-emerald-200/90 dark:border-emerald-800/70',
+    text: 'text-emerald-900 dark:text-emerald-200',
+    iconColor: 'text-emerald-700 dark:text-emerald-400',
+    bar: 'bg-emerald-600 dark:bg-emerald-400',
+  },
+  other: {
+    bg: 'bg-slate-100/70 dark:bg-slate-800/40',
+    border: 'border-slate-200/90 dark:border-slate-700/70',
+    text: 'text-slate-900 dark:text-slate-200',
+    iconColor: 'text-slate-700 dark:text-slate-400',
+    bar: 'bg-slate-600 dark:bg-slate-400',
+  },
 };
 
 export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
@@ -221,7 +267,6 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
 
       (trip.days || []).forEach((day) => {
         (day.items || []).forEach((spot) => {
-          // Compound unique key: tripId + dayNumber + spotId + (spotTitle + startTime)
           const spotKey = `${trip.id}::${day.dayNumber}::${spot.id}`;
           if (seenSpotKeys.has(spotKey)) return;
           seenSpotKeys.add(spotKey);
@@ -302,72 +347,59 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     };
   }, [uniqueTrips]);
 
-  // ================= ANNUAL REVIEW COMPUTATIONS =================
-  const reviewTrips = useMemo(() => {
-    return uniqueTrips.filter((t) => {
-      if (reviewYear === 'all') return true;
+  // ================= CONSOLIDATED HIGH-PERFORMANCE ANNUAL REVIEW AGGREGATOR =================
+  // Computes all metrics, categories, cities, monthly heatmaps, and per-trip indexes in a single pass O(N)
+  const annualReviewData = useMemo(() => {
+    // 1. Pre-filter relevant trips
+    const matchedTrips: Trip[] = [];
+    const matchedTripIdSet = new Set<string>();
+
+    uniqueTrips.forEach((t) => {
+      if (reviewYear === 'all') {
+        matchedTrips.push(t);
+        matchedTripIdSet.add(t.id);
+        return;
+      }
       const startY = t.startDate?.slice(0, 4);
       const endY = t.endDate?.slice(0, 4);
-      const daysMatch = (t.days || []).some((d) => d.date?.startsWith(reviewYear));
-      return startY === reviewYear || endY === reviewYear || daysMatch;
+      const hasMatchingDay = (t.days || []).some((d) => d.date?.startsWith(reviewYear));
+      if (startY === reviewYear || endY === reviewYear || hasMatchingDay) {
+        matchedTrips.push(t);
+        matchedTripIdSet.add(t.id);
+      }
     });
-  }, [uniqueTrips, reviewYear]);
 
-  const reviewSpots = useMemo(() => {
-    return allFlattenedSpots.filter((s) => {
-      if (reviewYear === 'all') return true;
-      return s.date?.startsWith(reviewYear) || s.tripStartDate?.startsWith(reviewYear);
+    // 2. Pre-filter spots belonging to this period & build per-trip spot/photo index for O(1) lookups
+    const matchedSpots: FlattenedSpotMemory[] = [];
+    const tripSpotMap = new Map<string, { spots: FlattenedSpotMemory[]; photosCount: number }>();
+    matchedTrips.forEach((t) => {
+      tripSpotMap.set(t.id, { spots: [], photosCount: 0 });
     });
-  }, [allFlattenedSpots, reviewYear]);
 
-  // 1. Visited cities count and breakdown
-  const reviewCitiesSummary = useMemo(() => {
+    allFlattenedSpots.forEach((s) => {
+      const match =
+        reviewYear === 'all'
+          ? true
+          : (s.date && s.date.startsWith(reviewYear)) ||
+            (s.tripStartDate && s.tripStartDate.startsWith(reviewYear));
+
+      if (match) {
+        matchedSpots.push(s);
+        const record = tripSpotMap.get(s.tripId);
+        if (record) {
+          record.spots.push(s);
+          record.photosCount += s.photos.length;
+        }
+      }
+    });
+
+    // 3. Single-pass metric accumulator
+    const uniqueDates = new Set<string>();
     const cityMap = new Map<
       string,
-      {
-        city: string;
-        spotsCount: number;
-        trips: Set<string>;
-        photos: string[];
-      }
+      { city: string; spotsCount: number; trips: Set<string>; photos: string[] }
     >();
-
-    reviewTrips.forEach((tr) => {
-      const city = tr.destination?.trim() || '自由行';
-      if (!cityMap.has(city)) {
-        cityMap.set(city, {
-          city,
-          spotsCount: 0,
-          trips: new Set(),
-          photos: [],
-        });
-      }
-      cityMap.get(city)!.trips.add(tr.title);
-    });
-
-    reviewSpots.forEach((s) => {
-      const city = s.tripDestination?.trim() || '自由行';
-      if (!cityMap.has(city)) {
-        cityMap.set(city, {
-          city,
-          spotsCount: 0,
-          trips: new Set([s.tripTitle]),
-          photos: [],
-        });
-      }
-      const record = cityMap.get(city)!;
-      record.spotsCount++;
-      if (s.photos && s.photos.length > 0 && record.photos.length < 3) {
-        record.photos.push(...s.photos.slice(0, 3 - record.photos.length));
-      }
-    });
-
-    return Array.from(cityMap.values()).sort((a, b) => b.spotsCount - a.spotsCount);
-  }, [reviewTrips, reviewSpots]);
-
-  // 2. Total spots count and category breakdown
-  const reviewCategoryStats = useMemo(() => {
-    const counts: Record<CategoryType, number> = {
+    const categoryCounts: Record<CategoryType, number> = {
       spot: 0,
       food: 0,
       transport: 0,
@@ -376,15 +408,8 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       activity: 0,
       other: 0,
     };
-    reviewSpots.forEach((s) => {
-      const cat = s.category || 'spot';
-      counts[cat] = (counts[cat] || 0) + 1;
-    });
-    return counts;
-  }, [reviewSpots]);
 
-  // 3. Most frequently visited month and 12-month travel density
-  const reviewMonthlyStats = useMemo(() => {
+    // 12 months array
     const months = Array.from({ length: 12 }, (_, i) => {
       const mNum = i + 1;
       return {
@@ -392,42 +417,84 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
         name: `${mNum}月`,
         uniqueDates: new Set<string>(),
         spotsCount: 0,
-        tripsCount: new Set<string>(),
+        tripsSet: new Set<string>(),
         spots: [] as FlattenedSpotMemory[],
       };
     });
 
-    reviewTrips.forEach((tr) => {
+    // Accumulate unique travel dates & monthly trips
+    matchedTrips.forEach((tr) => {
       (tr.days || []).forEach((d) => {
         if (!d.date) return;
         const [y, m] = d.date.split('-');
         if (reviewYear !== 'all' && y !== reviewYear) return;
+
+        uniqueDates.add(d.date);
         const mIdx = parseInt(m, 10) - 1;
         if (mIdx >= 0 && mIdx < 12) {
           months[mIdx].uniqueDates.add(d.date);
-          months[mIdx].tripsCount.add(tr.id);
+          months[mIdx].tripsSet.add(tr.id);
         }
       });
     });
 
-    reviewSpots.forEach((s) => {
-      if (!s.date) return;
-      const [y, m] = s.date.split('-');
-      if (reviewYear !== 'all' && y !== reviewYear) return;
-      const mIdx = parseInt(m, 10) - 1;
-      if (mIdx >= 0 && mIdx < 12) {
-        months[mIdx].spotsCount++;
-        months[mIdx].spots.push(s);
+    // Accumulate spots, categories, cities, and monthly spots in one pass
+    matchedSpots.forEach((s) => {
+      // Category count
+      const cat = s.category || 'spot';
+      categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+
+      // City count
+      const city = s.tripDestination?.trim() || '自由行';
+      let cRecord = cityMap.get(city);
+      if (!cRecord) {
+        cRecord = {
+          city,
+          spotsCount: 0,
+          trips: new Set([s.tripTitle]),
+          photos: [],
+        };
+        cityMap.set(city, cRecord);
+      } else {
+        cRecord.trips.add(s.tripTitle);
+      }
+      cRecord.spotsCount++;
+      if (s.photos && s.photos.length > 0 && cRecord.photos.length < 3) {
+        cRecord.photos.push(...s.photos.slice(0, 3 - cRecord.photos.length));
+      }
+
+      // Monthly spots
+      if (s.date) {
+        const [y, m] = s.date.split('-');
+        if (reviewYear === 'all' || y === reviewYear) {
+          const mIdx = parseInt(m, 10) - 1;
+          if (mIdx >= 0 && mIdx < 12) {
+            months[mIdx].spotsCount++;
+            months[mIdx].spots.push(s);
+          }
+        }
       }
     });
 
+    // Compute cities summary array with percentages
+    const totalSpots = matchedSpots.length;
+    const citiesSummary = Array.from(cityMap.values())
+      .sort((a, b) => b.spotsCount - a.spotsCount)
+      .map((item) => ({
+        ...item,
+        sharePercent: totalSpots > 0 ? Math.round((item.spotsCount / totalSpots) * 100) : 0,
+      }));
+
+    // Populate monthly summary
     const populatedMonths = months.map((m) => ({
-      ...m,
+      month: m.month,
+      name: m.name,
       daysCount: m.uniqueDates.size,
-      tripsTotal: m.tripsCount.size,
+      spotsCount: m.spotsCount,
+      tripsTotal: m.tripsSet.size,
+      spots: m.spots,
     }));
 
-    // Find the most frequently visited month (highest days count, then highest spots count)
     const activeMonths = populatedMonths.filter((m) => m.daysCount > 0 || m.spotsCount > 0);
     const mostVisited = [...activeMonths].sort((a, b) => {
       if (b.daysCount !== a.daysCount) return b.daysCount - a.daysCount;
@@ -437,47 +504,53 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     const maxDays = Math.max(...populatedMonths.map((m) => m.daysCount), 1);
     const maxSpots = Math.max(...populatedMonths.map((m) => m.spotsCount), 1);
 
-    return {
-      months: populatedMonths,
-      mostVisited,
-      maxDays,
-      maxSpots,
-    };
-  }, [reviewTrips, reviewSpots, reviewYear]);
+    const totalPhotosCount = matchedSpots.reduce((acc, s) => acc + s.photos.length, 0);
 
-  // Unique travel dates in review period
-  const reviewTotalDays = useMemo(() => {
-    const dates = new Set<string>();
-    reviewTrips.forEach((tr) => {
-      (tr.days || []).forEach((d) => {
-        if (!d.date) return;
-        if (reviewYear === 'all' || d.date.startsWith(reviewYear)) {
-          dates.add(d.date);
-        }
-      });
-    });
-    return dates.size;
-  }, [reviewTrips, reviewYear]);
+    return {
+      reviewTrips: matchedTrips,
+      reviewSpots: matchedSpots,
+      citiesSummary,
+      categoryCounts,
+      monthlyStats: {
+        months: populatedMonths,
+        mostVisited,
+        maxDays,
+        maxSpots,
+      },
+      totalTravelDays: uniqueDates.size,
+      totalPhotosCount,
+      tripSpotMap,
+    };
+  }, [uniqueTrips, allFlattenedSpots, reviewYear]);
+
+  // Spots for selected review month drill-down
+  const selectedMonthSpots = useMemo(() => {
+    if (reviewSelectedMonth === null) return [];
+    const targetMonth = annualReviewData.monthlyStats.months.find(
+      (m) => m.month === reviewSelectedMonth
+    );
+    return targetMonth?.spots || [];
+  }, [reviewSelectedMonth, annualReviewData.monthlyStats.months]);
 
   // Review copy report handler
   const handleCopyReviewReport = () => {
     const yearLabel = reviewYear === 'all' ? '歷年全部' : `${reviewYear} 年度`;
-    const citiesStr = reviewCitiesSummary.map((c) => `${c.city} (${c.spotsCount}處)`).join('、') || '無紀錄';
-    const topMonthStr = reviewMonthlyStats.mostVisited
-      ? `${reviewMonthlyStats.mostVisited.name}（出遊 ${reviewMonthlyStats.mostVisited.daysCount} 天 · 走訪 ${reviewMonthlyStats.mostVisited.spotsCount} 個行程點）`
+    const citiesStr = annualReviewData.citiesSummary.map((c) => `${c.city} (${c.spotsCount}處)`).join('、') || '無紀錄';
+    const topMonthStr = annualReviewData.monthlyStats.mostVisited
+      ? `${annualReviewData.monthlyStats.mostVisited.name}（出遊 ${annualReviewData.monthlyStats.mostVisited.daysCount} 天 · 走訪 ${annualReviewData.monthlyStats.mostVisited.spotsCount} 個行程點）`
       : '無';
 
     const text = `✨【日和手帳 · ${yearLabel}旅行回顧戰報】✨\n` +
-      `📅 漫遊總天數：${reviewTotalDays} 天\n` +
-      `✈️ 累積旅程：${reviewTrips.length} 趟\n` +
-      `🏙️ 造訪城市：${reviewCitiesSummary.length} 個（${citiesStr}）\n` +
-      `📍 景點打卡總數：${reviewSpots.length} 處\n` +
-      `   · 景點觀光：${reviewCategoryStats.spot} 處\n` +
-      `   · 美食品嚐：${reviewCategoryStats.food} 處\n` +
-      `   · 交通移動：${reviewCategoryStats.transport} 次\n` +
-      `   · 住宿飯店：${reviewCategoryStats.hotel} 晚\n` +
-      `   · 購物血拼：${reviewCategoryStats.shopping} 處\n` +
-      `   · 體驗活動：${reviewCategoryStats.activity} 次\n` +
+      `📅 漫遊總天數：${annualReviewData.totalTravelDays} 天\n` +
+      `✈️ 累積旅程：${annualReviewData.reviewTrips.length} 趟\n` +
+      `🏙️ 造訪城市：${annualReviewData.citiesSummary.length} 個（${citiesStr}）\n` +
+      `📍 景點打卡總數：${annualReviewData.reviewSpots.length} 處\n` +
+      `   · 景點觀光：${annualReviewData.categoryCounts.spot} 處\n` +
+      `   · 美食品嚐：${annualReviewData.categoryCounts.food} 處\n` +
+      `   · 交通移動：${annualReviewData.categoryCounts.transport} 次\n` +
+      `   · 住宿飯店：${annualReviewData.categoryCounts.hotel} 晚\n` +
+      `   · 購物血拼：${annualReviewData.categoryCounts.shopping} 處\n` +
+      `   · 體驗活動：${annualReviewData.categoryCounts.activity} 次\n` +
       `👑 最常出遊月份：${topMonthStr}\n` +
       `\n— 紀錄於 日和手帳 Hiyori`;
 
@@ -647,7 +720,6 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       }
       const group = groupMap.get(s.tripId);
       if (group) {
-        // Prevent duplicate spot within the trip group
         if (!group.spots.some((existing) => existing.spotId === s.spotId || (existing.spotTitle.trim() === s.spotTitle.trim() && (existing.startTime || '') === (s.startTime || '')))) {
           group.spots.push(s);
         }
@@ -1330,13 +1402,13 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
               )}
             </div>
           ) : (
-            /* ================= VIEW 3: 年度回顧 (Annual Review) ================= */
+            /* ================= VIEW 3: 年度回顧 (Annual Review - High Performance & Theme Balanced) ================= */
             <div className="space-y-6 max-w-4xl mx-auto animate-in fade-in duration-200">
               {/* Year Selector & Copy Report Bar */}
               <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
-                  <span className="text-xs font-bold text-slate-400 shrink-0 flex items-center gap-1.5">
-                    <CalendarIcon className="w-3.5 h-3.5 text-teal-600" />
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400 shrink-0 flex items-center gap-1.5">
+                    <CalendarIcon className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
                     <span>回顧年度:</span>
                   </span>
                   <button
@@ -1348,7 +1420,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
                       reviewYear === 'all'
                         ? 'bg-teal-600 text-white shadow-xs'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                     }`}
                   >
                     全部年份
@@ -1364,7 +1436,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
                         reviewYear === yr
                           ? 'bg-teal-600 text-white shadow-xs'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                       }`}
                     >
                       {yr} 年
@@ -1385,71 +1457,71 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 </div>
               </div>
 
-              {/* Top 3 Core Required Annual Metrics + Travel Days Banner */}
+              {/* Top 4 Core Metrics Cards (Balanced Contrast for Light and Dark modes) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {/* 1. Visited Cities Count (造訪城市數量) */}
-                <div className="p-4 rounded-3xl bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent border border-emerald-500/25 dark:border-emerald-500/20 shadow-xs space-y-2">
-                  <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400">
-                    <span className="text-xs font-bold flex items-center gap-1.5">
-                      <Building2 className="w-4 h-4" />
+                <div className="p-4 rounded-3xl bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/90 dark:border-emerald-800/60 shadow-2xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold flex items-center gap-1.5 text-emerald-800 dark:text-emerald-300">
+                      <Building2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                       <span>造訪城市數量</span>
                     </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 font-bold">
-                      {reviewYear === 'all' ? '歷年' : `${reviewYear}年`}
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100/90 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 font-bold border border-emerald-200/70 dark:border-emerald-700/60">
+                      {reviewYear === 'all' ? '歷年累計' : `${reviewYear}年`}
                     </span>
                   </div>
                   <div>
                     <div className="text-2xl sm:text-3xl font-black font-mono text-slate-900 dark:text-white tracking-tight">
-                      {reviewCitiesSummary.length}{' '}
-                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">個城市</span>
+                      {annualReviewData.citiesSummary.length}{' '}
+                      <span className="text-xs font-bold text-slate-600 dark:text-slate-400">個城市</span>
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-1">
-                      {reviewCitiesSummary.map((c) => c.city).slice(0, 3).join(' · ') || '尚未登錄城市'}
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 truncate mt-1">
+                      {annualReviewData.citiesSummary.map((c) => c.city).slice(0, 3).join(' · ') || '尚未登錄城市'}
                     </p>
                   </div>
                 </div>
 
-                {/* 2. Total Spots Count (景點總數) */}
-                <div className="p-4 rounded-3xl bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-transparent border border-amber-500/25 dark:border-amber-500/20 shadow-xs space-y-2">
-                  <div className="flex items-center justify-between text-amber-600 dark:text-amber-400">
-                    <span className="text-xs font-bold flex items-center gap-1.5">
-                      <Landmark className="w-4 h-4" />
+                {/* 2. Total Spots Count (景點打卡總數) */}
+                <div className="p-4 rounded-3xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200/90 dark:border-amber-800/60 shadow-2xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
+                      <Landmark className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                       <span>景點打卡總數</span>
                     </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 font-bold">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100/90 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 font-bold border border-amber-200/70 dark:border-amber-700/60">
                       累積足跡
                     </span>
                   </div>
                   <div>
                     <div className="text-2xl sm:text-3xl font-black font-mono text-slate-900 dark:text-white tracking-tight">
-                      {reviewSpots.length}{' '}
-                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">處行程點</span>
+                      {annualReviewData.reviewSpots.length}{' '}
+                      <span className="text-xs font-bold text-slate-600 dark:text-slate-400">處行程點</span>
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-1">
-                      含景點 {reviewCategoryStats.spot} · 美食 {reviewCategoryStats.food} · 住宿 {reviewCategoryStats.hotel}
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 truncate mt-1">
+                      含景點 {annualReviewData.categoryCounts.spot} · 美食 {annualReviewData.categoryCounts.food} · 住宿 {annualReviewData.categoryCounts.hotel}
                     </p>
                   </div>
                 </div>
 
                 {/* 3. Most Frequently Visited Month (最常造訪的月份) */}
-                <div className="p-4 rounded-3xl bg-gradient-to-br from-rose-500/10 via-pink-500/5 to-transparent border border-rose-500/25 dark:border-rose-500/20 shadow-xs space-y-2">
-                  <div className="flex items-center justify-between text-rose-600 dark:text-rose-400">
-                    <span className="text-xs font-bold flex items-center gap-1.5">
-                      <Trophy className="w-4 h-4" />
+                <div className="p-4 rounded-3xl bg-rose-50/80 dark:bg-rose-950/30 border border-rose-200/90 dark:border-rose-800/60 shadow-2xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold flex items-center gap-1.5 text-rose-800 dark:text-rose-300">
+                      <Trophy className="w-4 h-4 text-rose-600 dark:text-rose-400" />
                       <span>最常造訪月份</span>
                     </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/15 font-bold flex items-center gap-1">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100/90 dark:bg-rose-900/60 text-rose-800 dark:text-rose-200 font-bold border border-rose-200/70 dark:border-rose-700/60 flex items-center gap-1">
                       👑 巔峰出遊
                     </span>
                   </div>
                   <div>
                     <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
-                      {reviewMonthlyStats.mostVisited ? reviewMonthlyStats.mostVisited.name : '—'}
+                      {annualReviewData.monthlyStats.mostVisited ? annualReviewData.monthlyStats.mostVisited.name : '—'}
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-1">
-                      {reviewMonthlyStats.mostVisited ? (
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 truncate mt-1">
+                      {annualReviewData.monthlyStats.mostVisited ? (
                         <span>
-                          出遊 {reviewMonthlyStats.mostVisited.daysCount} 天 · 走訪 {reviewMonthlyStats.mostVisited.spotsCount} 點
+                          出遊 {annualReviewData.monthlyStats.mostVisited.daysCount} 天 · 走訪 {annualReviewData.monthlyStats.mostVisited.spotsCount} 點
                         </span>
                       ) : (
                         '該年度暫無行程'
@@ -1459,55 +1531,55 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 </div>
 
                 {/* 4. Total Travel Days & Trips (漫遊總天數) */}
-                <div className="p-4 rounded-3xl bg-gradient-to-br from-sky-500/10 via-blue-500/5 to-transparent border border-sky-500/25 dark:border-sky-500/20 shadow-xs space-y-2">
-                  <div className="flex items-center justify-between text-sky-600 dark:text-sky-400">
-                    <span className="text-xs font-bold flex items-center gap-1.5">
-                      <Compass className="w-4 h-4" />
+                <div className="p-4 rounded-3xl bg-sky-50/80 dark:bg-sky-950/30 border border-sky-200/90 dark:border-sky-800/60 shadow-2xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold flex items-center gap-1.5 text-sky-800 dark:text-sky-300">
+                      <Compass className="w-4 h-4 text-sky-600 dark:text-sky-400" />
                       <span>漫遊旅途天數</span>
                     </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/10 font-bold">
-                      {reviewTrips.length} 趟旅程
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-100/90 dark:bg-sky-900/60 text-sky-800 dark:text-sky-200 font-bold border border-sky-200/70 dark:border-sky-700/60">
+                      {annualReviewData.reviewTrips.length} 趟旅程
                     </span>
                   </div>
                   <div>
                     <div className="text-2xl sm:text-3xl font-black font-mono text-slate-900 dark:text-white tracking-tight">
-                      {reviewTotalDays}{' '}
-                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">天</span>
+                      {annualReviewData.totalTravelDays}{' '}
+                      <span className="text-xs font-bold text-slate-600 dark:text-slate-400">天</span>
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-1">
-                      珍藏回憶照片 {reviewSpots.reduce((acc, s) => acc + s.photos.length, 0)} 張
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 truncate mt-1">
+                      珍藏回憶照片 {annualReviewData.totalPhotosCount} 張
                     </p>
                   </div>
                 </div>
               </div>
 
-              {/* 12-Month Travel Frequency Bar Chart (月度旅行熱度長條圖) */}
+              {/* 12-Month Travel Frequency Bar Chart (Visual contrast optimized for both themes) */}
               <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
-                      <BarChart3 className="w-4 h-4 text-teal-600" />
-                      <span>12 個月旅行熱度分佈</span>
+                      <BarChart3 className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                      <span>12 個月旅行熱度分佈長條圖</span>
                     </h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      點選特定月份可快速檢視當月的景點與足跡明細
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      點選柱狀圖任意月份，可即時查看當月出遊明細與景點打卡清單
                     </p>
                   </div>
 
-                  {reviewMonthlyStats.mostVisited && (
-                    <div className="hidden sm:flex items-center gap-1.5 text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-3 py-1 rounded-xl border border-rose-200 dark:border-rose-900">
-                      <span>👑 最高峰月份：{reviewMonthlyStats.mostVisited.name}</span>
+                  {annualReviewData.monthlyStats.mostVisited && (
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-rose-800 dark:text-rose-200 bg-rose-100/80 dark:bg-rose-950/70 px-3 py-1 rounded-xl border border-rose-200 dark:border-rose-800/80 shadow-2xs self-start sm:self-auto">
+                      <span>👑 出遊最高峰：{annualReviewData.monthlyStats.mostVisited.name}</span>
                     </div>
                   )}
                 </div>
 
                 {/* 12 Columns Visual Bar Grid */}
-                <div className="grid grid-cols-12 gap-1.5 sm:gap-2.5 pt-4 pb-2 items-end min-h-[140px]">
-                  {reviewMonthlyStats.months.map((m) => {
-                    const isPeak = reviewMonthlyStats.mostVisited?.month === m.month && m.daysCount > 0;
+                <div className="grid grid-cols-12 gap-1.5 sm:gap-2.5 pt-4 pb-2 items-end min-h-[145px]">
+                  {annualReviewData.monthlyStats.months.map((m) => {
+                    const isPeak = annualReviewData.monthlyStats.mostVisited?.month === m.month && m.daysCount > 0;
                     const isSelected = reviewSelectedMonth === m.month;
                     const heightPercent = m.daysCount > 0
-                      ? Math.max(18, Math.round((m.daysCount / reviewMonthlyStats.maxDays) * 100))
+                      ? Math.max(18, Math.round((m.daysCount / annualReviewData.monthlyStats.maxDays) * 100))
                       : 8;
 
                     return (
@@ -1519,40 +1591,43 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                           }
                         }}
                         className={`flex flex-col items-center justify-end h-full group cursor-pointer ${
-                          m.daysCount === 0 && m.spotsCount === 0 ? 'opacity-30 cursor-default' : ''
+                          m.daysCount === 0 && m.spotsCount === 0 ? 'opacity-35 cursor-default' : ''
                         }`}
+                        title={`${m.name}: 出遊 ${m.daysCount} 天, ${m.spotsCount} 個行程點`}
                       >
                         {/* Peak indicator icon */}
                         {isPeak && (
-                          <span className="text-[10px] text-rose-500 font-bold mb-1 animate-bounce">
+                          <span className="text-[11px] text-rose-500 font-bold mb-1 animate-bounce">
                             👑
                           </span>
                         )}
 
-                        {/* Bar */}
-                        <div className="w-full max-w-[32px] bg-slate-100 dark:bg-slate-800 rounded-xl overflow-hidden flex flex-col justify-end p-0.5">
+                        {/* Bar Track & Fill */}
+                        <div className="w-full max-w-[34px] bg-slate-100 dark:bg-slate-800/90 border border-slate-200/80 dark:border-slate-700/80 rounded-xl overflow-hidden flex flex-col justify-end p-0.5">
                           <div
                             style={{ height: `${heightPercent}%` }}
                             className={`w-full rounded-lg transition-all duration-300 ${
                               isPeak
-                                ? 'bg-gradient-to-t from-rose-500 to-amber-400 shadow-sm'
+                                ? 'bg-gradient-to-t from-rose-600 to-amber-500 dark:from-rose-500 dark:to-amber-400 shadow-sm'
                                 : isSelected
-                                ? 'bg-teal-500 ring-2 ring-teal-400'
+                                ? 'bg-teal-500 dark:bg-teal-400 ring-2 ring-teal-400 dark:ring-teal-300 shadow-xs'
                                 : m.daysCount > 0
-                                ? 'bg-teal-600 hover:bg-teal-500'
-                                : 'bg-slate-200 dark:bg-slate-700'
+                                ? 'bg-teal-600 dark:bg-teal-500 hover:bg-teal-500 dark:hover:bg-teal-400'
+                                : 'bg-slate-200/90 dark:bg-slate-700'
                             }`}
                           />
                         </div>
 
-                        {/* Label */}
+                        {/* Month Label */}
                         <span
                           className={`mt-2 text-[10px] sm:text-xs font-mono font-bold ${
                             isPeak
-                              ? 'text-rose-600 dark:text-rose-400 font-black'
+                              ? 'text-rose-700 dark:text-rose-300 font-black'
                               : isSelected
-                              ? 'text-teal-600 font-black'
-                              : 'text-slate-600 dark:text-slate-400'
+                              ? 'text-teal-700 dark:text-teal-300 font-black'
+                              : m.daysCount > 0
+                              ? 'text-slate-800 dark:text-slate-200'
+                              : 'text-slate-400 dark:text-slate-500'
                           }`}
                         >
                           {m.month}月
@@ -1560,7 +1635,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
 
                         {/* Days Pill */}
                         {m.daysCount > 0 && (
-                          <span className="text-[9px] text-slate-400 font-mono">
+                          <span className="text-[9px] text-slate-500 dark:text-slate-400 font-mono font-semibold">
                             {m.daysCount}天
                           </span>
                         )}
@@ -1568,59 +1643,88 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                     );
                   })}
                 </div>
+
+                {/* Interactive Month Selection Drill-down Banner */}
+                {reviewSelectedMonth !== null && (
+                  <div className="p-3.5 rounded-2xl bg-teal-50/80 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800/80 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 animate-in fade-in duration-150">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-full bg-teal-600 text-white font-mono font-bold text-xs">
+                        {reviewSelectedMonth}月
+                      </span>
+                      <span className="text-xs font-bold text-teal-900 dark:text-teal-200">
+                        當月出遊明細：共 {selectedMonthSpots.length} 個行程點
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setReviewSelectedMonth(null)}
+                      className="px-2.5 py-1 text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white cursor-pointer self-end sm:self-auto"
+                    >
+                      清除月份篩選
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Visited Cities Breakdown (造訪城市排行榜與足跡) */}
               <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
-                    <Building2 className="w-4 h-4 text-teal-600" />
-                    <span>造訪城市與足跡清單 ({reviewCitiesSummary.length} 座)</span>
+                    <Building2 className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                    <span>造訪城市與足跡清單 ({annualReviewData.citiesSummary.length} 座)</span>
                   </h3>
-                  <span className="text-xs text-slate-400">點選城市可瀏覽細節</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">依行程打卡數排序</span>
                 </div>
 
-                {reviewCitiesSummary.length === 0 ? (
+                {annualReviewData.citiesSummary.length === 0 ? (
                   <p className="text-xs text-slate-400 py-4 text-center">
                     該年度尚未記錄任何造訪城市。
                   </p>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {reviewCitiesSummary.map((item, idx) => {
-                      const sharePercent = reviewSpots.length > 0
-                        ? Math.round((item.spotsCount / reviewSpots.length) * 100)
-                        : 0;
+                    {annualReviewData.citiesSummary.map((item, idx) => {
+                      const rankClass =
+                        idx === 0
+                          ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/80 dark:text-amber-200 border border-amber-300 dark:border-amber-700/80'
+                          : idx === 1
+                          ? 'bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-200'
+                          : idx === 2
+                          ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
+                          : 'bg-teal-50 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300';
 
                       return (
                         <div
                           key={item.city}
-                          className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 space-y-2 hover:border-teal-500/50 transition shadow-2xs"
+                          className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/90 dark:border-slate-700/90 space-y-2.5 hover:border-teal-500/60 dark:hover:border-teal-400/60 transition shadow-2xs"
                         >
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="w-5 h-5 rounded-full bg-teal-100 dark:bg-teal-900 text-teal-800 dark:text-teal-200 text-[10px] font-mono font-bold flex items-center justify-center shrink-0">
+                              <span
+                                className={`w-5 h-5 rounded-full ${rankClass} text-[10px] font-mono font-bold flex items-center justify-center shrink-0`}
+                              >
                                 {idx + 1}
                               </span>
                               <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
                                 {item.city}
                               </h4>
                             </div>
-                            <span className="text-[11px] font-mono font-bold text-teal-600 dark:text-teal-400 shrink-0">
+                            <span className="text-[11px] font-mono font-bold text-teal-700 dark:text-teal-300 shrink-0">
                               {item.spotsCount} 個點
                             </span>
                           </div>
 
-                          {/* Progress bar of spots share */}
+                          {/* High contrast progress bar */}
                           <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
                             <div
-                              style={{ width: `${Math.max(10, sharePercent)}%` }}
-                              className="bg-teal-500 h-full rounded-full"
+                              style={{ width: `${Math.max(10, item.sharePercent)}%` }}
+                              className="bg-teal-600 dark:bg-teal-400 h-full rounded-full transition-all duration-300"
                             />
                           </div>
 
-                          <div className="flex items-center justify-between text-[10px] text-slate-400">
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                             <span className="truncate">相關旅程：{Array.from(item.trips).join('、')}</span>
-                            <span>{sharePercent}%</span>
+                            <span className="font-mono font-bold">{item.sharePercent}%</span>
                           </div>
 
                           {/* Sample thumbnails */}
@@ -1650,38 +1754,63 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 )}
               </div>
 
-              {/* Spot Category Distribution (景點類別比例) */}
+              {/* Spot Category Distribution (景點類別比例 & Stacked Bar) */}
               <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-amber-500" />
-                    <span>行程類別分佈 ({reviewSpots.length} 處打卡點)</span>
+                    <span>行程類別分佈 ({annualReviewData.reviewSpots.length} 處打卡點)</span>
                   </h3>
                 </div>
 
+                {/* Stacked Proportional Progress Bar */}
+                {annualReviewData.reviewSpots.length > 0 && (
+                  <div className="w-full h-3 rounded-full overflow-hidden flex bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700/80 shadow-2xs">
+                    {(['spot', 'food', 'transport', 'hotel', 'shopping', 'activity', 'other'] as CategoryType[]).map(
+                      (cat) => {
+                        const count = annualReviewData.categoryCounts[cat] || 0;
+                        if (count === 0) return null;
+                        const pct = (count / annualReviewData.reviewSpots.length) * 100;
+                        const color = CATEGORY_COLORS[cat];
+                        return (
+                          <div
+                            key={cat}
+                            style={{ width: `${pct}%` }}
+                            className={`${color.bar} h-full transition-all`}
+                            title={`${CATEGORY_NAMES[cat]}: ${count} (${Math.round(pct)}%)`}
+                          />
+                        );
+                      }
+                    )}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
                   {(['spot', 'food', 'transport', 'hotel', 'shopping', 'activity'] as CategoryType[]).map((cat) => {
-                    const count = reviewCategoryStats[cat] || 0;
-                    const percent = reviewSpots.length > 0 ? Math.round((count / reviewSpots.length) * 100) : 0;
+                    const count = annualReviewData.categoryCounts[cat] || 0;
+                    const percent =
+                      annualReviewData.reviewSpots.length > 0
+                        ? Math.round((count / annualReviewData.reviewSpots.length) * 100)
+                        : 0;
                     const Icon = CATEGORY_ICONS[cat] || Circle;
                     const color = CATEGORY_COLORS[cat];
 
                     return (
                       <div
                         key={cat}
-                        className={`p-3 rounded-2xl ${color.bg} border border-slate-200/60 dark:border-slate-700/60 flex flex-col justify-between space-y-1.5`}
+                        className={`p-3 rounded-2xl ${color.bg} border ${color.border} flex flex-col justify-between space-y-1.5`}
                       >
                         <div className="flex items-center justify-between">
-                          <Icon className={`w-4 h-4 ${color.text}`} />
-                          <span className="text-[10px] font-mono font-bold text-slate-400">
+                          <Icon className={`w-4 h-4 ${color.iconColor}`} />
+                          <span className="text-[10px] font-mono font-bold text-slate-500 dark:text-slate-400">
                             {percent}%
                           </span>
                         </div>
                         <div>
-                          <div className="text-lg font-black font-mono text-slate-900 dark:text-white">
+                          <div className={`text-lg font-black font-mono ${color.text}`}>
                             {count}
                           </div>
-                          <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                          <p className={`text-[11px] font-bold ${color.text}`}>
                             {CATEGORY_NAMES[cat]}
                           </p>
                         </div>
@@ -1691,24 +1820,25 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 </div>
               </div>
 
-              {/* Trips of the Year List (年度所有旅程清單) */}
+              {/* Trips of the Year List (年度所有旅程清單 - O(1) spot count lookups) */}
               <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
-                    <Route className="w-4 h-4 text-teal-600" />
-                    <span>年度旅程篇章 ({reviewTrips.length} 趟旅程)</span>
+                    <Route className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                    <span>年度旅程篇章 ({annualReviewData.reviewTrips.length} 趟旅程)</span>
                   </h3>
                 </div>
 
                 <div className="space-y-3">
-                  {reviewTrips.map((tr) => {
-                    const tripSpots = allFlattenedSpots.filter((s) => s.tripId === tr.id);
-                    const photosCount = tripSpots.reduce((acc, s) => acc + s.photos.length, 0);
+                  {annualReviewData.reviewTrips.map((tr) => {
+                    const tripData = annualReviewData.tripSpotMap.get(tr.id);
+                    const spotsCount = tripData?.spots.length || 0;
+                    const photosCount = tripData?.photosCount || 0;
 
                     return (
                       <div
                         key={tr.id}
-                        className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 hover:border-teal-400 transition"
+                        className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 hover:border-teal-400 dark:hover:border-teal-500 transition"
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <div
@@ -1723,12 +1853,12 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                             <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white truncate">
                               {tr.title}
                             </h4>
-                            <p className="text-xs text-slate-400 flex items-center gap-2 font-mono mt-0.5">
+                            <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2 font-mono mt-0.5">
                               <span>{formatDateSlash(tr.startDate)} ~ {formatDateSlash(tr.endDate)}</span>
                               <span>·</span>
                               <span>{tr.destination}</span>
                               <span>·</span>
-                              <span>{tripSpots.length} 個行程點</span>
+                              <span>{spotsCount} 個行程點</span>
                               {photosCount > 0 && <span>· 📸 {photosCount} 張照片</span>}
                             </p>
                           </div>
