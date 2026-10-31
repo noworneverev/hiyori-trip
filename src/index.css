@@ -29,6 +29,10 @@ body {
   background-color: #0f172a;
 }
 
+.dark .leaflet-tile-pane {
+  filter: brightness(0.7) invert(1) contrast(2.8) hue-rotate(200deg) saturate(0.35);
+}
+
 .leaflet-popup-content-wrapper {
   border-radius: 1rem;
   box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);

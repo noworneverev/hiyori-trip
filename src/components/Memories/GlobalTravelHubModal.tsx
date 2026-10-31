@@ -19,6 +19,19 @@ import {
   ArrowRight,
   Filter,
   Route,
+  BarChart3,
+  Sparkles,
+  Trophy,
+  Building2,
+  TrendingUp,
+  Copy,
+  Landmark,
+  Utensils,
+  Train,
+  Hotel,
+  ShoppingBag,
+  Footprints,
+  Circle,
 } from 'lucide-react';
 
 interface GlobalTravelHubModalProps {
@@ -52,13 +65,33 @@ interface FlattenedSpotMemory {
 }
 
 const CATEGORY_NAMES: Record<CategoryType, string> = {
-  spot: '景點',
-  food: '美食',
-  transport: '交通',
-  hotel: '住宿',
-  shopping: '購物',
-  activity: '體驗',
-  other: '其他',
+  spot: '景點觀光',
+  food: '美食品嚐',
+  transport: '交通移動',
+  hotel: '住宿飯店',
+  shopping: '購物採買',
+  activity: '體驗活動',
+  other: '其他行程',
+};
+
+const CATEGORY_ICONS: Record<CategoryType, React.ComponentType<{ className?: string }>> = {
+  spot: Landmark,
+  food: Utensils,
+  transport: Train,
+  hotel: Hotel,
+  shopping: ShoppingBag,
+  activity: Footprints,
+  other: Circle,
+};
+
+const CATEGORY_COLORS: Record<CategoryType, { bg: string; text: string; bar: string }> = {
+  spot: { bg: 'bg-teal-50 dark:bg-teal-950/60', text: 'text-teal-700 dark:text-teal-300', bar: 'bg-teal-500' },
+  food: { bg: 'bg-amber-50 dark:bg-amber-950/60', text: 'text-amber-700 dark:text-amber-300', bar: 'bg-amber-500' },
+  transport: { bg: 'bg-sky-50 dark:bg-sky-950/60', text: 'text-sky-700 dark:text-sky-300', bar: 'bg-sky-500' },
+  hotel: { bg: 'bg-indigo-50 dark:bg-indigo-950/60', text: 'text-indigo-700 dark:text-indigo-300', bar: 'bg-indigo-500' },
+  shopping: { bg: 'bg-rose-50 dark:bg-rose-950/60', text: 'text-rose-700 dark:text-rose-300', bar: 'bg-rose-500' },
+  activity: { bg: 'bg-emerald-50 dark:bg-emerald-950/60', text: 'text-emerald-700 dark:text-emerald-300', bar: 'bg-emerald-500' },
+  other: { bg: 'bg-slate-50 dark:bg-slate-800', text: 'text-slate-700 dark:text-slate-300', bar: 'bg-slate-400' },
 };
 
 export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
@@ -71,8 +104,8 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   useBodyScrollLock(true);
   const t = TRANSLATIONS[lang];
 
-  // Active view mode: 'calendar' or 'timeline'
-  const [viewMode, setViewMode] = useState<'calendar' | 'timeline'>('calendar');
+  // Active view mode: 'calendar', 'timeline', or 'review'
+  const [viewMode, setViewMode] = useState<'calendar' | 'timeline' | 'review'>('calendar');
 
   // Search and filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -80,9 +113,22 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedDestination, setSelectedDestination] = useState<string>('all');
 
+  // Annual Review filter states
+  const [reviewYear, setReviewYear] = useState<string>(() => {
+    const active = trips.find((t) => t.id === currentTripId);
+    if (active?.startDate && active.startDate.length >= 4) {
+      return active.startDate.slice(0, 4);
+    }
+    if (trips.length > 0 && trips[0].startDate && trips[0].startDate.length >= 4) {
+      return trips[0].startDate.slice(0, 4);
+    }
+    return new Date().getFullYear().toString();
+  });
+  const [reviewSelectedMonth, setReviewSelectedMonth] = useState<number | null>(null);
+  const [copiedReviewReport, setCopiedReviewReport] = useState(false);
+
   // Calendar navigation state
   const [calendarYear, setCalendarYear] = useState<number>(() => {
-    // Default to the year of the current trip or most recent trip or current year
     const active = trips.find((t) => t.id === currentTripId);
     if (active?.startDate && active.startDate.length >= 4) {
       const y = parseInt(active.startDate.slice(0, 4), 10);
@@ -147,7 +193,6 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     const list: FlattenedSpotMemory[] = [];
 
     trips.forEach((trip) => {
-      // Collect photos from trip.memories mapped by spotId
       const memoryPhotoMap: Record<string, { photos: string[]; notes?: string; mood?: string; googlePhotosUrl?: string }> = {};
       (trip.memories || []).forEach((mem) => {
         if (mem.spotId) {
@@ -239,55 +284,236 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     };
   }, [trips]);
 
-  // Filtered spots based on user search query, year, destination, category
+  // ================= ANNUAL REVIEW COMPUTATIONS =================
+  const reviewTrips = useMemo(() => {
+    return trips.filter((t) => {
+      if (reviewYear === 'all') return true;
+      const startY = t.startDate?.slice(0, 4);
+      const endY = t.endDate?.slice(0, 4);
+      const daysMatch = (t.days || []).some((d) => d.date?.startsWith(reviewYear));
+      return startY === reviewYear || endY === reviewYear || daysMatch;
+    });
+  }, [trips, reviewYear]);
+
+  const reviewSpots = useMemo(() => {
+    return allFlattenedSpots.filter((s) => {
+      if (reviewYear === 'all') return true;
+      return s.date?.startsWith(reviewYear) || s.tripStartDate?.startsWith(reviewYear);
+    });
+  }, [allFlattenedSpots, reviewYear]);
+
+  // 1. Visited cities count and breakdown
+  const reviewCitiesSummary = useMemo(() => {
+    const cityMap = new Map<
+      string,
+      {
+        city: string;
+        spotsCount: number;
+        trips: Set<string>;
+        photos: string[];
+      }
+    >();
+
+    reviewTrips.forEach((tr) => {
+      const city = tr.destination?.trim() || '自由行';
+      if (!cityMap.has(city)) {
+        cityMap.set(city, {
+          city,
+          spotsCount: 0,
+          trips: new Set(),
+          photos: [],
+        });
+      }
+      cityMap.get(city)!.trips.add(tr.title);
+    });
+
+    reviewSpots.forEach((s) => {
+      const city = s.tripDestination?.trim() || '自由行';
+      if (!cityMap.has(city)) {
+        cityMap.set(city, {
+          city,
+          spotsCount: 0,
+          trips: new Set([s.tripTitle]),
+          photos: [],
+        });
+      }
+      const record = cityMap.get(city)!;
+      record.spotsCount++;
+      if (s.photos && s.photos.length > 0 && record.photos.length < 3) {
+        record.photos.push(...s.photos.slice(0, 3 - record.photos.length));
+      }
+    });
+
+    return Array.from(cityMap.values()).sort((a, b) => b.spotsCount - a.spotsCount);
+  }, [reviewTrips, reviewSpots]);
+
+  // 2. Total spots count and category breakdown
+  const reviewCategoryStats = useMemo(() => {
+    const counts: Record<CategoryType, number> = {
+      spot: 0,
+      food: 0,
+      transport: 0,
+      hotel: 0,
+      shopping: 0,
+      activity: 0,
+      other: 0,
+    };
+    reviewSpots.forEach((s) => {
+      const cat = s.category || 'spot';
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    return counts;
+  }, [reviewSpots]);
+
+  // 3. Most frequently visited month and 12-month travel density
+  const reviewMonthlyStats = useMemo(() => {
+    const months = Array.from({ length: 12 }, (_, i) => {
+      const mNum = i + 1;
+      return {
+        month: mNum,
+        name: `${mNum}月`,
+        uniqueDates: new Set<string>(),
+        spotsCount: 0,
+        tripsCount: new Set<string>(),
+        spots: [] as FlattenedSpotMemory[],
+      };
+    });
+
+    reviewTrips.forEach((tr) => {
+      (tr.days || []).forEach((d) => {
+        if (!d.date) return;
+        const [y, m] = d.date.split('-');
+        if (reviewYear !== 'all' && y !== reviewYear) return;
+        const mIdx = parseInt(m, 10) - 1;
+        if (mIdx >= 0 && mIdx < 12) {
+          months[mIdx].uniqueDates.add(d.date);
+          months[mIdx].tripsCount.add(tr.id);
+        }
+      });
+    });
+
+    reviewSpots.forEach((s) => {
+      if (!s.date) return;
+      const [y, m] = s.date.split('-');
+      if (reviewYear !== 'all' && y !== reviewYear) return;
+      const mIdx = parseInt(m, 10) - 1;
+      if (mIdx >= 0 && mIdx < 12) {
+        months[mIdx].spotsCount++;
+        months[mIdx].spots.push(s);
+      }
+    });
+
+    const populatedMonths = months.map((m) => ({
+      ...m,
+      daysCount: m.uniqueDates.size,
+      tripsTotal: m.tripsCount.size,
+    }));
+
+    // Find the most frequently visited month (highest days count, then highest spots count)
+    const activeMonths = populatedMonths.filter((m) => m.daysCount > 0 || m.spotsCount > 0);
+    const mostVisited = [...activeMonths].sort((a, b) => {
+      if (b.daysCount !== a.daysCount) return b.daysCount - a.daysCount;
+      return b.spotsCount - a.spotsCount;
+    })[0] || null;
+
+    const maxDays = Math.max(...populatedMonths.map((m) => m.daysCount), 1);
+    const maxSpots = Math.max(...populatedMonths.map((m) => m.spotsCount), 1);
+
+    return {
+      months: populatedMonths,
+      mostVisited,
+      maxDays,
+      maxSpots,
+    };
+  }, [reviewTrips, reviewSpots, reviewYear]);
+
+  // Unique travel dates in review period
+  const reviewTotalDays = useMemo(() => {
+    const dates = new Set<string>();
+    reviewTrips.forEach((tr) => {
+      (tr.days || []).forEach((d) => {
+        if (!d.date) return;
+        if (reviewYear === 'all' || d.date.startsWith(reviewYear)) {
+          dates.add(d.date);
+        }
+      });
+    });
+    return dates.size;
+  }, [reviewTrips, reviewYear]);
+
+  // Review copy report handler
+  const handleCopyReviewReport = () => {
+    const yearLabel = reviewYear === 'all' ? '歷年全部' : `${reviewYear} 年度`;
+    const citiesStr = reviewCitiesSummary.map((c) => `${c.city} (${c.spotsCount}處)`).join('、') || '無紀錄';
+    const topMonthStr = reviewMonthlyStats.mostVisited
+      ? `${reviewMonthlyStats.mostVisited.name}（出遊 ${reviewMonthlyStats.mostVisited.daysCount} 天 · 走訪 ${reviewMonthlyStats.mostVisited.spotsCount} 個行程點）`
+      : '無';
+
+    const text = `✨【日和手帳 · ${yearLabel}旅行回顧戰報】✨\n` +
+      `📅 漫遊總天數：${reviewTotalDays} 天\n` +
+      `✈️ 累積旅程：${reviewTrips.length} 趟\n` +
+      `🏙️ 造訪城市：${reviewCitiesSummary.length} 個（${citiesStr}）\n` +
+      `📍 景點打卡總數：${reviewSpots.length} 處\n` +
+      `   · 景點觀光：${reviewCategoryStats.spot} 處\n` +
+      `   · 美食品嚐：${reviewCategoryStats.food} 處\n` +
+      `   · 交通移動：${reviewCategoryStats.transport} 次\n` +
+      `   · 住宿飯店：${reviewCategoryStats.hotel} 晚\n` +
+      `   · 購物血拼：${reviewCategoryStats.shopping} 處\n` +
+      `   · 體驗活動：${reviewCategoryStats.activity} 次\n` +
+      `👑 最常出遊月份：${topMonthStr}\n` +
+      `\n— 紀錄於 日和手帳 Hiyori`;
+
+    navigator.clipboard?.writeText(text);
+    setCopiedReviewReport(true);
+    setTimeout(() => setCopiedReviewReport(false), 2500);
+  };
+
+  // Filtered spots for Search in calendar and timeline modes
   const filteredSpots = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
     return allFlattenedSpots.filter((item) => {
-      // Query search
       if (q) {
         const matchTitle = item.spotTitle.toLowerCase().includes(q);
         const matchTrip = item.tripTitle.toLowerCase().includes(q);
         const matchDest = item.tripDestination.toLowerCase().includes(q);
-        const matchLoc = item.locationName?.toLowerCase().includes(q);
-        const matchNotes = item.notes?.toLowerCase().includes(q);
-        const matchCategory = CATEGORY_NAMES[item.category]?.toLowerCase().includes(q);
-        if (!matchTitle && !matchTrip && !matchDest && !matchLoc && !matchNotes && !matchCategory) {
+        const matchLoc = (item.locationName || '').toLowerCase().includes(q);
+        const matchNotes = (item.notes || '').toLowerCase().includes(q);
+        if (!matchTitle && !matchTrip && !matchDest && !matchLoc && !matchNotes) {
           return false;
         }
       }
 
-      // Year filter
       if (selectedYear !== 'all') {
-        if (!item.date.startsWith(selectedYear)) return false;
+        const itemYear = item.date ? item.date.slice(0, 4) : item.tripStartDate.slice(0, 4);
+        if (itemYear !== selectedYear) return false;
       }
 
-      // Category filter
-      if (selectedCategory !== 'all') {
-        if (item.category !== selectedCategory) return false;
+      if (selectedCategory !== 'all' && item.category !== selectedCategory) {
+        return false;
       }
 
-      // Destination filter
-      if (selectedDestination !== 'all') {
-        if (!item.tripDestination.includes(selectedDestination)) return false;
+      if (selectedDestination !== 'all' && item.tripDestination !== selectedDestination) {
+        return false;
       }
 
       return true;
     });
   }, [allFlattenedSpots, searchQuery, selectedYear, selectedCategory, selectedDestination]);
 
-  // Map of date string "YYYY-MM-DD" to list of spots for the calendar
+  // Calendar mapping: date string -> spots
   const spotsByDateMap = useMemo(() => {
     const map = new Map<string, FlattenedSpotMemory[]>();
-    allFlattenedSpots.forEach((spot) => {
-      const existing = map.get(spot.date) || [];
-      existing.push(spot);
-      map.set(spot.date, existing);
+    filteredSpots.forEach((s) => {
+      if (!s.date) return;
+      const list = map.get(s.date) || [];
+      list.push(s);
+      map.set(s.date, list);
     });
     return map;
-  }, [allFlattenedSpots]);
+  }, [filteredSpots]);
 
-  // Trips active on each date for calendar footprint visualization
+  // Trip ranges mapping: date string -> Trip info
   const tripsByDateMap = useMemo(() => {
     const map = new Map<string, { trip: Trip; dayNumber: number }>();
     trips.forEach((tr) => {
@@ -303,8 +529,8 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   // Days in current calendar month
   const calendarDays = useMemo(() => {
     const firstDayOfMonth = new Date(calendarYear, calendarMonth, 1);
+    const startingDayOfWeek = firstDayOfMonth.getDay();
     const lastDayOfMonth = new Date(calendarYear, calendarMonth + 1, 0);
-    const startWeekday = firstDayOfMonth.getDay(); // 0 is Sunday
     const totalDays = lastDayOfMonth.getDate();
 
     const days: {
@@ -315,16 +541,18 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       tripInfo?: { trip: Trip; dayNumber: number };
     }[] = [];
 
-    // Preceding empty/overflow days
-    for (let i = 0; i < startWeekday; i++) {
-      const prevDate = new Date(calendarYear, calendarMonth, 1 - (startWeekday - i));
+    // Leading days from previous month
+    const prevMonthLastDate = new Date(calendarYear, calendarMonth, 0).getDate();
+    for (let i = startingDayOfWeek - 1; i >= 0; i--) {
+      const d = prevMonthLastDate - i;
+      const prevDate = new Date(calendarYear, calendarMonth - 1, d);
       const y = prevDate.getFullYear();
       const m = String(prevDate.getMonth() + 1).padStart(2, '0');
-      const d = String(prevDate.getDate()).padStart(2, '0');
-      const dateStr = `${y}-${m}-${d}`;
+      const dayStr = String(d).padStart(2, '0');
+      const dateStr = `${y}-${m}-${dayStr}`;
       days.push({
         dateStr,
-        dayNumber: prevDate.getDate(),
+        dayNumber: d,
         isCurrentMonth: false,
         spots: spotsByDateMap.get(dateStr) || [],
         tripInfo: tripsByDateMap.get(dateStr),
@@ -346,7 +574,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       });
     }
 
-    // Trailing days to complete the 7-column grid
+    // Trailing days to complete 7-column grid
     const remaining = (7 - (days.length % 7)) % 7;
     for (let i = 1; i <= remaining; i++) {
       const nextDate = new Date(calendarYear, calendarMonth + 1, i);
@@ -377,7 +605,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     return tripsByDateMap.get(selectedCalendarDate) || null;
   }, [selectedCalendarDate, tripsByDateMap]);
 
-  // Group filtered spots by Year and Trip for the Timeline Story Wall
+  // Group filtered spots by Year and Trip for Timeline Story Wall
   const timelineGrouped = useMemo(() => {
     const groups: {
       trip: Trip;
@@ -388,7 +616,6 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       }[];
     }[] = [];
 
-    // Identify which trips have matching spots
     const tripMap = new Map<string, Map<number, FlattenedSpotMemory[]>>();
 
     filteredSpots.forEach((spot) => {
@@ -468,7 +695,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 </span>
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                穿梭歷年所有旅行點滴 · 月曆足跡與時光故事軸
+                穿梭歷年所有旅行點滴 · 月曆足跡、時光故事軸與年度回顧
               </p>
             </div>
           </div>
@@ -502,6 +729,19 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 <span className="hidden sm:inline">時光軸故事牆</span>
                 <span className="sm:hidden">故事軸</span>
               </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('review')}
+                className={`px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+                  viewMode === 'review'
+                    ? 'bg-white dark:bg-slate-700 text-teal-800 dark:text-teal-200 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <BarChart3 className="w-3.5 h-3.5 text-amber-500" />
+                <span className="hidden sm:inline">年度回顧</span>
+                <span className="sm:hidden">回顧</span>
+              </button>
             </div>
 
             {/* Passport Milestone Card Button */}
@@ -527,133 +767,125 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
           </div>
         </div>
 
-        {/* Search & Multi-dimension Filter Bar */}
-        <div className="px-4 sm:px-6 py-2.5 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
-          {/* Universal Search Input */}
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜尋景點、城市、美食、住宿、隨行筆記..."
-              className="w-full pl-9 pr-8 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 outline-none focus:border-teal-500 dark:focus:border-teal-400 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
+        {/* Search & Multi-dimension Filter Bar (for Calendar and Timeline views) */}
+        {viewMode !== 'review' && (
+          <div className="px-4 sm:px-6 py-2.5 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
+            {/* Universal Search Input */}
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="搜尋景點、城市、美食、住宿、隨行筆記..."
+                className="w-full pl-9 pr-8 py-1.5 text-xs rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 outline-none focus:border-teal-500 dark:focus:border-teal-400 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
 
-          {/* Quick Year Filter */}
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 shrink-0">
-            <span className="text-[11px] font-bold text-slate-400 shrink-0 flex items-center gap-1">
-              <Filter className="w-3 h-3" />
-              <span>年份:</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => setSelectedYear('all')}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition shrink-0 cursor-pointer ${
-                selectedYear === 'all'
-                  ? 'bg-teal-600 text-white shadow-2xs'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
-              }`}
-            >
-              全部
-            </button>
-            {availableYears.map((yr) => (
+            {/* Quick Year Filter */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 shrink-0">
+              <span className="text-[11px] font-bold text-slate-400 shrink-0 flex items-center gap-1">
+                <Filter className="w-3 h-3" />
+                <span>年份:</span>
+              </span>
               <button
-                key={yr}
                 type="button"
-                onClick={() => {
-                  setSelectedYear(yr);
-                  const num = parseInt(yr, 10);
-                  if (!isNaN(num)) setCalendarYear(num);
-                }}
+                onClick={() => setSelectedYear('all')}
                 className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition shrink-0 cursor-pointer ${
-                  selectedYear === yr
+                  selectedYear === 'all'
                     ? 'bg-teal-600 text-white shadow-2xs'
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
                 }`}
               >
-                {yr}年
+                全部
               </button>
-            ))}
-
-            {/* Quick Category Filter */}
-            <select
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              className="px-2 py-1 text-[11px] rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-300 outline-none cursor-pointer"
-            >
-              <option value="all">所有類別</option>
-              {Object.entries(CATEGORY_NAMES).map(([key, name]) => (
-                <option key={key} value={key}>
-                  {name}
-                </option>
+              {availableYears.map((yr) => (
+                <button
+                  key={yr}
+                  type="button"
+                  onClick={() => {
+                    setSelectedYear(yr);
+                    const num = parseInt(yr, 10);
+                    if (!isNaN(num)) setCalendarYear(num);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition shrink-0 cursor-pointer ${
+                    selectedYear === yr
+                      ? 'bg-teal-600 text-white shadow-2xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  {yr}年
+                </button>
               ))}
-            </select>
-          </div>
-        </div>
 
-        {/* Content Area: Calendar View OR Timeline View */}
-        <div className="flex-1 overflow-y-auto min-h-0 bg-slate-50/50 dark:bg-slate-950/40 p-3 sm:p-5">
+              {/* Quick Category Filter */}
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="px-2 py-1 text-[11px] rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-300 outline-none cursor-pointer"
+              >
+                <option value="all">所有類別</option>
+                {Object.entries(CATEGORY_NAMES).map(([key, name]) => (
+                  <option key={key} value={key}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+
+        {/* Main Content Area */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50/50 dark:bg-slate-950/40">
           {viewMode === 'calendar' ? (
             /* ================= VIEW 1: 月曆足跡視角 ================= */
             <div className="space-y-4 max-w-4xl mx-auto">
-              {/* Calendar Month Header & Month Stepper */}
-              <div className="flex items-center justify-between bg-white dark:bg-slate-900 p-3 sm:p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs">
-                <div className="flex items-center gap-3">
+              {/* Calendar Month Navigation Header */}
+              <div className="flex items-center justify-between bg-white dark:bg-slate-900 px-4 py-3 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-2xs">
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={handlePrevMonth}
                     className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer"
                     title="上個月"
                   >
-                    <ChevronLeft className="w-5 h-5" />
+                    <ChevronLeft className="w-4 h-4" />
                   </button>
-                  <div>
-                    <h3 className="font-bold text-base sm:text-lg text-slate-900 dark:text-white">
-                      {calendarYear} 年 {calendarMonth + 1} 月
-                    </h3>
-                    <p className="text-[10px] text-slate-400">
-                      點選標記日曆格子，即可查看當日所有景點與留影
-                    </p>
-                  </div>
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white font-mono tracking-tight">
+                    {calendarYear} 年 {calendarMonth + 1} 月
+                  </h3>
                   <button
                     type="button"
                     onClick={handleNextMonth}
                     className="p-1.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition cursor-pointer"
                     title="下個月"
                   >
-                    <ChevronRight className="w-5 h-5" />
+                    <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
 
-                {/* Quick Trip Jump */}
-                <div className="flex items-center gap-1.5">
-                  {trips.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const tr = trips.find((t) => t.id === currentTripId) || trips[0];
-                        if (tr.startDate) {
-                          setCalendarYear(parseInt(tr.startDate.slice(0, 4), 10));
-                          setCalendarMonth(parseInt(tr.startDate.slice(5, 7), 10) - 1);
-                          setSelectedCalendarDate(tr.startDate);
-                        }
-                      }}
-                      className="px-2.5 py-1 text-[11px] font-bold text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 rounded-lg hover:bg-teal-100 transition cursor-pointer"
-                    >
-                      跳至目前旅程
-                    </button>
-                  )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const now = new Date();
+                      setCalendarYear(now.getFullYear());
+                      setCalendarMonth(now.getMonth());
+                      setSelectedCalendarDate(null);
+                    }}
+                    className="px-2.5 py-1 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold transition cursor-pointer"
+                  >
+                    回到今天
+                  </button>
                 </div>
               </div>
 
@@ -762,61 +994,42 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                             onSelectTrip(selectedDateTripInfo.trip.id);
                             onClose();
                           }}
-                          className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1 transition shadow-xs cursor-pointer"
+                          className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
                         >
-                          <span>進入此行程規劃</span>
+                          <span>前往此行程</span>
                           <ArrowRight className="w-3.5 h-3.5" />
                         </button>
                       )}
                       <button
                         type="button"
                         onClick={() => setSelectedCalendarDate(null)}
-                        className="p-1 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        className="p-1 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer"
                       >
                         <X className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
 
-                  {/* Spot cards for the selected day */}
+                  {/* Spots list for the day */}
                   {selectedDateSpots.length === 0 ? (
                     <p className="text-xs text-slate-400 py-3 text-center">
-                      當天為旅程休息日或無行程項目
+                      當日尚無詳細行程景點，點擊上方可直接進入該旅程進行規劃。
                     </p>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                       {selectedDateSpots.map((spot) => (
                         <div
                           key={spot.spotId}
-                          className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700/60 space-y-2"
+                          className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 space-y-2 hover:border-teal-400 transition"
                         >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                                {spot.startTime && (
-                                  <span className="font-mono font-bold text-teal-600 dark:text-teal-400">
-                                    {spot.startTime}
-                                  </span>
-                                )}
-                                <span>·</span>
-                                <span>{CATEGORY_NAMES[spot.category]}</span>
-                                {spot.mood && <span>· {spot.mood}</span>}
-                              </div>
-                              <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate mt-0.5">
-                                {spot.spotTitle}
-                              </h4>
-                            </div>
-
-                            {spot.googlePhotosUrl && (
-                              <a
-                                href={spot.googlePhotosUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-2 py-0.5 rounded-lg bg-teal-50 dark:bg-teal-950 text-teal-600 dark:text-teal-300 text-[10px] font-bold flex items-center gap-1 hover:underline shrink-0"
-                              >
-                                <span>相簿</span>
-                                <ExternalLink className="w-2.5 h-2.5" />
-                              </a>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
+                              {spot.spotTitle}
+                            </span>
+                            {spot.startTime && (
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-semibold border border-slate-200/60 dark:border-slate-600 shrink-0">
+                                {spot.startTime}
+                              </span>
                             )}
                           </div>
 
@@ -863,7 +1076,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 </div>
               )}
             </div>
-          ) : (
+          ) : viewMode === 'timeline' ? (
             /* ================= VIEW 2: 時光軸回憶故事牆 ================= */
             <div className="space-y-6 max-w-4xl mx-auto">
               {timelineGrouped.length === 0 ? (
@@ -919,60 +1132,67 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                           onSelectTrip(trip.id);
                           onClose();
                         }}
-                        className="self-start sm:self-auto px-3.5 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-md text-white font-bold text-xs flex items-center gap-1.5 transition active:scale-95 border border-white/20 cursor-pointer shrink-0"
+                        className="px-3.5 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition flex items-center gap-1.5 self-start sm:self-auto cursor-pointer shadow-xs"
                       >
-                        <span>進入此趟行程</span>
+                        <span>打開此行程</span>
                         <ArrowRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
 
-                    {/* Days and Spots along the Timeline */}
-                    <div className="p-4 sm:p-5 space-y-6">
-                      {days.map((day) => (
-                        <div key={day.dayNumber} className="space-y-3">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-teal-600" />
-                            <span className="font-bold text-xs text-slate-800 dark:text-slate-200">
-                              第 {day.dayNumber} 天 ({formatDateSlash(day.date)})
+                    {/* Days and Spots in Trip */}
+                    <div className="p-4 sm:p-5 space-y-5">
+                      {days.map((dayGroup) => (
+                        <div key={dayGroup.dayNumber} className="space-y-3">
+                          <div className="flex items-center gap-2.5">
+                            <span className="w-6 h-6 rounded-full bg-teal-600 text-white text-[11px] font-mono font-bold flex items-center justify-center shrink-0">
+                              D{dayGroup.dayNumber}
                             </span>
-                            <span className="text-[10px] text-slate-400">
-                              {day.spots.length} 個行程點
+                            <span className="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-200">
+                              {dayGroup.date ? `${formatDateSlash(dayGroup.date)} (${getDayOfWeek(dayGroup.date, lang)})` : `第 ${dayGroup.dayNumber} 天`}
+                            </span>
+                            <span className="text-[11px] text-slate-400 font-normal">
+                              ({dayGroup.spots.length} 個點)
                             </span>
                           </div>
 
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pl-3 sm:pl-4 border-l-2 border-slate-100 dark:border-slate-800">
-                            {day.spots.map((spot) => (
+                          {/* Spots in Day */}
+                          <div className="ml-3 pl-5 border-l-2 border-teal-500/30 space-y-3">
+                            {dayGroup.spots.map((spot) => (
                               <div
                                 key={spot.spotId}
-                                className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 flex flex-col justify-between gap-2.5 hover:shadow-xs transition"
+                                className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800 space-y-2 hover:border-teal-500/50 transition"
                               >
-                                <div>
-                                  <div className="flex items-center justify-between text-[10px] text-slate-400">
-                                    <span className="font-bold font-mono text-teal-600 dark:text-teal-400">
-                                      {spot.startTime || '隨行'}
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="text-xs font-bold text-teal-800 dark:text-teal-200 truncate">
+                                      {spot.spotTitle}
                                     </span>
-                                    <span>{CATEGORY_NAMES[spot.category]}</span>
+                                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-600 shrink-0">
+                                      {CATEGORY_NAMES[spot.category] || '景點'}
+                                    </span>
                                   </div>
 
-                                  <h4 className="font-bold text-sm text-slate-900 dark:text-white mt-1">
-                                    {spot.spotTitle}
-                                  </h4>
-
-                                  {spot.locationName && (
-                                    <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-0.5 truncate">
-                                      <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                                      <span className="truncate">{spot.locationName}</span>
-                                    </p>
-                                  )}
-
-                                  {spot.notes && (
-                                    <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-2 bg-white dark:bg-slate-800 p-2 rounded-xl border border-slate-100 dark:border-slate-700/60 leading-relaxed">
-                                      {spot.notes}
-                                    </p>
+                                  {spot.startTime && (
+                                    <span className="text-[10px] font-mono font-semibold text-slate-400 shrink-0">
+                                      {spot.startTime}
+                                    </span>
                                   )}
                                 </div>
 
-                                {/* Photo Grid */}
+                                {spot.locationName && (
+                                  <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1 truncate">
+                                    <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                    <span className="truncate">{spot.locationName}</span>
+                                  </p>
+                                )}
+
+                                {spot.notes && (
+                                  <p className="text-xs text-slate-700 dark:text-slate-300 bg-white/80 dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200/50 dark:border-slate-700/50 leading-relaxed">
+                                    {spot.notes}
+                                  </p>
+                                )}
+
+                                {/* Spot Memory Photos */}
                                 {spot.photos.length > 0 && (
                                   <div className="flex items-center gap-2 overflow-x-auto py-1">
                                     {spot.photos.map((photoUrl, pIdx) => (
@@ -1009,6 +1229,428 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 ))
               )}
             </div>
+          ) : (
+            /* ================= VIEW 3: 年度回顧 (Annual Review) ================= */
+            <div className="space-y-6 max-w-4xl mx-auto animate-in fade-in duration-200">
+              {/* Year Selector & Copy Report Bar */}
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
+                  <span className="text-xs font-bold text-slate-400 shrink-0 flex items-center gap-1.5">
+                    <CalendarIcon className="w-3.5 h-3.5 text-teal-600" />
+                    <span>回顧年度:</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReviewYear('all');
+                      setReviewSelectedMonth(null);
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
+                      reviewYear === 'all'
+                        ? 'bg-teal-600 text-white shadow-xs'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    全部年份
+                  </button>
+                  {availableYears.map((yr) => (
+                    <button
+                      key={yr}
+                      type="button"
+                      onClick={() => {
+                        setReviewYear(yr);
+                        setReviewSelectedMonth(null);
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
+                        reviewYear === yr
+                          ? 'bg-teal-600 text-white shadow-xs'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      {yr} 年
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleCopyReviewReport}
+                    className="w-full sm:w-auto px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-xs"
+                    title="複製年度旅行回顧報表"
+                  >
+                    {copiedReviewReport ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedReviewReport ? '已複製回顧報表！' : '複製年度回顧報告'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Top 3 Core Required Annual Metrics + Travel Days Banner */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* 1. Visited Cities Count (造訪城市數量) */}
+                <div className="p-4 rounded-3xl bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-transparent border border-emerald-500/25 dark:border-emerald-500/20 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between text-emerald-600 dark:text-emerald-400">
+                    <span className="text-xs font-bold flex items-center gap-1.5">
+                      <Building2 className="w-4 h-4" />
+                      <span>造訪城市數量</span>
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 font-bold">
+                      {reviewYear === 'all' ? '歷年' : `${reviewYear}年`}
+                    </span>
+                  </div>
+                  <div>
+                    <div className="text-2xl sm:text-3xl font-black font-mono text-slate-900 dark:text-white tracking-tight">
+                      {reviewCitiesSummary.length}{' '}
+                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">個城市</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-1">
+                      {reviewCitiesSummary.map((c) => c.city).slice(0, 3).join(' · ') || '尚未登錄城市'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 2. Total Spots Count (景點總數) */}
+                <div className="p-4 rounded-3xl bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-transparent border border-amber-500/25 dark:border-amber-500/20 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between text-amber-600 dark:text-amber-400">
+                    <span className="text-xs font-bold flex items-center gap-1.5">
+                      <Landmark className="w-4 h-4" />
+                      <span>景點打卡總數</span>
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 font-bold">
+                      累積足跡
+                    </span>
+                  </div>
+                  <div>
+                    <div className="text-2xl sm:text-3xl font-black font-mono text-slate-900 dark:text-white tracking-tight">
+                      {reviewSpots.length}{' '}
+                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">處行程點</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-1">
+                      含景點 {reviewCategoryStats.spot} · 美食 {reviewCategoryStats.food} · 住宿 {reviewCategoryStats.hotel}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 3. Most Frequently Visited Month (最常造訪的月份) */}
+                <div className="p-4 rounded-3xl bg-gradient-to-br from-rose-500/10 via-pink-500/5 to-transparent border border-rose-500/25 dark:border-rose-500/20 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between text-rose-600 dark:text-rose-400">
+                    <span className="text-xs font-bold flex items-center gap-1.5">
+                      <Trophy className="w-4 h-4" />
+                      <span>最常造訪月份</span>
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/15 font-bold flex items-center gap-1">
+                      👑 巔峰出遊
+                    </span>
+                  </div>
+                  <div>
+                    <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">
+                      {reviewMonthlyStats.mostVisited ? reviewMonthlyStats.mostVisited.name : '—'}
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-1">
+                      {reviewMonthlyStats.mostVisited ? (
+                        <span>
+                          出遊 {reviewMonthlyStats.mostVisited.daysCount} 天 · 走訪 {reviewMonthlyStats.mostVisited.spotsCount} 點
+                        </span>
+                      ) : (
+                        '該年度暫無行程'
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* 4. Total Travel Days & Trips (漫遊總天數) */}
+                <div className="p-4 rounded-3xl bg-gradient-to-br from-sky-500/10 via-blue-500/5 to-transparent border border-sky-500/25 dark:border-sky-500/20 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between text-sky-600 dark:text-sky-400">
+                    <span className="text-xs font-bold flex items-center gap-1.5">
+                      <Compass className="w-4 h-4" />
+                      <span>漫遊旅途天數</span>
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/10 font-bold">
+                      {reviewTrips.length} 趟旅程
+                    </span>
+                  </div>
+                  <div>
+                    <div className="text-2xl sm:text-3xl font-black font-mono text-slate-900 dark:text-white tracking-tight">
+                      {reviewTotalDays}{' '}
+                      <span className="text-xs font-bold text-slate-500 dark:text-slate-400">天</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-1">
+                      珍藏回憶照片 {reviewSpots.reduce((acc, s) => acc + s.photos.length, 0)} 張
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 12-Month Travel Frequency Bar Chart (月度旅行熱度長條圖) */}
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
+                      <BarChart3 className="w-4 h-4 text-teal-600" />
+                      <span>12 個月旅行熱度分佈</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      點選特定月份可快速檢視當月的景點與足跡明細
+                    </p>
+                  </div>
+
+                  {reviewMonthlyStats.mostVisited && (
+                    <div className="hidden sm:flex items-center gap-1.5 text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 px-3 py-1 rounded-xl border border-rose-200 dark:border-rose-900">
+                      <span>👑 最高峰月份：{reviewMonthlyStats.mostVisited.name}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* 12 Columns Visual Bar Grid */}
+                <div className="grid grid-cols-12 gap-1.5 sm:gap-2.5 pt-4 pb-2 items-end min-h-[140px]">
+                  {reviewMonthlyStats.months.map((m) => {
+                    const isPeak = reviewMonthlyStats.mostVisited?.month === m.month && m.daysCount > 0;
+                    const isSelected = reviewSelectedMonth === m.month;
+                    const heightPercent = m.daysCount > 0
+                      ? Math.max(18, Math.round((m.daysCount / reviewMonthlyStats.maxDays) * 100))
+                      : 8;
+
+                    return (
+                      <div
+                        key={m.month}
+                        onClick={() => {
+                          if (m.daysCount > 0 || m.spotsCount > 0) {
+                            setReviewSelectedMonth(isSelected ? null : m.month);
+                          }
+                        }}
+                        className={`flex flex-col items-center justify-end h-full group cursor-pointer ${
+                          m.daysCount === 0 && m.spotsCount === 0 ? 'opacity-30 cursor-default' : ''
+                        }`}
+                      >
+                        {/* Peak indicator icon */}
+                        {isPeak && (
+                          <span className="text-[10px] text-rose-500 font-bold mb-1 animate-bounce">
+                            👑
+                          </span>
+                        )}
+
+                        {/* Bar */}
+                        <div className="w-full max-w-[32px] bg-slate-100 dark:bg-slate-800 rounded-xl overflow-hidden flex flex-col justify-end p-0.5">
+                          <div
+                            style={{ height: `${heightPercent}%` }}
+                            className={`w-full rounded-lg transition-all duration-300 ${
+                              isPeak
+                                ? 'bg-gradient-to-t from-rose-500 to-amber-400 shadow-sm'
+                                : isSelected
+                                ? 'bg-teal-500 ring-2 ring-teal-400'
+                                : m.daysCount > 0
+                                ? 'bg-teal-600 hover:bg-teal-500'
+                                : 'bg-slate-200 dark:bg-slate-700'
+                            }`}
+                          />
+                        </div>
+
+                        {/* Label */}
+                        <span
+                          className={`mt-2 text-[10px] sm:text-xs font-mono font-bold ${
+                            isPeak
+                              ? 'text-rose-600 dark:text-rose-400 font-black'
+                              : isSelected
+                              ? 'text-teal-600 font-black'
+                              : 'text-slate-600 dark:text-slate-400'
+                          }`}
+                        >
+                          {m.month}月
+                        </span>
+
+                        {/* Days Pill */}
+                        {m.daysCount > 0 && (
+                          <span className="text-[9px] text-slate-400 font-mono">
+                            {m.daysCount}天
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Visited Cities Breakdown (造訪城市排行榜與足跡) */}
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-teal-600" />
+                    <span>造訪城市與足跡清單 ({reviewCitiesSummary.length} 座)</span>
+                  </h3>
+                  <span className="text-xs text-slate-400">點選城市可瀏覽細節</span>
+                </div>
+
+                {reviewCitiesSummary.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-4 text-center">
+                    該年度尚未記錄任何造訪城市。
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {reviewCitiesSummary.map((item, idx) => {
+                      const sharePercent = reviewSpots.length > 0
+                        ? Math.round((item.spotsCount / reviewSpots.length) * 100)
+                        : 0;
+
+                      return (
+                        <div
+                          key={item.city}
+                          className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 space-y-2 hover:border-teal-500/50 transition shadow-2xs"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-5 h-5 rounded-full bg-teal-100 dark:bg-teal-900 text-teal-800 dark:text-teal-200 text-[10px] font-mono font-bold flex items-center justify-center shrink-0">
+                                {idx + 1}
+                              </span>
+                              <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
+                                {item.city}
+                              </h4>
+                            </div>
+                            <span className="text-[11px] font-mono font-bold text-teal-600 dark:text-teal-400 shrink-0">
+                              {item.spotsCount} 個點
+                            </span>
+                          </div>
+
+                          {/* Progress bar of spots share */}
+                          <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
+                            <div
+                              style={{ width: `${Math.max(10, sharePercent)}%` }}
+                              className="bg-teal-500 h-full rounded-full"
+                            />
+                          </div>
+
+                          <div className="flex items-center justify-between text-[10px] text-slate-400">
+                            <span className="truncate">相關旅程：{Array.from(item.trips).join('、')}</span>
+                            <span>{sharePercent}%</span>
+                          </div>
+
+                          {/* Sample thumbnails */}
+                          {item.photos.length > 0 && (
+                            <div className="flex items-center gap-1.5 pt-1">
+                              {item.photos.map((p, pIdx) => (
+                                <img
+                                  key={pIdx}
+                                  src={p}
+                                  alt={item.city}
+                                  onClick={() =>
+                                    setLightboxImage({
+                                      url: p,
+                                      spotTitle: item.city,
+                                      tripTitle: Array.from(item.trips).join('、'),
+                                    })
+                                  }
+                                  className="w-10 h-10 rounded-lg object-cover border border-slate-200 dark:border-slate-700 cursor-pointer hover:scale-105 transition shrink-0"
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Spot Category Distribution (景點類別比例) */}
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    <span>行程類別分佈 ({reviewSpots.length} 處打卡點)</span>
+                  </h3>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                  {(['spot', 'food', 'transport', 'hotel', 'shopping', 'activity'] as CategoryType[]).map((cat) => {
+                    const count = reviewCategoryStats[cat] || 0;
+                    const percent = reviewSpots.length > 0 ? Math.round((count / reviewSpots.length) * 100) : 0;
+                    const Icon = CATEGORY_ICONS[cat] || Circle;
+                    const color = CATEGORY_COLORS[cat];
+
+                    return (
+                      <div
+                        key={cat}
+                        className={`p-3 rounded-2xl ${color.bg} border border-slate-200/60 dark:border-slate-700/60 flex flex-col justify-between space-y-1.5`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <Icon className={`w-4 h-4 ${color.text}`} />
+                          <span className="text-[10px] font-mono font-bold text-slate-400">
+                            {percent}%
+                          </span>
+                        </div>
+                        <div>
+                          <div className="text-lg font-black font-mono text-slate-900 dark:text-white">
+                            {count}
+                          </div>
+                          <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                            {CATEGORY_NAMES[cat]}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Trips of the Year List (年度所有旅程清單) */}
+              <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-200/90 dark:border-slate-800 shadow-xs space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
+                    <Route className="w-4 h-4 text-teal-600" />
+                    <span>年度旅程篇章 ({reviewTrips.length} 趟旅程)</span>
+                  </h3>
+                </div>
+
+                <div className="space-y-3">
+                  {reviewTrips.map((tr) => {
+                    const tripSpots = allFlattenedSpots.filter((s) => s.tripId === tr.id);
+                    const photosCount = tripSpots.reduce((acc, s) => acc + s.photos.length, 0);
+
+                    return (
+                      <div
+                        key={tr.id}
+                        className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 hover:border-teal-400 transition"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div
+                            className={`w-12 h-12 rounded-xl bg-gradient-to-br ${
+                              tr.coverGradient || 'from-teal-600 to-emerald-700'
+                            } text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-2xs`}
+                          >
+                            {tr.destination ? tr.destination.slice(0, 2) : '日和'}
+                          </div>
+
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white truncate">
+                              {tr.title}
+                            </h4>
+                            <p className="text-xs text-slate-400 flex items-center gap-2 font-mono mt-0.5">
+                              <span>{formatDateSlash(tr.startDate)} ~ {formatDateSlash(tr.endDate)}</span>
+                              <span>·</span>
+                              <span>{tr.destination}</span>
+                              <span>·</span>
+                              <span>{tripSpots.length} 個行程點</span>
+                              {photosCount > 0 && <span>· 📸 {photosCount} 張照片</span>}
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelectTrip(tr.id);
+                            onClose();
+                          }}
+                          className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shrink-0 shadow-xs"
+                        >
+                          <span>直達行程</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -1040,7 +1682,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
             </div>
 
             {/* Passport Card Body */}
-            <div className="p-5 rounded-2xl bg-gradient-to-br from-teal-700 via-teal-800 to-emerald-950 text-white space-y-4 shadow-inner relative overflow-hidden">
+            <div className="p-5 rounded-2xl bg-gradient-to-br from-teal-700 via-teal-800 to-emerald-955 text-white space-y-4 shadow-inner relative overflow-hidden">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-[10px] tracking-widest text-teal-200 uppercase font-mono">
@@ -1106,52 +1748,56 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
         </div>
       )}
 
-      {/* ================= LIGHTBOX: 照片大圖檢視 ================= */}
+      {/* ================= MODAL: 高解析照片 Lightbox ================= */}
       {lightboxImage && (
         <div
-          className="fixed inset-0 z-70 flex items-center justify-center bg-black/90 p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-70 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-150"
           onClick={() => setLightboxImage(null)}
         >
           <div
-            className="max-w-2xl max-h-[85vh] flex flex-col items-center gap-3"
+            className="relative max-w-4xl max-h-[90vh] flex flex-col items-center gap-3 text-white"
             onClick={(e) => e.stopPropagation()}
           >
+            <button
+              type="button"
+              onClick={() => setLightboxImage(null)}
+              className="absolute -top-10 right-0 p-1.5 rounded-full bg-white/20 hover:bg-white/40 text-white cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
             <img
               src={lightboxImage.url}
-              alt={lightboxImage.spotTitle || 'Memory'}
-              className="max-w-full max-h-[70vh] rounded-2xl object-contain shadow-2xl"
+              alt={lightboxImage.spotTitle || '照片回憶'}
+              className="max-w-full max-h-[75vh] object-contain rounded-2xl shadow-2xl border border-white/10"
             />
-            <div className="bg-slate-900/90 text-white p-3 rounded-2xl border border-slate-700/80 max-w-md w-full flex items-center justify-between text-xs backdrop-blur-md">
-              <div className="truncate pr-2">
-                <p className="font-bold truncate">{lightboxImage.spotTitle}</p>
-                <p className="text-[11px] text-slate-300 truncate">
-                  {lightboxImage.tripTitle} · {lightboxImage.date}
-                </p>
-                {lightboxImage.caption && (
-                  <p className="text-[11px] text-teal-300 mt-1">{lightboxImage.caption}</p>
+
+            {(lightboxImage.spotTitle || lightboxImage.caption) && (
+              <div className="text-center space-y-1 bg-black/50 backdrop-blur-sm px-4 py-2 rounded-xl border border-white/10 max-w-lg">
+                <h4 className="font-bold text-sm text-white">
+                  {lightboxImage.spotTitle}
+                </h4>
+                {lightboxImage.tripTitle && (
+                  <p className="text-[11px] text-teal-300">
+                    {lightboxImage.tripTitle} · {lightboxImage.date}
+                  </p>
                 )}
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
+                {lightboxImage.caption && (
+                  <p className="text-xs text-white/80">{lightboxImage.caption}</p>
+                )}
                 {lightboxImage.googlePhotosUrl && (
                   <a
                     href={lightboxImage.googlePhotosUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white flex items-center gap-1 text-[11px]"
+                    className="inline-flex items-center gap-1 text-[11px] text-amber-300 hover:underline pt-1"
                   >
-                    <span>Google 相簿</span>
+                    <span>在 Google 相簿中開啟相簿</span>
                     <ExternalLink className="w-3 h-3" />
                   </a>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setLightboxImage(null)}
-                  className="p-1.5 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}

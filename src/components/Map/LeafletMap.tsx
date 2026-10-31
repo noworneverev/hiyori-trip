@@ -70,7 +70,14 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
     markersLayerRef.current = markersGroup;
     mapInstanceRef.current = map;
 
+    // Auto invalidate size when container size changes
+    const resizeObserver = new ResizeObserver(() => {
+      map.invalidateSize();
+    });
+    resizeObserver.observe(mapContainerRef.current);
+
     return () => {
+      resizeObserver.disconnect();
       map.remove();
       mapInstanceRef.current = null;
     };
