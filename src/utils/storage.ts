@@ -21,8 +21,24 @@ export function getStoredTrips(): Trip[] {
     }
     const trips = JSON.parse(raw);
     if (Array.isArray(trips) && trips.length > 0) {
+      // Deduplicate trips by id to prevent duplicate trip objects
+      const uniqueMap = new Map<string, Trip>();
+      trips.forEach((t: Trip) => {
+        if (t && t.id) {
+          if (!uniqueMap.has(t.id)) {
+            uniqueMap.set(t.id, t);
+          } else {
+            const existing = uniqueMap.get(t.id)!;
+            if ((t.updatedAt || 0) > (existing.updatedAt || 0)) {
+              uniqueMap.set(t.id, t);
+            }
+          }
+        }
+      });
+      const uniqueTrips = Array.from(uniqueMap.values());
+
       // Keep only Hokuriku and any user custom created trips; filter out old sample presets
-      const cleaned = trips.filter(
+      const cleaned = uniqueTrips.filter(
         (t: Trip) =>
           t.id !== 'preset-tokyo-5days' &&
           t.id !== 'preset-kyoto-osaka-6days' &&
@@ -65,7 +81,13 @@ export function getStoredTrips(): Trip[] {
 
 export function saveTrips(trips: Trip[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(trips));
+    const uniqueMap = new Map<string, Trip>();
+    (trips || []).forEach((t) => {
+      if (t && t.id && !uniqueMap.has(t.id)) {
+        uniqueMap.set(t.id, t);
+      }
+    });
+    localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(Array.from(uniqueMap.values())));
   } catch (err) {
     console.error('Error saving trips to local storage:', err);
   }

@@ -110,17 +110,29 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   // Search and filter states
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedYear, setSelectedYear] = useState<string>('all');
+  const [selectedTripFilter, setSelectedTripFilter] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedDestination, setSelectedDestination] = useState<string>('all');
 
+  // 1. Strictly deduplicate trips by ID to prevent duplicate trip rendering
+  const uniqueTrips = useMemo(() => {
+    const map = new Map<string, Trip>();
+    (trips || []).forEach((t) => {
+      if (t && t.id && !map.has(t.id)) {
+        map.set(t.id, t);
+      }
+    });
+    return Array.from(map.values());
+  }, [trips]);
+
   // Annual Review filter states
   const [reviewYear, setReviewYear] = useState<string>(() => {
-    const active = trips.find((t) => t.id === currentTripId);
+    const active = uniqueTrips.find((t) => t.id === currentTripId);
     if (active?.startDate && active.startDate.length >= 4) {
       return active.startDate.slice(0, 4);
     }
-    if (trips.length > 0 && trips[0].startDate && trips[0].startDate.length >= 4) {
-      return trips[0].startDate.slice(0, 4);
+    if (uniqueTrips.length > 0 && uniqueTrips[0].startDate && uniqueTrips[0].startDate.length >= 4) {
+      return uniqueTrips[0].startDate.slice(0, 4);
     }
     return new Date().getFullYear().toString();
   });
@@ -129,26 +141,26 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
 
   // Calendar navigation state
   const [calendarYear, setCalendarYear] = useState<number>(() => {
-    const active = trips.find((t) => t.id === currentTripId);
+    const active = uniqueTrips.find((t) => t.id === currentTripId);
     if (active?.startDate && active.startDate.length >= 4) {
       const y = parseInt(active.startDate.slice(0, 4), 10);
       if (!isNaN(y)) return y;
     }
-    if (trips.length > 0 && trips[0].startDate) {
-      const y = parseInt(trips[0].startDate.slice(0, 4), 10);
+    if (uniqueTrips.length > 0 && uniqueTrips[0].startDate) {
+      const y = parseInt(uniqueTrips[0].startDate.slice(0, 4), 10);
       if (!isNaN(y)) return y;
     }
     return new Date().getFullYear();
   });
 
   const [calendarMonth, setCalendarMonth] = useState<number>(() => {
-    const active = trips.find((t) => t.id === currentTripId);
+    const active = uniqueTrips.find((t) => t.id === currentTripId);
     if (active?.startDate && active.startDate.length >= 7) {
       const m = parseInt(active.startDate.slice(5, 7), 10);
       if (!isNaN(m)) return m - 1; // 0-indexed
     }
-    if (trips.length > 0 && trips[0].startDate) {
-      const m = parseInt(trips[0].startDate.slice(5, 7), 10);
+    if (uniqueTrips.length > 0 && uniqueTrips[0].startDate) {
+      const m = parseInt(uniqueTrips[0].startDate.slice(5, 7), 10);
       if (!isNaN(m)) return m - 1;
     }
     return new Date().getMonth();
@@ -188,11 +200,12 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [lightboxImage, showPassportCard, onClose]);
 
-  // Flatten all spots across all trips for search and calendar indexing
+  // Flatten all spots across unique trips with strict spotId deduplication
   const allFlattenedSpots = useMemo(() => {
     const list: FlattenedSpotMemory[] = [];
+    const seenSpotKeys = new Set<string>();
 
-    trips.forEach((trip) => {
+    uniqueTrips.forEach((trip) => {
       const memoryPhotoMap: Record<string, { photos: string[]; notes?: string; mood?: string; googlePhotosUrl?: string }> = {};
       (trip.memories || []).forEach((mem) => {
         if (mem.spotId) {
@@ -208,6 +221,11 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
 
       (trip.days || []).forEach((day) => {
         (day.items || []).forEach((spot) => {
+          // Compound unique key: tripId + dayNumber + spotId + (spotTitle + startTime)
+          const spotKey = `${trip.id}::${day.dayNumber}::${spot.id}`;
+          if (seenSpotKeys.has(spotKey)) return;
+          seenSpotKeys.add(spotKey);
+
           const directPhotos = spot.memoryPhotos || [];
           const memoryPhotos = memoryPhotoMap[spot.id]?.photos || [];
           const combinedPhotos = Array.from(new Set([...directPhotos, ...memoryPhotos]));
@@ -238,28 +256,28 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     });
 
     return list;
-  }, [trips]);
+  }, [uniqueTrips]);
 
   // Extract available years
   const availableYears = useMemo(() => {
     const years = new Set<string>();
-    trips.forEach((tr) => {
+    uniqueTrips.forEach((tr) => {
       if (tr.startDate && tr.startDate.length >= 4) {
         years.add(tr.startDate.slice(0, 4));
       }
     });
     return Array.from(years).sort((a, b) => b.localeCompare(a));
-  }, [trips]);
+  }, [uniqueTrips]);
 
   // Overall Travel Milestone Statistics
   const stats = useMemo(() => {
-    const totalTrips = trips.length;
+    const totalTrips = uniqueTrips.length;
     const uniqueDates = new Set<string>();
     const uniqueDestinations = new Set<string>();
     let totalSpots = 0;
     let totalPhotos = 0;
 
-    trips.forEach((tr) => {
+    uniqueTrips.forEach((tr) => {
       if (tr.destination) uniqueDestinations.add(tr.destination);
       (tr.days || []).forEach((d) => {
         if (d.date) uniqueDates.add(d.date);
@@ -277,23 +295,23 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
 
     return {
       totalTrips,
-      totalDays: uniqueDates.size || trips.reduce((acc, t) => acc + (t.days?.length || 1), 0),
+      totalDays: uniqueDates.size || uniqueTrips.reduce((acc, t) => acc + (t.days?.length || 1), 0),
       totalDestinations: uniqueDestinations.size,
       totalSpots,
       totalPhotos,
     };
-  }, [trips]);
+  }, [uniqueTrips]);
 
   // ================= ANNUAL REVIEW COMPUTATIONS =================
   const reviewTrips = useMemo(() => {
-    return trips.filter((t) => {
+    return uniqueTrips.filter((t) => {
       if (reviewYear === 'all') return true;
       const startY = t.startDate?.slice(0, 4);
       const endY = t.endDate?.slice(0, 4);
       const daysMatch = (t.days || []).some((d) => d.date?.startsWith(reviewYear));
       return startY === reviewYear || endY === reviewYear || daysMatch;
     });
-  }, [trips, reviewYear]);
+  }, [uniqueTrips, reviewYear]);
 
   const reviewSpots = useMemo(() => {
     return allFlattenedSpots.filter((s) => {
@@ -473,6 +491,11 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     const q = searchQuery.trim().toLowerCase();
 
     return allFlattenedSpots.filter((item) => {
+      // Trip selection filter
+      if (selectedTripFilter !== 'all' && item.tripId !== selectedTripFilter) {
+        return false;
+      }
+
       if (q) {
         const matchTitle = item.spotTitle.toLowerCase().includes(q);
         const matchTrip = item.tripTitle.toLowerCase().includes(q);
@@ -499,15 +522,24 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
 
       return true;
     });
-  }, [allFlattenedSpots, searchQuery, selectedYear, selectedCategory, selectedDestination]);
+  }, [allFlattenedSpots, searchQuery, selectedTripFilter, selectedYear, selectedCategory, selectedDestination]);
 
-  // Calendar mapping: date string -> spots
+  // Calendar mapping: date string -> spots (strictly deduplicated on identical spotId or same tripId+title+startTime)
   const spotsByDateMap = useMemo(() => {
     const map = new Map<string, FlattenedSpotMemory[]>();
     filteredSpots.forEach((s) => {
       if (!s.date) return;
       const list = map.get(s.date) || [];
-      list.push(s);
+      const isDuplicate = list.some(
+        (existing) =>
+          existing.spotId === s.spotId ||
+          (existing.tripId === s.tripId &&
+            existing.spotTitle.trim() === s.spotTitle.trim() &&
+            (existing.startTime || '') === (s.startTime || ''))
+      );
+      if (!isDuplicate) {
+        list.push(s);
+      }
       map.set(s.date, list);
     });
     return map;
@@ -516,7 +548,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   // Trip ranges mapping: date string -> Trip info
   const tripsByDateMap = useMemo(() => {
     const map = new Map<string, { trip: Trip; dayNumber: number }>();
-    trips.forEach((tr) => {
+    uniqueTrips.forEach((tr) => {
       (tr.days || []).forEach((d) => {
         if (d.date) {
           map.set(d.date, { trip: tr, dayNumber: d.dayNumber });
@@ -524,7 +556,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       });
     });
     return map;
-  }, [trips]);
+  }, [uniqueTrips]);
 
   // Days in current calendar month
   const calendarDays = useMemo(() => {
@@ -594,16 +626,41 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     return days;
   }, [calendarYear, calendarMonth, spotsByDateMap, tripsByDateMap]);
 
-  // Spots for selected calendar date
-  const selectedDateSpots = useMemo(() => {
+  // Selected date trips & spots grouped strictly by Trip
+  const selectedDateTripGroups = useMemo(() => {
     if (!selectedCalendarDate) return [];
-    return spotsByDateMap.get(selectedCalendarDate) || [];
-  }, [selectedCalendarDate, spotsByDateMap]);
+    const daySpots = spotsByDateMap.get(selectedCalendarDate) || [];
+    if (daySpots.length === 0) return [];
 
-  const selectedDateTripInfo = useMemo(() => {
-    if (!selectedCalendarDate) return null;
-    return tripsByDateMap.get(selectedCalendarDate) || null;
-  }, [selectedCalendarDate, tripsByDateMap]);
+    const groupMap = new Map<string, { trip: Trip; dayNumber: number; spots: FlattenedSpotMemory[] }>();
+
+    daySpots.forEach((s) => {
+      if (!groupMap.has(s.tripId)) {
+        const foundTrip = uniqueTrips.find((t) => t.id === s.tripId);
+        if (foundTrip) {
+          groupMap.set(s.tripId, {
+            trip: foundTrip,
+            dayNumber: s.dayNumber,
+            spots: [],
+          });
+        }
+      }
+      const group = groupMap.get(s.tripId);
+      if (group) {
+        // Prevent duplicate spot within the trip group
+        if (!group.spots.some((existing) => existing.spotId === s.spotId || (existing.spotTitle.trim() === s.spotTitle.trim() && (existing.startTime || '') === (s.startTime || '')))) {
+          group.spots.push(s);
+        }
+      }
+    });
+
+    return Array.from(groupMap.values());
+  }, [selectedCalendarDate, spotsByDateMap, uniqueTrips]);
+
+  // Total count of spots for the selected day across all trips
+  const totalSelectedDaySpotsCount = useMemo(() => {
+    return selectedDateTripGroups.reduce((acc, g) => acc + g.spots.length, 0);
+  }, [selectedDateTripGroups]);
 
   // Group filtered spots by Year and Trip for Timeline Story Wall
   const timelineGrouped = useMemo(() => {
@@ -624,11 +681,13 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       }
       const dayMap = tripMap.get(spot.tripId)!;
       const list = dayMap.get(spot.dayNumber) || [];
-      list.push(spot);
+      if (!list.some((existing) => existing.spotId === spot.spotId)) {
+        list.push(spot);
+      }
       dayMap.set(spot.dayNumber, list);
     });
 
-    trips.forEach((tr) => {
+    uniqueTrips.forEach((tr) => {
       if (tripMap.has(tr.id)) {
         const dayMap = tripMap.get(tr.id)!;
         const sortedDayNumbers = Array.from(dayMap.keys()).sort((a, b) => a - b);
@@ -642,7 +701,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     });
 
     return groups;
-  }, [filteredSpots, trips]);
+  }, [filteredSpots, uniqueTrips]);
 
   // Month navigation handlers
   const handlePrevMonth = () => {
@@ -691,7 +750,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
               <h2 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white truncate flex items-center gap-2">
                 <span>跨旅程回憶與足跡時光庫</span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950/80 text-teal-700 dark:text-teal-300 border border-teal-200/60 dark:border-teal-800 hidden sm:inline-flex">
-                  {trips.length} 趟旅程 · {stats.totalSpots} 個足跡點
+                  {uniqueTrips.length} 趟旅程 · {stats.totalSpots} 個足跡點
                 </span>
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
@@ -791,41 +850,63 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
               )}
             </div>
 
-            {/* Quick Year Filter */}
+            {/* Quick Filters */}
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 shrink-0">
-              <span className="text-[11px] font-bold text-slate-400 shrink-0 flex items-center gap-1">
-                <Filter className="w-3 h-3" />
-                <span>年份:</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setSelectedYear('all')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition shrink-0 cursor-pointer ${
-                  selectedYear === 'all'
-                    ? 'bg-teal-600 text-white shadow-2xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                }`}
-              >
-                全部
-              </button>
-              {availableYears.map((yr) => (
+              {/* Trip Filter */}
+              {uniqueTrips.length > 1 && (
+                <div className="flex items-center gap-1">
+                  <span className="text-[11px] font-bold text-slate-400 shrink-0">旅程:</span>
+                  <select
+                    value={selectedTripFilter}
+                    onChange={(e) => setSelectedTripFilter(e.target.value)}
+                    className="px-2 py-1 text-[11px] font-semibold rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 text-slate-700 dark:text-slate-300 outline-none cursor-pointer max-w-[130px] sm:max-w-[170px] truncate"
+                  >
+                    <option value="all">全部旅程 ({uniqueTrips.length})</option>
+                    {uniqueTrips.map((tr) => (
+                      <option key={tr.id} value={tr.id}>
+                        {tr.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Year Filter */}
+              <div className="flex items-center gap-1">
+                <span className="text-[11px] font-bold text-slate-400 shrink-0 flex items-center gap-1">
+                  <Filter className="w-3 h-3" />
+                  <span>年份:</span>
+                </span>
                 <button
-                  key={yr}
                   type="button"
-                  onClick={() => {
-                    setSelectedYear(yr);
-                    const num = parseInt(yr, 10);
-                    if (!isNaN(num)) setCalendarYear(num);
-                  }}
+                  onClick={() => setSelectedYear('all')}
                   className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition shrink-0 cursor-pointer ${
-                    selectedYear === yr
+                    selectedYear === 'all'
                       ? 'bg-teal-600 text-white shadow-2xs'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
                   }`}
                 >
-                  {yr}年
+                  全部
                 </button>
-              ))}
+                {availableYears.map((yr) => (
+                  <button
+                    key={yr}
+                    type="button"
+                    onClick={() => {
+                      setSelectedYear(yr);
+                      const num = parseInt(yr, 10);
+                      if (!isNaN(num)) setCalendarYear(num);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition shrink-0 cursor-pointer ${
+                      selectedYear === yr
+                        ? 'bg-teal-600 text-white shadow-2xs'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    {yr}年
+                  </button>
+                ))}
+              </div>
 
               {/* Quick Category Filter */}
               <select
@@ -966,109 +1047,127 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 </div>
               </div>
 
-              {/* Selected Day Footprint Details Sheet / Panel */}
+              {/* Selected Day Footprint Details Sheet / Panel (Grouped cleanly by Trip without duplicates) */}
               {selectedCalendarDate && (
-                <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 border border-teal-500/40 shadow-lg space-y-3 animate-in fade-in slide-in-from-top-2 duration-150">
+                <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-5 border border-teal-500/40 shadow-lg space-y-4 animate-in fade-in slide-in-from-top-2 duration-150">
                   <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
                           {formatDateSlash(selectedCalendarDate)} ({getDayOfWeek(selectedCalendarDate, lang)})
                         </span>
-                        {selectedDateTripInfo && (
-                          <span className="px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 text-[10px] font-bold border border-teal-200/60 dark:border-teal-800">
-                            【{selectedDateTripInfo.trip.title}】第 {selectedDateTripInfo.dayNumber} 天
-                          </span>
-                        )}
                       </div>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                        當日共排定 {selectedDateSpots.length} 個景點活動
+                        當日共排定 {totalSelectedDaySpotsCount} 個景點活動 · 涵蓋 {selectedDateTripGroups.length} 趟旅程
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      {selectedDateTripInfo && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            onSelectTrip(selectedDateTripInfo.trip.id);
-                            onClose();
-                          }}
-                          className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-                        >
-                          <span>前往此行程</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedCalendarDate(null)}
-                        className="p-1 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCalendarDate(null)}
+                      className="p-1 rounded-full text-slate-400 hover:text-slate-600 cursor-pointer"
+                      title="關閉當日詳情"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
 
-                  {/* Spots list for the day */}
-                  {selectedDateSpots.length === 0 ? (
+                  {/* Spots list for the day grouped cleanly by Trip */}
+                  {selectedDateTripGroups.length === 0 ? (
                     <p className="text-xs text-slate-400 py-3 text-center">
                       當日尚無詳細行程景點，點擊上方可直接進入該旅程進行規劃。
                     </p>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                      {selectedDateSpots.map((spot) => (
-                        <div
-                          key={spot.spotId}
-                          className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 space-y-2 hover:border-teal-400 transition"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
-                              {spot.spotTitle}
-                            </span>
-                            {spot.startTime && (
-                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-semibold border border-slate-200/60 dark:border-slate-600 shrink-0">
-                                {spot.startTime}
+                    <div className="space-y-4">
+                      {selectedDateTripGroups.map(({ trip, dayNumber, spots }) => (
+                        <div key={trip.id} className="space-y-2.5">
+                          {/* Trip Section Header */}
+                          <div className="flex items-center justify-between bg-slate-100/80 dark:bg-slate-800/80 p-2 sm:px-3 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`w-2.5 h-2.5 rounded-full bg-gradient-to-r ${trip.coverGradient || 'from-teal-600 to-emerald-600'} shrink-0`}
+                              />
+                              <span className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
+                                【{trip.title}】
                               </span>
-                            )}
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 font-bold border border-slate-200/60 dark:border-slate-600 shrink-0">
+                                第 {dayNumber} 天
+                              </span>
+                              <span className="text-[11px] text-slate-400 font-normal hidden sm:inline">
+                                ({spots.length} 個景點)
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onSelectTrip(trip.id);
+                                onClose();
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-[11px] flex items-center gap-1 transition cursor-pointer shadow-2xs shrink-0"
+                            >
+                              <span>前往此行程</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </button>
                           </div>
 
-                          {spot.locationName && (
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1 truncate">
-                              <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                              <span className="truncate">{spot.locationName}</span>
-                            </p>
-                          )}
+                          {/* Spot Cards Grid */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-0.5">
+                            {spots.map((spot, sIdx) => (
+                              <div
+                                key={`${spot.tripId}-${spot.spotId}-${sIdx}`}
+                                className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 space-y-2 hover:border-teal-400 transition"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
+                                    {spot.spotTitle}
+                                  </span>
+                                  {spot.startTime && (
+                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-semibold border border-slate-200/60 dark:border-slate-600 shrink-0">
+                                      {spot.startTime}
+                                    </span>
+                                  )}
+                                </div>
 
-                          {spot.notes && (
-                            <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2 bg-white dark:bg-slate-800 p-2 rounded-xl border border-slate-100 dark:border-slate-700/50">
-                              {spot.notes}
-                            </p>
-                          )}
+                                {spot.locationName && (
+                                  <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1 truncate">
+                                    <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                    <span className="truncate">{spot.locationName}</span>
+                                  </p>
+                                )}
 
-                          {/* Photos thumbnails */}
-                          {spot.photos.length > 0 && (
-                            <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-                              {spot.photos.map((imgUrl, i) => (
-                                <img
-                                  key={i}
-                                  src={imgUrl}
-                                  alt={spot.spotTitle}
-                                  onClick={() =>
-                                    setLightboxImage({
-                                      url: imgUrl,
-                                      spotTitle: spot.spotTitle,
-                                      tripTitle: spot.tripTitle,
-                                      date: spot.date,
-                                      caption: spot.notes,
-                                      googlePhotosUrl: spot.googlePhotosUrl,
-                                    })
-                                  }
-                                  className="w-14 h-14 rounded-xl object-cover border border-slate-200 dark:border-slate-700 cursor-pointer hover:scale-105 transition shadow-2xs shrink-0"
-                                />
-                              ))}
-                            </div>
-                          )}
+                                {spot.notes && (
+                                  <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2 bg-white dark:bg-slate-800 p-2 rounded-xl border border-slate-100 dark:border-slate-700/50">
+                                    {spot.notes}
+                                  </p>
+                                )}
+
+                                {/* Photos thumbnails */}
+                                {spot.photos.length > 0 && (
+                                  <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+                                    {spot.photos.map((imgUrl, i) => (
+                                      <img
+                                        key={i}
+                                        src={imgUrl}
+                                        alt={spot.spotTitle}
+                                        onClick={() =>
+                                          setLightboxImage({
+                                            url: imgUrl,
+                                            spotTitle: spot.spotTitle,
+                                            tripTitle: spot.tripTitle,
+                                            date: spot.date,
+                                            caption: spot.notes,
+                                            googlePhotosUrl: spot.googlePhotosUrl,
+                                          })
+                                        }
+                                        className="w-14 h-14 rounded-xl object-cover border border-slate-200 dark:border-slate-700 cursor-pointer hover:scale-105 transition shadow-2xs shrink-0"
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1095,6 +1194,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                     onClick={() => {
                       setSearchQuery('');
                       setSelectedYear('all');
+                      setSelectedTripFilter('all');
                       setSelectedCategory('all');
                       setSelectedDestination('all');
                     }}
@@ -1682,7 +1782,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
             </div>
 
             {/* Passport Card Body */}
-            <div className="p-5 rounded-2xl bg-gradient-to-br from-teal-700 via-teal-800 to-emerald-955 text-white space-y-4 shadow-inner relative overflow-hidden">
+            <div className="p-5 rounded-2xl bg-gradient-to-br from-teal-700 via-teal-800 to-emerald-950 text-white space-y-4 shadow-inner relative overflow-hidden">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-[10px] tracking-widest text-teal-200 uppercase font-mono">
@@ -1720,7 +1820,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 <span className="text-[10px] text-teal-200 block mb-1">已點亮旅行目的地：</span>
                 <p className="text-xs font-semibold text-white/90">
                   {Array.from(
-                    new Set(trips.map((t) => t.destination).filter(Boolean))
+                    new Set(uniqueTrips.map((t) => t.destination).filter(Boolean))
                   ).join(' · ') || '自由行探索中'}
                 </p>
               </div>

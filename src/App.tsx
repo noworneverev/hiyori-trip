@@ -524,7 +524,10 @@ export default function App() {
           updatedAt: Date.now(),
         };
       }
-      const newTrips = [newTrip, ...trips];
+      const exists = trips.some((t) => t.id === newTrip.id);
+      const newTrips = exists
+        ? trips.map((t) => (t.id === newTrip.id ? newTrip : t))
+        : [newTrip, ...trips];
       setTrips(newTrips);
       saveTrips(newTrips);
       setCurrentTripIdState(newTrip.id);
@@ -749,11 +752,15 @@ export default function App() {
   };
 
   const handleImportTrip = (imported: Trip) => {
-    const updated = [imported, ...trips];
+    const exists = trips.some((t) => t.id === imported.id);
+    const sanitized = exists
+      ? { ...imported, id: `trip-${Date.now()}-${Math.random().toString(36).substr(2, 6)}` }
+      : imported;
+    const updated = [sanitized, ...trips.filter((t) => t.id !== sanitized.id)];
     setTrips(updated);
     saveTrips(updated);
-    setCurrentTripIdState(imported.id);
-    setCurrentTripId(imported.id);
+    setCurrentTripIdState(sanitized.id);
+    setCurrentTripId(sanitized.id);
   };
 
   if (!currentTrip) {
