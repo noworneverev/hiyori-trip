@@ -409,7 +409,7 @@ export default function App() {
       try {
         const { successCount } = await flushPendingSyncQueue();
         if (successCount > 0) {
-          showToast(`網路連線已恢復，已為您自動同步 ${successCount} 筆離線變更！`);
+          showToast(lang === 'zh' ? `網路已連線，已同步 ${successCount} 筆變更` : `Online: synced ${successCount} changes`);
         }
       } catch (e) {
         console.warn('Online sync flush error:', e);
@@ -732,12 +732,12 @@ export default function App() {
 
     if (sanitizedPhotos.length > 0 || sanitizedItemData.googlePhotosUrl) {
       if (currentUser) {
-        showToast(lang === 'zh' ? '景點與照片已儲存並即時同步至雲端！' : 'Spot & photos saved and synced to cloud!');
+        showToast(lang === 'zh' ? '已儲存並同步' : 'Saved and synced');
       } else {
-        showToast(lang === 'zh' ? '景點與照片已儲存於本機。登入 Google 帳號可跨裝置即時同步！' : 'Saved locally. Sign in with Google to sync across devices!');
+        showToast(lang === 'zh' ? '已儲存於本機' : 'Saved locally');
       }
     } else {
-      showToast(lang === 'zh' ? '景點已成功儲存' : 'Spot saved');
+      showToast(lang === 'zh' ? '已儲存' : 'Saved');
     }
   };
 
@@ -862,7 +862,7 @@ export default function App() {
                         className="w-full py-1.5 px-2 rounded-xl bg-teal-50/80 hover:bg-teal-100 dark:bg-teal-950/60 dark:hover:bg-teal-900/80 text-teal-800 dark:text-teal-200 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                       >
                         <Compass className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                        <span>跨行程搜尋與足跡時光庫</span>
+                        <span>足跡時光庫</span>
                       </button>
                     </div>
                   </div>
@@ -1199,14 +1199,14 @@ export default function App() {
                 <Eye className="w-4 h-4" />
               </div>
               <p className="text-slate-300 text-xs">
-                您目前在此行程具有<strong>【僅檢視權限 (Viewer)】</strong>，可自由查閱景點路線與天氣。如需新增或修改行程，請向擁有者申請編輯權限。
+                目前為<strong>僅檢視權限</strong>。如需編輯請向擁有者申請權限。
               </p>
             </div>
             <button
               onClick={() => setShowCollabModal(true)}
               className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-semibold text-xs shrink-0 self-end sm:self-auto transition"
             >
-              查看權限清單
+              權限清單
             </button>
           </div>
         )}

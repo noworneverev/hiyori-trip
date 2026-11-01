@@ -647,8 +647,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   {lang === 'zh'
-                    ? '留存每一站打卡照片與隨筆，一鍵產出旅程相簿與拍立得'
-                    : 'Curate your journey photos and memories with authentic Polaroid print formats'}
+                    ? '記錄打卡照片與隨筆，支援拍立得列印'
+                    : 'Curate your journey photos and memories with Polaroid print formats'}
                 </p>
               </div>
             </div>
@@ -851,7 +851,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       {saveSuccessToast && (
         <div className="p-3 rounded-2xl bg-teal-600 text-white font-bold text-xs flex items-center gap-2 shadow-lg animate-in fade-in slide-in-from-top duration-200">
           <Check className="w-4 h-4 text-emerald-200" />
-          <span>✨ 回憶照片已成功儲存並同步至雲端，電腦與手機隨時保持一致！</span>
+          <span>照片已儲存並同步</span>
         </div>
       )}
 
@@ -860,7 +860,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             <div className="flex items-center justify-between text-xs">
               <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                 <Route className="w-4 h-4 text-teal-600" />
-                <span>行程景點相簿打卡進度</span>
+                <span>景點記錄進度</span>
               </span>
               <span className="font-mono font-bold text-teal-700 dark:text-teal-400">
                 {visitedSpotsCount} / {allSpots.length} 個景點 ({allSpots.length > 0 ? Math.round((visitedSpotsCount / allSpots.length) * 100) : 0}%)
@@ -884,10 +884,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-2xs'
                       : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                   }`}
-                  title="僅呈現有打勾或有照片的實際造訪景點"
+                  title="僅呈現有照片或已造訪景點"
                 >
                   <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                  <span>僅已造訪 / 含照片 ({visitedSpotsCount})</span>
+                  <span>已造訪 / 含照片 ({visitedSpotsCount})</span>
                 </button>
                 <button
                   type="button"
@@ -897,9 +897,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-2xs'
                       : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                   }`}
-                  title="顯示所有預定行程"
+                  title="顯示全部景點"
                 >
-                  <span>全部排定行程 ({allSpots.length})</span>
+                  <span>全部 ({allSpots.length})</span>
                 </button>
               </div>
 
@@ -914,7 +914,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   className="text-teal-600 dark:text-teal-400 font-bold hover:underline text-xs flex items-center gap-1"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span>新增行程外自由隨拍</span>
+                  <span>新增隨拍</span>
                 </button>
               )}
             </div>
@@ -930,13 +930,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   </span>
                   <div>
                     <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                      <span>行程漫遊隨拍 · 自由探索剪影</span>
+                      <span>漫遊隨拍</span>
                       <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-950 text-teal-700 dark:text-teal-300 font-bold">
                         {unassignedMemories.length} 張
                       </span>
                     </h4>
                     <p className="text-[11px] text-slate-400">
-                      全行程通用的隨手打卡、街景與私房美食回憶
+                      自由探索剪影與隨手記錄
                     </p>
                   </div>
                 </div>
@@ -1060,10 +1060,21 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                               className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                             />
                             <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
-                              <span className="px-2 py-0.5 rounded-lg bg-emerald-900/85 backdrop-blur-md text-emerald-100 text-[10px] font-bold flex items-center gap-1">
-                                <Check className="w-3 h-3 stroke-[2.5]" />
-                                <span>{spot.completed ? '已打卡造訪' : '已上傳回憶'}</span>
-                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleSpotCompleted(spot.id, e);
+                                }}
+                                className={`p-1.5 rounded-full backdrop-blur-md transition cursor-pointer ${
+                                  spot.completed
+                                    ? 'bg-emerald-600/90 text-white'
+                                    : 'bg-black/50 text-white/80 hover:bg-black/70'
+                                }`}
+                                title={spot.completed ? '已造訪' : '標記造訪'}
+                              >
+                                <Check className="w-3 h-3 stroke-[3]" />
+                              </button>
                             </div>
                             <div className="absolute bottom-2.5 right-2.5 opacity-0 group-hover:opacity-100 transition p-1.5 rounded-xl bg-slate-900/70 text-white">
                               <ZoomIn className="w-3.5 h-3.5" />
@@ -1078,7 +1089,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                                   key={pm.id}
                                   className="relative w-12 h-12 rounded-xl overflow-hidden border-2 border-slate-200 dark:border-slate-700 hover:border-teal-500 cursor-pointer group/thumb shrink-0 transition"
                                   onClick={() => setLightboxMemory(pm)}
-                                  title="點擊放大檢視相片"
+                                  title="放大相片"
                                 >
                                   <img src={pm.imageUrl} alt="" className="w-full h-full object-cover group-hover/thumb:scale-110 transition" />
                                   {isAuthorizedUploader && (
@@ -1089,7 +1100,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                                         handleDeleteMemory(pm.id);
                                       }}
                                       className="absolute top-0.5 right-0.5 w-5 h-5 rounded bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center transition opacity-0 group-hover/thumb:opacity-100 z-10"
-                                      title="刪除此相片"
+                                      title="刪除"
                                     >
                                       <Trash2 className="w-3 h-3 text-rose-300 hover:text-white" />
                                     </button>
@@ -1126,7 +1137,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                                     <span>管理相片</span>
                                   </button>
                                 ) : (
-                                  <span className="text-slate-400 text-[10px]">打卡相簿</span>
+                                  <span className="text-slate-400 text-[10px]">相簿</span>
                                 )}
                                 {(spot.googlePhotosUrl || firstPhoto.googlePhotosUrl) && (
                                   <a
@@ -1179,20 +1190,14 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                           <div className="space-y-1.5">
                             <div className="flex items-center justify-between text-xs">
                               <span className="font-mono text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">{spot.startTime || '行程安排'}</span>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-semibold flex items-center gap-1 border border-emerald-300/60 dark:border-emerald-800">
-                                  <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-                                  <span>已打卡造訪</span>
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleToggleSpotCompleted(spot.id, e)}
-                                  className="text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline"
-                                  title="取消打卡標記"
-                                >
-                                  取消
-                                </button>
-                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => handleToggleSpotCompleted(spot.id, e)}
+                                className="p-1 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition cursor-pointer"
+                                title="已造訪（點擊切換）"
+                              >
+                                <CheckCircle2 className="w-4 h-4" />
+                              </button>
                             </div>
                             <h5 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition">
                               {spot.title}
@@ -1207,7 +1212,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                             <div className="pt-3 border-t border-emerald-100 dark:border-emerald-900/60 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-400 font-bold">
                               <span className="flex items-center gap-1 text-[11px]">
                                 <Camera className="w-3.5 h-3.5" />
-                                <span>補登相片留念</span>
+                                <span>補登照片</span>
                               </span>
                               <span className="text-base group-hover:translate-x-0.5 transition">＋</span>
                             </div>
@@ -1225,7 +1230,14 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between text-xs text-slate-400">
                             <span className="font-mono text-[10px]">{spot.startTime || '行程安排'}</span>
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 font-medium">待造訪 / 未成行</span>
+                            <button
+                              type="button"
+                              onClick={(e) => handleToggleSpotCompleted(spot.id, e)}
+                              className="p-1 rounded-lg text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                              title="標記造訪"
+                            >
+                              <Circle className="w-4 h-4 stroke-[1.5]" />
+                            </button>
                           </div>
                           <h5 className="font-bold text-xs sm:text-sm text-slate-700 dark:text-slate-300">
                             {spot.title}
@@ -1240,10 +1252,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                           <button
                             type="button"
                             onClick={(e) => handleToggleSpotCompleted(spot.id, e)}
-                            className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 flex items-center gap-1"
+                            className="text-xs font-semibold text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 flex items-center gap-1 transition"
                           >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>標記為已造訪</span>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>造訪</span>
                           </button>
                           {isAuthorizedUploader && (
                             <button
@@ -1270,7 +1282,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     customDayMemories.length === 0 && (
                       <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 text-center col-span-full">
                         <p className="text-xs text-slate-400">
-                          此天尚未標記已造訪之景點。切換上方「全部排定行程」可查看原規劃或補打卡。
+                          尚無已造訪景點
                         </p>
                       </div>
                     )}
@@ -1280,7 +1292,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 {customDayMemories.length > 0 && (
                   <div className="pt-2">
                     <span className="text-[11px] font-bold text-slate-400 block mb-2">
-                      ✨ Day {day.dayNumber} 自由隨拍與突發景點：
+                      ✨ Day {day.dayNumber} 自由隨拍：
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                       {customDayMemories.map((m) => (
@@ -1331,11 +1343,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           </div>
           <div className="space-y-1 max-w-sm mx-auto">
             <h4 className="font-bold text-base text-slate-800 dark:text-slate-200">
-              {lang === 'zh' ? '這趟旅程還沒有上傳回憶照片' : 'No memory photos added yet'}
+              {lang === 'zh' ? '尚未新增照片' : 'No photos added yet'}
             </h4>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
               {lang === 'zh'
-                ? '點選上方「上傳回憶照」，挑選沿途隨手拍攝的景點照片、寫下當時的心得感受，即可自動排版成如雜誌般典雅的旅程相簿與實體沖印拍立得卡片！'
+                ? '上傳景點隨拍與心得，自動排版為相簿或拍立得。'
                 : 'Upload travel photos and captions to create a beautiful memory album and printable Polaroid cards.'}
             </p>
           </div>
@@ -1345,7 +1357,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               onClick={() => setShowUploadModal(true)}
               className="px-5 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md transition active:scale-95"
             >
-              📸 立即上傳第一張照片
+              📸 上傳照片
             </button>
           )}
         </div>
@@ -1411,7 +1423,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
                 {/* Card Action footer */}
                 <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
-                  <span className="text-[10px]">日和手帳回憶記錄</span>
+                  <span className="text-[10px]">回憶相簿</span>
                   <button
                     type="button"
                     onClick={() => handleDeleteMemory(mem.id)}
@@ -1433,9 +1445,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             <div className="flex items-center gap-2">
               <span className="text-lg">🎞️</span>
               <div>
-                <p className="font-bold">照相館拍立得沖印排版已就緒</p>
+                <p className="font-bold">拍立得沖印模式</p>
                 <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                  採用經典拍立得厚白邊框、手寫體景點標記與復古膠卷質感。點選上方「沖印 / 列印相簿」即可直接送印（支援 A4、4×6 相片紙裁切）。
+                  支援 A4、4×6 相片紙直接列印。
                 </p>
               </div>
             </div>
@@ -1444,7 +1456,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               onClick={handlePrintPolaroids}
               className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 shadow-xs"
             >
-              立即列印
+              列印
             </button>
           </div>
 
@@ -1535,10 +1547,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 </div>
                 <div>
                   <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
-                    {lang === 'zh' ? '新增打卡回憶照片' : 'Add Journey Memory Photo'}
+                    {lang === 'zh' ? '新增回憶照片' : 'Add Memory Photo'}
                   </h3>
                   <p className="text-[10px] text-slate-400">
-                    {lang === 'zh' ? '關聯旅程景點、寫下心得隨筆，支援拍立得自動排版' : 'Link to itinerary spot & add personal reflections'}
+                    {lang === 'zh' ? '關聯行程景點與心得隨筆' : 'Link to itinerary spot & add notes'}
                   </p>
                 </div>
               </div>
