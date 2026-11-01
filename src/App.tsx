@@ -1597,6 +1597,7 @@ export default function App() {
           trips={trips}
           currentTripId={currentTrip.id}
           lang={lang}
+          onUpdateTrip={handleUpdateTrip}
           onSelectTrip={(selectedId) => {
             handleSelectTrip(selectedId);
             setShowGlobalHubModal(false);

@@ -573,12 +573,12 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 <div
                   id={`spot-card-${item.id}`}
                   onClick={() => setSelectedItemId(item.id)}
-                  className={`rounded-2xl p-4 sm:p-5 transition shadow-2xs bg-white dark:bg-slate-900 border cursor-pointer ${
+                  className={`rounded-2xl p-4 sm:p-5 transition shadow-2xs border cursor-pointer ${
                     isSelected
-                      ? 'border-teal-500 ring-2 ring-teal-500/20 shadow-md'
+                      ? 'border-teal-500 ring-2 ring-teal-500/20 shadow-md bg-white dark:bg-slate-900'
                       : item.completed
-                      ? 'border-emerald-200 dark:border-emerald-950 bg-emerald-50/10 opacity-75'
-                      : 'border-slate-200/90 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                      ? 'border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/20 dark:bg-emerald-950/20 shadow-xs'
+                      : 'border-slate-200/80 dark:border-slate-800 bg-white/75 dark:bg-slate-900/60 opacity-85 hover:opacity-100 hover:border-slate-300 dark:hover:border-slate-700'
                   }`}
                 >
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3.5">
@@ -635,12 +635,26 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                               </span>
                             </>
                           )}
+                          <span aria-hidden="true">·</span>
+                          {item.completed ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-200/80 dark:border-emerald-800/60">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                              <span>{lang === 'zh' ? '已打卡造訪' : 'Visited'}</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-200/60 dark:border-slate-700/60">
+                              <Circle className="w-3 h-3 text-slate-400" />
+                              <span>{lang === 'zh' ? '待造訪 / 未成行' : 'Unvisited / Planned'}</span>
+                            </span>
+                          )}
                         </div>
 
-                        {/* Spot Title */}
+                        {/* Spot Title (No line-through, elegant contrast) */}
                         <h4
-                          className={`text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-white ${
-                            item.completed ? 'line-through text-slate-400 dark:text-slate-500' : ''
+                          className={`text-base sm:text-lg font-bold tracking-tight ${
+                            item.completed
+                              ? 'text-slate-900 dark:text-white'
+                              : 'text-slate-700 dark:text-slate-300'
                           }`}
                         >
                           {item.title}

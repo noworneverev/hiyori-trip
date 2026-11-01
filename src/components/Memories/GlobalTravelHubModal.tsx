@@ -32,6 +32,7 @@ import {
   ShoppingBag,
   Footprints,
   Circle,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface GlobalTravelHubModalProps {
@@ -39,6 +40,7 @@ interface GlobalTravelHubModalProps {
   currentTripId: string;
   lang: Language;
   onSelectTrip: (tripId: string, targetSpotId?: string) => void;
+  onUpdateTrip?: (updatedTrip: Trip) => void;
   onClose: () => void;
 }
 
@@ -62,6 +64,7 @@ interface FlattenedSpotMemory {
   mood?: string;
   photos: string[];
   googlePhotosUrl?: string;
+  completed: boolean;
 }
 
 const CATEGORY_NAMES: Record<CategoryType, string> = {
@@ -145,6 +148,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   currentTripId,
   lang,
   onSelectTrip,
+  onUpdateTrip,
   onClose,
 }) => {
   useBodyScrollLock(true);
@@ -159,6 +163,31 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   const [selectedTripFilter, setSelectedTripFilter] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedDestination, setSelectedDestination] = useState<string>('all');
+
+  // Filter completed/visited spots only vs all planned spots (Default: true)
+  const [filterCompletedOnly, setFilterCompletedOnly] = useState<boolean>(true);
+
+  // Toggle spot visited status from Global Hub
+  const handleToggleSpotVisited = (tripId: string, dayNumber: number, spotId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!onUpdateTrip) return;
+    const targetTrip = uniqueTrips.find((t) => t.id === tripId);
+    if (!targetTrip) return;
+
+    const updatedDays = targetTrip.days.map((d) => {
+      if (d.dayNumber !== dayNumber) return d;
+      return {
+        ...d,
+        items: d.items.map((it) => (it.id === spotId ? { ...it, completed: !it.completed } : it)),
+      };
+    });
+
+    onUpdateTrip({
+      ...targetTrip,
+      days: updatedDays,
+      updatedAt: Date.now(),
+    });
+  };
 
   // 1. Strictly deduplicate trips by ID to prevent duplicate trip rendering
   const uniqueTrips = useMemo(() => {
@@ -295,6 +324,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
             mood: spot.memoryMood || memoryPhotoMap[spot.id]?.mood,
             photos: combinedPhotos,
             googlePhotosUrl: spot.googlePhotosUrl || memoryPhotoMap[spot.id]?.googlePhotosUrl,
+            completed: !!spot.completed,
           });
         });
       });
@@ -302,6 +332,14 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
 
     return list;
   }, [uniqueTrips]);
+
+  // Active spots according to filterCompletedOnly (Default: true -> only checked or photographed spots)
+  const displaySpots = useMemo(() => {
+    if (!filterCompletedOnly) return allFlattenedSpots;
+    return allFlattenedSpots.filter(
+      (s) => s.completed || s.photos.length > 0 || !!s.googlePhotosUrl
+    );
+  }, [allFlattenedSpots, filterCompletedOnly]);
 
   // Extract available years
   const availableYears = useMemo(() => {
@@ -314,7 +352,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     return Array.from(years).sort((a, b) => b.localeCompare(a));
   }, [uniqueTrips]);
 
-  // Overall Travel Milestone Statistics
+  // Overall Travel Milestone Statistics (reflects displaySpots)
   const stats = useMemo(() => {
     const totalTrips = uniqueTrips.length;
     const uniqueDates = new Set<string>();
@@ -322,20 +360,11 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     let totalSpots = 0;
     let totalPhotos = 0;
 
-    uniqueTrips.forEach((tr) => {
-      if (tr.destination) uniqueDestinations.add(tr.destination);
-      (tr.days || []).forEach((d) => {
-        if (d.date) uniqueDates.add(d.date);
-        totalSpots += (d.items || []).length;
-      });
-      (tr.memories || []).forEach((m) => {
-        if (m.imageUrl) totalPhotos++;
-      });
-      (tr.days || []).forEach((d) => {
-        (d.items || []).forEach((it) => {
-          if (it.memoryPhotos) totalPhotos += it.memoryPhotos.length;
-        });
-      });
+    displaySpots.forEach((s) => {
+      totalSpots++;
+      totalPhotos += s.photos.length;
+      if (s.date) uniqueDates.add(s.date);
+      if (s.tripDestination) uniqueDestinations.add(s.tripDestination.trim());
     });
 
     return {
@@ -345,7 +374,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       totalSpots,
       totalPhotos,
     };
-  }, [uniqueTrips]);
+  }, [uniqueTrips, displaySpots]);
 
   // ================= CONSOLIDATED HIGH-PERFORMANCE ANNUAL REVIEW AGGREGATOR =================
   // Computes all metrics, categories, cities, monthly heatmaps, and per-trip indexes in a single pass O(N)
@@ -376,7 +405,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       tripSpotMap.set(t.id, { spots: [], photosCount: 0 });
     });
 
-    allFlattenedSpots.forEach((s) => {
+    displaySpots.forEach((s) => {
       const match =
         reviewYear === 'all'
           ? true
@@ -422,21 +451,36 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       };
     });
 
-    // Accumulate unique travel dates & monthly trips
-    matchedTrips.forEach((tr) => {
-      (tr.days || []).forEach((d) => {
-        if (!d.date) return;
-        const [y, m] = d.date.split('-');
+    // Accumulate unique travel dates & monthly trips based on filterCompletedOnly
+    if (filterCompletedOnly) {
+      matchedSpots.forEach((s) => {
+        if (!s.date) return;
+        const [y, m] = s.date.split('-');
         if (reviewYear !== 'all' && y !== reviewYear) return;
 
-        uniqueDates.add(d.date);
+        uniqueDates.add(s.date);
         const mIdx = parseInt(m, 10) - 1;
         if (mIdx >= 0 && mIdx < 12) {
-          months[mIdx].uniqueDates.add(d.date);
-          months[mIdx].tripsSet.add(tr.id);
+          months[mIdx].uniqueDates.add(s.date);
+          months[mIdx].tripsSet.add(s.tripId);
         }
       });
-    });
+    } else {
+      matchedTrips.forEach((tr) => {
+        (tr.days || []).forEach((d) => {
+          if (!d.date) return;
+          const [y, m] = d.date.split('-');
+          if (reviewYear !== 'all' && y !== reviewYear) return;
+
+          uniqueDates.add(d.date);
+          const mIdx = parseInt(m, 10) - 1;
+          if (mIdx >= 0 && mIdx < 12) {
+            months[mIdx].uniqueDates.add(d.date);
+            months[mIdx].tripsSet.add(tr.id);
+          }
+        });
+      });
+    }
 
     // Accumulate spots, categories, cities, and monthly spots in one pass
     matchedSpots.forEach((s) => {
@@ -563,7 +607,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   const filteredSpots = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
-    return allFlattenedSpots.filter((item) => {
+    return displaySpots.filter((item) => {
       // Trip selection filter
       if (selectedTripFilter !== 'all' && item.tripId !== selectedTripFilter) {
         return false;
@@ -595,7 +639,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
 
       return true;
     });
-  }, [allFlattenedSpots, searchQuery, selectedTripFilter, selectedYear, selectedCategory, selectedDestination]);
+  }, [displaySpots, searchQuery, selectedTripFilter, selectedYear, selectedCategory, selectedDestination]);
 
   // Calendar mapping: date string -> spots (strictly deduplicated on identical spotId or same tripId+title+startTime)
   const spotsByDateMap = useMemo(() => {
@@ -924,6 +968,35 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
 
             {/* Quick Filters */}
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 shrink-0">
+              {/* Visited vs All Planned Toggle */}
+              <div className="flex items-center p-0.5 bg-slate-100 dark:bg-slate-800 rounded-xl text-[11px] font-bold shrink-0 border border-slate-200/80 dark:border-slate-700">
+                <button
+                  type="button"
+                  onClick={() => setFilterCompletedOnly(true)}
+                  className={`px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${
+                    filterCompletedOnly
+                      ? 'bg-emerald-600 text-white shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="僅呈現有打勾或有照片的實際造訪足跡"
+                >
+                  <Check className="w-3 h-3 stroke-[2.5]" />
+                  <span>僅已造訪</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterCompletedOnly(false)}
+                  className={`px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${
+                    !filterCompletedOnly
+                      ? 'bg-slate-700 text-white dark:bg-slate-600 shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="包含未打卡或預定行程"
+                >
+                  <span>全部預定</span>
+                </button>
+              </div>
+
               {/* Trip Filter */}
               {uniqueTrips.length > 1 && (
                 <div className="flex items-center gap-1">
@@ -1191,14 +1264,43 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                                 className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 space-y-2 hover:border-teal-400 transition"
                               >
                                 <div className="flex items-center justify-between gap-2">
-                                  <span className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
-                                    {spot.spotTitle}
-                                  </span>
-                                  {spot.startTime && (
-                                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-semibold border border-slate-200/60 dark:border-slate-600 shrink-0">
-                                      {spot.startTime}
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
+                                      {spot.spotTitle}
                                     </span>
-                                  )}
+                                    {spot.completed ? (
+                                      <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-semibold border border-emerald-300/60 dark:border-emerald-800 shrink-0 flex items-center gap-0.5">
+                                        <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+                                        <span>已造訪</span>
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 font-medium border border-slate-200/60 dark:border-slate-600 shrink-0">
+                                        待造訪
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {spot.startTime && (
+                                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-semibold border border-slate-200/60 dark:border-slate-600">
+                                        {spot.startTime}
+                                      </span>
+                                    )}
+                                    {onUpdateTrip && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleToggleSpotVisited(spot.tripId, spot.dayNumber, spot.spotId, e)}
+                                        className={`text-[10px] px-2 py-0.5 rounded-md font-semibold transition cursor-pointer flex items-center gap-1 ${
+                                          spot.completed
+                                            ? 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
+                                            : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs'
+                                        }`}
+                                        title={spot.completed ? '標記為未造訪' : '標記為已造訪'}
+                                      >
+                                        <Check className="w-2.5 h-2.5" />
+                                        <span>{spot.completed ? '取消' : '打卡'}</span>
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
 
                                 {spot.locationName && (
@@ -1342,13 +1444,40 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                                     <span className="text-[10px] px-2 py-0.5 rounded-md bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-600 shrink-0">
                                       {CATEGORY_NAMES[spot.category] || '景點'}
                                     </span>
+                                    {spot.completed ? (
+                                      <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-emerald-50 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-semibold border border-emerald-300/60 dark:border-emerald-800 shrink-0 flex items-center gap-0.5">
+                                        <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 dark:text-emerald-400" />
+                                        <span>已造訪</span>
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] px-1.5 py-0.2 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 font-medium border border-slate-200/60 dark:border-slate-600 shrink-0">
+                                        待造訪
+                                      </span>
+                                    )}
                                   </div>
 
-                                  {spot.startTime && (
-                                    <span className="text-[10px] font-mono font-semibold text-slate-400 shrink-0">
-                                      {spot.startTime}
-                                    </span>
-                                  )}
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    {spot.startTime && (
+                                      <span className="text-[10px] font-mono font-semibold text-slate-400">
+                                        {spot.startTime}
+                                      </span>
+                                    )}
+                                    {onUpdateTrip && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleToggleSpotVisited(spot.tripId, spot.dayNumber, spot.spotId, e)}
+                                        className={`text-[10px] px-2 py-0.5 rounded-md font-semibold transition cursor-pointer flex items-center gap-1 ${
+                                          spot.completed
+                                            ? 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
+                                            : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs'
+                                        }`}
+                                        title={spot.completed ? '標記為未造訪' : '標記為已造訪'}
+                                      >
+                                        <Check className="w-2.5 h-2.5" />
+                                        <span>{spot.completed ? '取消' : '打卡'}</span>
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
 
                                 {spot.locationName && (
@@ -1444,7 +1573,36 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                   ))}
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  {/* Visited vs All Planned Toggle */}
+                  <div className="flex items-center p-0.5 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-bold border border-slate-200/80 dark:border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => setFilterCompletedOnly(true)}
+                      className={`px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${
+                        filterCompletedOnly
+                          ? 'bg-emerald-600 text-white shadow-2xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                      title="僅統計已打卡造訪的景點與城市"
+                    >
+                      <Check className="w-3 h-3 stroke-[2.5]" />
+                      <span>僅已造訪</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFilterCompletedOnly(false)}
+                      className={`px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 ${
+                        !filterCompletedOnly
+                          ? 'bg-slate-700 text-white dark:bg-slate-600 shadow-2xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                      title="統計所有曾排定的行程景點"
+                    >
+                      <span>全部預定</span>
+                    </button>
+                  </div>
+
                   <button
                     type="button"
                     onClick={handleCopyReviewReport}

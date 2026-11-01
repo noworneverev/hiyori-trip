@@ -28,6 +28,8 @@ import {
   ExternalLink,
   Edit2,
   Compass,
+  CheckCircle2,
+  Circle,
 } from 'lucide-react';
 
 interface TripMemoriesViewProps {
@@ -193,11 +195,36 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     return () => window.removeEventListener('auth_state_change', handleAuth);
   }, []);
 
-  // Count of spots that have at least one photo
-  const checkedSpotsCount = useMemo(() => {
-    const set = new Set(allMemories.map((m) => m.spotId).filter(Boolean));
-    return set.size;
-  }, [allMemories]);
+  // Visited-only filter state for itinerary retrospection
+  const [filterVisitedOnly, setFilterVisitedOnly] = useState(true);
+
+  // Count of spots that are completed OR have at least one photo / googlePhotosUrl
+  const visitedSpotsCount = useMemo(() => {
+    const photoSpotIds = new Set(allMemories.map((m) => m.spotId).filter(Boolean));
+    let count = 0;
+    (trip.days || []).forEach((d) => {
+      (d.items || []).forEach((it) => {
+        if (it.completed || photoSpotIds.has(it.id) || (it.memoryPhotos && it.memoryPhotos.length > 0) || it.googlePhotosUrl) {
+          count++;
+        }
+      });
+    });
+    return count;
+  }, [allMemories, trip.days]);
+
+  // Direct check-in toggle from photo memory view
+  const handleToggleSpotCompleted = (spotId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const updatedDays = trip.days.map((d) => ({
+      ...d,
+      items: d.items.map((it) => (it.id === spotId ? { ...it, completed: !it.completed } : it)),
+    }));
+    onUpdateTrip({
+      ...trip,
+      days: updatedDays,
+      updatedAt: Date.now(),
+    });
+  };
 
   // Unassigned / general trip snapshots (not bound to a specific day spot or with custom dayNumber not matching days)
   const unassignedMemories = useMemo(() => {
@@ -502,6 +529,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               : existing;
             return {
               ...item,
+              completed: true,
               memoryPhotos: merged.length > 0 ? merged : undefined,
               memoryNotes: uploadCaption.trim() || item.memoryNotes,
               memoryMood: uploadMood,
@@ -835,19 +863,46 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 <span>行程景點相簿打卡進度</span>
               </span>
               <span className="font-mono font-bold text-teal-700 dark:text-teal-400">
-                {checkedSpotsCount} / {allSpots.length} 個景點 ({allSpots.length > 0 ? Math.round((checkedSpotsCount / allSpots.length) * 100) : 0}%)
+                {visitedSpotsCount} / {allSpots.length} 個景點 ({allSpots.length > 0 ? Math.round((visitedSpotsCount / allSpots.length) * 100) : 0}%)
               </span>
             </div>
             <div className="w-full bg-slate-100 dark:bg-slate-800 h-2.5 rounded-full overflow-hidden">
               <div
                 className="bg-gradient-to-r from-teal-500 to-emerald-500 h-full rounded-full transition-all duration-500"
                 style={{
-                  width: `${allSpots.length > 0 ? Math.round((checkedSpotsCount / allSpots.length) * 100) : 0}%`,
+                  width: `${allSpots.length > 0 ? Math.round((visitedSpotsCount / allSpots.length) * 100) : 0}%`,
                 }}
               />
             </div>
-            <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-              <span>{checkedSpotsCount === allSpots.length && allSpots.length > 0 ? '🎉 太棒了！全行程景點均已打卡留念！' : (isAuthorizedUploader ? '點擊下方尚未打卡的景點卡片即可快速拍照上傳' : '景點打卡回憶相簿')}</span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+              <div className="flex items-center p-0.5 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => setFilterVisitedOnly(true)}
+                  className={`px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+                    filterVisitedOnly
+                      ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="僅呈現有打勾或有照片的實際造訪景點"
+                >
+                  <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <span>僅已造訪 / 含照片 ({visitedSpotsCount})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterVisitedOnly(false)}
+                  className={`px-3 py-1.5 rounded-lg transition cursor-pointer flex items-center gap-1.5 ${
+                    !filterVisitedOnly
+                      ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                  title="顯示所有預定行程"
+                >
+                  <span>全部排定行程 ({allSpots.length})</span>
+                </button>
+              </div>
+
               {isAuthorizedUploader && (
                 <button
                   type="button"
@@ -856,9 +911,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     setIsCustomSpot(true);
                     setShowUploadModal(true);
                   }}
-                  className="text-teal-600 dark:text-teal-400 font-bold hover:underline"
+                  className="text-teal-600 dark:text-teal-400 font-bold hover:underline text-xs flex items-center gap-1"
                 >
-                  ＋ 新增行程外自由隨拍
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>新增行程外自由隨拍</span>
                 </button>
               )}
             </div>
@@ -981,6 +1037,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   {daySpots.map((spot) => {
                     const spotMems = allMemories.filter((m) => m.spotId === spot.id);
                     const hasPhotos = spotMems.length > 0;
+                    const isVisited = spot.completed || hasPhotos || !!spot.googlePhotosUrl;
+
+                    if (filterVisitedOnly && !isVisited) {
+                      return null;
+                    }
 
                     if (hasPhotos) {
                       const firstPhoto = spotMems[0];
@@ -999,8 +1060,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                               className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                             />
                             <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
-                              <span className="px-2 py-0.5 rounded-lg bg-teal-900/80 backdrop-blur-md text-teal-100 text-[10px] font-bold">
-                                ✓ 已打卡
+                              <span className="px-2 py-0.5 rounded-lg bg-emerald-900/85 backdrop-blur-md text-emerald-100 text-[10px] font-bold flex items-center gap-1">
+                                <Check className="w-3 h-3 stroke-[2.5]" />
+                                <span>{spot.completed ? '已打卡造訪' : '已上傳回憶'}</span>
                               </span>
                             </div>
                             <div className="absolute bottom-2.5 right-2.5 opacity-0 group-hover:opacity-100 transition p-1.5 rounded-xl bg-slate-900/70 text-white">
@@ -1058,7 +1120,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                                       setUploadGooglePhotosUrl(spot.googlePhotosUrl || firstPhoto.googlePhotosUrl || '');
                                       setShowUploadModal(true);
                                     }}
-                                    className="text-teal-600 font-bold hover:underline flex items-center gap-1"
+                                    className="text-teal-600 dark:text-teal-400 font-bold hover:underline flex items-center gap-1"
                                   >
                                     <Plus className="w-3 h-3" />
                                     <span>管理相片</span>
@@ -1096,27 +1158,76 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       );
                     }
 
+                    // Spot with NO photos yet
+                    if (spot.completed) {
+                      // Visited spot without photos
+                      return (
+                        <div
+                          key={spot.id}
+                          onClick={() => {
+                            if (isAuthorizedUploader) {
+                              setUploadSpotId(spot.id);
+                              setIsCustomSpot(false);
+                              setUploadGooglePhotosUrl(spot.googlePhotosUrl || '');
+                              setShowUploadModal(true);
+                            }
+                          }}
+                          className={`rounded-3xl border border-emerald-300/80 dark:border-emerald-800/70 p-4 transition flex flex-col justify-between min-h-[130px] group bg-emerald-50/25 dark:bg-emerald-950/20 shadow-2xs ${
+                            isAuthorizedUploader ? 'hover:border-emerald-500 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/30 cursor-pointer' : ''
+                          }`}
+                        >
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-mono text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">{spot.startTime || '行程安排'}</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-semibold flex items-center gap-1 border border-emerald-300/60 dark:border-emerald-800">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                  <span>已打卡造訪</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleToggleSpotCompleted(spot.id, e)}
+                                  className="text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline"
+                                  title="取消打卡標記"
+                                >
+                                  取消
+                                </button>
+                              </div>
+                            </div>
+                            <h5 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition">
+                              {spot.title}
+                            </h5>
+                            {spot.locationName && (
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                📍 {spot.locationName}
+                              </p>
+                            )}
+                          </div>
+                          {isAuthorizedUploader && (
+                            <div className="pt-3 border-t border-emerald-100 dark:border-emerald-900/60 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-400 font-bold">
+                              <span className="flex items-center gap-1 text-[11px]">
+                                <Camera className="w-3.5 h-3.5" />
+                                <span>補登相片留念</span>
+                              </span>
+                              <span className="text-base group-hover:translate-x-0.5 transition">＋</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    // Uncompleted spot (only shown when filterVisitedOnly is false)
                     return (
                       <div
                         key={spot.id}
-                        onClick={() => {
-                          if (isAuthorizedUploader) {
-                            setUploadSpotId(spot.id);
-                            setIsCustomSpot(false);
-                            setUploadGooglePhotosUrl(spot.googlePhotosUrl || '');
-                            setShowUploadModal(true);
-                          }
-                        }}
-                        className={`rounded-3xl border border-slate-200 dark:border-slate-800 p-4 transition flex flex-col justify-between min-h-[130px] group bg-white/50 dark:bg-slate-900/50 ${
-                          isAuthorizedUploader ? 'hover:border-teal-500 hover:bg-teal-50/20 dark:hover:bg-teal-950/20 cursor-pointer border-dashed' : ''
-                        }`}
+                        className="rounded-3xl border border-dashed border-slate-200 dark:border-slate-800 p-4 transition flex flex-col justify-between min-h-[130px] group bg-white/40 dark:bg-slate-900/40 opacity-75 hover:opacity-100"
                       >
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between text-xs text-slate-400">
                             <span className="font-mono text-[10px]">{spot.startTime || '行程安排'}</span>
-                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500">未打卡</span>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 font-medium">待造訪 / 未成行</span>
                           </div>
-                          <h5 className="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-200 group-hover:text-teal-600 transition">
+                          <h5 className="font-bold text-xs sm:text-sm text-slate-700 dark:text-slate-300">
                             {spot.title}
                           </h5>
                           {spot.locationName && (
@@ -1125,18 +1236,44 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                             </p>
                           )}
                         </div>
-                        {isAuthorizedUploader && (
-                          <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs text-teal-600 font-bold">
-                            <span className="flex items-center gap-1 text-[11px]">
-                              <Camera className="w-3.5 h-3.5" />
-                              <span>點擊上傳此景點相片</span>
-                            </span>
-                            <span className="text-base group-hover:translate-x-0.5 transition">→</span>
-                          </div>
-                        )}
+                        <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                          <button
+                            type="button"
+                            onClick={(e) => handleToggleSpotCompleted(spot.id, e)}
+                            className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 flex items-center gap-1"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>標記為已造訪</span>
+                          </button>
+                          {isAuthorizedUploader && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUploadSpotId(spot.id);
+                                setIsCustomSpot(false);
+                                setUploadGooglePhotosUrl(spot.googlePhotosUrl || '');
+                                setShowUploadModal(true);
+                              }}
+                              className="text-teal-600 dark:text-teal-400 hover:text-teal-700 font-bold flex items-center gap-1 text-[11px]"
+                            >
+                              <Camera className="w-3 h-3" />
+                              <span>拍照上傳</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
+
+                  {filterVisitedOnly &&
+                    daySpots.filter((s) => s.completed || allMemories.some((m) => m.spotId === s.id) || !!s.googlePhotosUrl).length === 0 &&
+                    customDayMemories.length === 0 && (
+                      <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 text-center col-span-full">
+                        <p className="text-xs text-slate-400">
+                          此天尚未標記已造訪之景點。切換上方「全部排定行程」可查看原規劃或補打卡。
+                        </p>
+                      </div>
+                    )}
                 </div>
 
                 {/* Custom Day Memories */}
