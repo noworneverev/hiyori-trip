@@ -95,6 +95,29 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
+  // Safe Haptic Feedback helper (10ms subtle vibration for touch devices)
+  const triggerHaptic = (ms = 10) => {
+    try {
+      if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+        navigator.vibrate(ms);
+      }
+    } catch {
+      // Ignore vibration error on unsupported platforms
+    }
+  };
+
+  const scrollToCenterChip = (elementId: string) => {
+    const activeBtn = document.getElementById(elementId);
+    const container = scrollContainerRef.current;
+    if (activeBtn && container) {
+      const containerWidth = container.clientWidth;
+      const btnLeft = activeBtn.offsetLeft;
+      const btnWidth = activeBtn.offsetWidth;
+      const targetScrollLeft = btnLeft - containerWidth / 2 + btnWidth / 2;
+      container.scrollTo({ left: Math.max(0, targetScrollLeft), behavior: 'smooth' });
+    }
+  };
+
   const checkScroll = () => {
     if (!scrollContainerRef.current) return;
     const { scrollLeft, scrollWidth, clientWidth } = scrollContainerRef.current;
@@ -114,14 +137,12 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     };
   }, [trip.days.length]);
 
-  // Auto-scroll selected day into view when selectedDayNumber changes
+  // Auto-scroll selected day or overview into view when selectedDayNumber or view mode changes
   useEffect(() => {
-    if (timelineViewMode === 'daily') {
-      const activeBtn = document.getElementById(`day-filter-chip-${selectedDayNumber}`);
-      if (activeBtn) {
-        activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-      }
-    }
+    const targetId = timelineViewMode === 'daily'
+      ? `day-filter-chip-${selectedDayNumber}`
+      : 'day-filter-chip-overview';
+    scrollToCenterChip(targetId);
   }, [selectedDayNumber, timelineViewMode]);
 
   const handleScrollDays = (direction: 'left' | 'right') => {
@@ -347,11 +368,16 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           {/* Overview button option */}
           <button
             type="button"
-            onClick={() => setTimelineViewMode('overview')}
-            className={`min-w-[80px] px-3 py-2 rounded-xl text-left transition shrink-0 flex flex-col justify-between cursor-pointer ${
+            id="day-filter-chip-overview"
+            onClick={() => {
+              triggerHaptic(10);
+              setTimelineViewMode('overview');
+              scrollToCenterChip('day-filter-chip-overview');
+            }}
+            className={`min-w-[84px] px-3.5 py-2.5 rounded-xl text-left transform transition-all duration-200 ease-out shrink-0 flex flex-col justify-between cursor-pointer select-none ${
               timelineViewMode === 'overview'
-                ? 'bg-teal-700 text-white shadow-xs ring-2 ring-teal-500/30'
-                : 'bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
+                ? 'scale-[1.03] -translate-y-0.5 bg-teal-700 text-white shadow-md ring-2 ring-teal-500/40 z-1'
+                : 'scale-100 translate-y-0 hover:scale-[1.01] hover:-translate-y-0.5 active:scale-95 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
             }`}
           >
             <span className="text-[11px] font-bold flex items-center gap-1">
@@ -377,13 +403,21 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 id={`day-filter-chip-${day.dayNumber}`}
                 type="button"
                 onClick={() => {
+                  triggerHaptic(10);
                   handleSelectDay(day.dayNumber);
                   setTimelineViewMode('daily');
+                  scrollToCenterChip(`day-filter-chip-${day.dayNumber}`);
+                  setTimeout(() => {
+                    const scheduleEl = document.getElementById('day-schedule-section');
+                    if (scheduleEl) {
+                      scheduleEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }
+                  }, 60);
                 }}
-                className={`min-w-[110px] px-3 py-2 rounded-xl text-left transition shrink-0 flex flex-col justify-between cursor-pointer ${
+                className={`min-w-[110px] px-3.5 py-2.5 rounded-xl text-left transform transition-all duration-200 ease-out shrink-0 flex flex-col justify-between cursor-pointer select-none ${
                   isCurrent
-                    ? 'bg-teal-700 text-white shadow-xs ring-2 ring-teal-500/30'
-                    : 'bg-slate-50 dark:bg-slate-800/60 hover:bg-teal-50/60 dark:hover:bg-teal-950/30 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
+                    ? 'scale-[1.03] -translate-y-0.5 bg-teal-700 text-white shadow-md ring-2 ring-teal-500/40 z-1'
+                    : 'scale-100 translate-y-0 hover:scale-[1.01] hover:-translate-y-0.5 active:scale-95 bg-slate-50 dark:bg-slate-800/60 hover:bg-teal-50/60 dark:hover:bg-teal-950/30 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
                 }`}
               >
                 <div className="flex items-center justify-between gap-1.5">
@@ -418,8 +452,11 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           {/* Add Day button */}
           <button
             type="button"
-            onClick={handleAddDay}
-            className="h-[52px] px-3 rounded-xl border border-dashed border-teal-500/70 hover:border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center gap-1 shrink-0 transition cursor-pointer"
+            onClick={() => {
+              triggerHaptic(10);
+              handleAddDay();
+            }}
+            className="h-[52px] px-3 rounded-xl border border-dashed border-teal-500/70 hover:border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center gap-1 shrink-0 transition active:scale-95 cursor-pointer"
             title={lang === 'zh' ? '增加一天' : 'Add Day'}
             aria-label="增加一天"
           >
