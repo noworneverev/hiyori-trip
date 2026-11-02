@@ -1,10 +1,11 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Trip, DayPlan, ItineraryItem } from '../../types/itinerary';
 import { LeafletMap, CATEGORY_COLORS } from '../Map/LeafletMap';
 import { calculateDistanceKm, formatDistance, estimateTravelTime, getGoogleMapsNavigationUrl } from '../../utils/geo';
 import {
   formatDateSlash,
   formatMonthDaySlash,
+  getDayOfWeek,
   sortItineraryItemsByTime,
   getSuggestedNextStartTime,
   parseTimeToMinutes,
@@ -88,6 +89,46 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [spotSearchQuery, setSpotSearchQuery] = useState('');
+
+  // Horizontal Day Filter Bar scroll state & auto-centering
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkScroll = () => {
+    if (!scrollContainerRef.current) return;
+    const { scrollLeft, scrollWidth, clientWidth } = scrollContainerRef.current;
+    setCanScrollLeft(scrollLeft > 4);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 4);
+  };
+
+  useEffect(() => {
+    checkScroll();
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', checkScroll, { passive: true });
+    window.addEventListener('resize', checkScroll);
+    return () => {
+      el.removeEventListener('scroll', checkScroll);
+      window.removeEventListener('resize', checkScroll);
+    };
+  }, [trip.days.length]);
+
+  // Auto-scroll selected day into view when selectedDayNumber changes
+  useEffect(() => {
+    if (timelineViewMode === 'daily') {
+      const activeBtn = document.getElementById(`day-filter-chip-${selectedDayNumber}`);
+      if (activeBtn) {
+        activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    }
+  }, [selectedDayNumber, timelineViewMode]);
+
+  const handleScrollDays = (direction: 'left' | 'right') => {
+    if (!scrollContainerRef.current) return;
+    const offset = direction === 'left' ? -260 : 260;
+    scrollContainerRef.current.scrollBy({ left: offset, behavior: 'smooth' });
+  };
 
   // High-Resolution Photo Overlay State for intercepting thumbnail clicks & displaying original high-res URL
   const [overlaySpotPhoto, setOverlaySpotPhoto] = useState<{
@@ -283,7 +324,123 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3.5">
+      {/* 水平捲動日期/天數篩選列 (Horizontal Day & Date Filter Bar) */}
+      <div className="relative group/filter bg-white dark:bg-[#1c1c1e] rounded-2xl border border-slate-200/90 dark:border-white/10 p-2 shadow-2xs">
+        {/* Left scroll arrow button */}
+        {canScrollLeft && (
+          <button
+            type="button"
+            onClick={() => handleScrollDays('left')}
+            className="absolute left-1.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
+            aria-label="往左捲動天數"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+        )}
+
+        {/* Scrollable Container */}
+        <div
+          ref={scrollContainerRef}
+          className="flex items-center gap-2 overflow-x-auto scrollbar-none px-1 py-0.5 scroll-smooth"
+        >
+          {/* Overview button option */}
+          <button
+            type="button"
+            onClick={() => setTimelineViewMode('overview')}
+            className={`min-w-[80px] px-3 py-2 rounded-xl text-left transition shrink-0 flex flex-col justify-between cursor-pointer ${
+              timelineViewMode === 'overview'
+                ? 'bg-teal-700 text-white shadow-xs ring-2 ring-teal-500/30'
+                : 'bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
+            }`}
+          >
+            <span className="text-[11px] font-bold flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5" />
+              {lang === 'zh' ? '行程總覽' : 'Overview'}
+            </span>
+            <span className="text-[10px] opacity-75 font-mono mt-0.5">
+              {trip.days.length} 天日程
+            </span>
+          </button>
+
+          {/* Individual Day Chips */}
+          {trip.days.map((day) => {
+            const isCurrent = timelineViewMode === 'daily' && day.dayNumber === selectedDayNumber;
+            const completedCount = day.items.filter((i) => i.completed).length;
+            const totalCount = day.items.length;
+            const weekday = getDayOfWeek(day.date, lang);
+            const dateStr = formatMonthDaySlash(day.date);
+
+            return (
+              <button
+                key={day.id}
+                id={`day-filter-chip-${day.dayNumber}`}
+                type="button"
+                onClick={() => {
+                  handleSelectDay(day.dayNumber);
+                  setTimelineViewMode('daily');
+                }}
+                className={`min-w-[110px] px-3 py-2 rounded-xl text-left transition shrink-0 flex flex-col justify-between cursor-pointer ${
+                  isCurrent
+                    ? 'bg-teal-700 text-white shadow-xs ring-2 ring-teal-500/30'
+                    : 'bg-slate-50 dark:bg-slate-800/60 hover:bg-teal-50/60 dark:hover:bg-teal-950/30 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className={`text-xs font-black ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                    Day {day.dayNumber}
+                  </span>
+                  {totalCount > 0 ? (
+                    <span
+                      className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${
+                        isCurrent
+                          ? 'bg-teal-900/60 text-teal-100 font-bold'
+                          : completedCount === totalCount
+                          ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold'
+                          : 'bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      {completedCount > 0 ? `✓ ${completedCount}/${totalCount}` : `${totalCount}`}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] opacity-40 font-mono">0</span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1 mt-1 text-[10px] font-mono opacity-85">
+                  <span>{dateStr}</span>
+                  {weekday && <span>({weekday})</span>}
+                </div>
+              </button>
+            );
+          })}
+
+          {/* Add Day button */}
+          <button
+            type="button"
+            onClick={handleAddDay}
+            className="h-[52px] px-3 rounded-xl border border-dashed border-teal-500/70 hover:border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center gap-1 shrink-0 transition cursor-pointer"
+            title={lang === 'zh' ? '增加一天' : 'Add Day'}
+            aria-label="增加一天"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span className="text-[11px] whitespace-nowrap">{lang === 'zh' ? '加一天' : '+Day'}</span>
+          </button>
+        </div>
+
+        {/* Right scroll arrow button */}
+        {canScrollRight && (
+          <button
+            type="button"
+            onClick={() => handleScrollDays('right')}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
+            aria-label="往右捲動天數"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
       {/* 行程全景點即時搜尋列 (Instant Spot & Place Search) */}
       <div className="relative">
         <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-white dark:bg-[#1c1c1e] border border-slate-200/80 dark:border-white/10 shadow-2xs focus-within:ring-2 focus-within:ring-teal-500/50 focus-within:border-teal-500 transition">
@@ -415,50 +572,6 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
         />
       ) : (
         <>
-          {/* Day Selector Segmented Bar */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-            {trip.days.map((day) => {
-              const isCurrent = day.dayNumber === selectedDayNumber;
-              const completedCount = day.items.filter((i) => i.completed).length;
-              return (
-                <button
-                  key={day.id}
-                  onClick={() => handleSelectDay(day.dayNumber)}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
-                    isCurrent
-                      ? 'bg-teal-700 text-white shadow-xs'
-                      : 'bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-                  }`}
-                >
-                  <span>{t.day.replace('{n}', String(day.dayNumber))}</span>
-                  <span className="text-[10px] opacity-75 font-normal">
-                    ({formatMonthDaySlash(day.date)})
-                  </span>
-                  {day.items.length > 0 && (
-                    <span
-                      className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                        isCurrent
-                          ? 'bg-teal-900/60 text-teal-100'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                      }`}
-                    >
-                      {completedCount}/{day.items.length}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-
-            <button
-              onClick={handleAddDay}
-              className="px-2.5 py-2 rounded-xl border border-dashed border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center gap-1 shrink-0 transition"
-              title={lang === 'zh' ? '增加一天' : 'Add Day'}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>+</span>
-            </button>
-          </div>
-
           {/* Interactive Map (When expanded) */}
           {isMapExpanded && (
             <LeafletMap
