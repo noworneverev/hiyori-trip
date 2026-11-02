@@ -360,10 +360,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           </button>
         )}
 
-        {/* Scrollable Container */}
+        {/* Scrollable Container with Scroll Snap */}
         <div
           ref={scrollContainerRef}
-          className="flex items-center gap-2 overflow-x-auto scrollbar-none px-1 py-0.5 scroll-smooth"
+          className="flex items-center gap-2 overflow-x-auto scrollbar-none px-2 py-1.5 scroll-smooth snap-x snap-mandatory scroll-px-4 sm:scroll-px-6"
         >
           {/* Overview button option */}
           <button
@@ -374,7 +374,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               setTimelineViewMode('overview');
               scrollToCenterChip('day-filter-chip-overview');
             }}
-            className={`min-w-[84px] px-3.5 py-2.5 rounded-xl text-left transform transition-all duration-200 ease-out shrink-0 flex flex-col justify-between cursor-pointer select-none ${
+            className={`min-w-[84px] px-3.5 py-2.5 rounded-xl text-left transform transition-all duration-200 ease-out shrink-0 snap-center snap-always flex flex-col justify-between cursor-pointer select-none ${
               timelineViewMode === 'overview'
                 ? 'scale-[1.03] -translate-y-0.5 bg-teal-700 text-white shadow-md ring-2 ring-teal-500/40 z-1'
                 : 'scale-100 translate-y-0 hover:scale-[1.01] hover:-translate-y-0.5 active:scale-95 bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
@@ -414,7 +414,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     }
                   }, 60);
                 }}
-                className={`min-w-[110px] px-3.5 py-2.5 rounded-xl text-left transform transition-all duration-200 ease-out shrink-0 flex flex-col justify-between cursor-pointer select-none ${
+                className={`min-w-[110px] px-3.5 py-2.5 rounded-xl text-left transform transition-all duration-200 ease-out shrink-0 snap-center snap-always flex flex-col justify-between cursor-pointer select-none ${
                   isCurrent
                     ? 'scale-[1.03] -translate-y-0.5 bg-teal-700 text-white shadow-md ring-2 ring-teal-500/40 z-1'
                     : 'scale-100 translate-y-0 hover:scale-[1.01] hover:-translate-y-0.5 active:scale-95 bg-slate-50 dark:bg-slate-800/60 hover:bg-teal-50/60 dark:hover:bg-teal-950/30 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
@@ -456,7 +456,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               triggerHaptic(10);
               handleAddDay();
             }}
-            className="h-[52px] px-3 rounded-xl border border-dashed border-teal-500/70 hover:border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center gap-1 shrink-0 transition active:scale-95 cursor-pointer"
+            className="h-[52px] px-3 rounded-xl border border-dashed border-teal-500/70 hover:border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center gap-1 shrink-0 snap-center transition active:scale-95 cursor-pointer"
             title={lang === 'zh' ? '增加一天' : 'Add Day'}
             aria-label="增加一天"
           >
