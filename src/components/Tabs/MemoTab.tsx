@@ -332,13 +332,8 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
           <div>
             <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
               <Bookmark className="w-5 h-5 text-amber-500" />
-              <span>隨身速記便籤 ({stickyNotes.length})</span>
+              <span>速記便籤 ({stickyNotes.length})</span>
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {lang === 'zh'
-                ? '出國隨手記錄置物櫃密碼、新幹線車次座位、住宿大門密碼，隨時查看'
-                : 'Quick notes for locker codes, train seats, and hotel door codes'}
-            </p>
           </div>
 
           <button
@@ -347,7 +342,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
             className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition active:scale-95 shadow-2xs self-start sm:self-auto"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>新增速記便籤</span>
+            <span>新增便籤</span>
           </button>
         </div>
 
@@ -614,11 +609,6 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
               <FileText className="w-5 h-5 text-teal-600 dark:text-teal-400" />
               <span>{t.travelMemo}</span>
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {lang === 'zh'
-                ? '隨意編輯筆記、出發叮嚀、預約號碼，輸入即時自動保存'
-                : 'Freeform notes, booking codes, and itineraries with real-time auto-save'}
-            </p>
           </div>
 
           <div className="flex items-center gap-2.5 self-end sm:self-auto shrink-0">
@@ -627,12 +617,12 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
               {isAutoSaving ? (
                 <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
                   <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                  <span>自動儲存中...</span>
+                  <span>儲存中...</span>
                 </span>
               ) : isSavedNotes ? (
                 <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                   <Check className="w-3.5 h-3.5" />
-                  <span>已自動儲存</span>
+                  <span>已儲存</span>
                 </span>
               ) : (
                 <span className="text-slate-400">已同步</span>
@@ -644,14 +634,14 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
               className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 transition active:scale-95"
             >
               <Check className="w-3.5 h-3.5" />
-              <span>手動立即儲存</span>
+              <span>儲存</span>
             </button>
           </div>
         </div>
 
         {/* Quick Template Insert Buttons */}
         <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          <span className="text-[11px] text-slate-400 font-medium">快速插入範本：</span>
+          <span className="text-[11px] text-slate-400 font-medium">範本：</span>
           <button
             type="button"
             onClick={() =>
@@ -704,7 +694,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
           onBlur={handleSaveNotes}
           placeholder={
             lang === 'zh'
-              ? '在此隨意輸入此趟旅程的所有自由筆記、出發叮嚀、預約確認信內容或貼入重要資訊 (即時自動儲存)...'
+              ? '隨意輸入自由筆記、出發叮嚀或重要資訊 (即時自動儲存)...'
               : 'Type notes, confirmation numbers, reservations here (auto-saved)...'
           }
           className="w-full p-4 rounded-2xl border border-slate-200 dark:border-slate-700/80 focus:ring-2 focus:ring-teal-500/25 focus:border-teal-500 outline-hidden text-xs leading-relaxed font-mono bg-slate-50/60 dark:bg-slate-800/50 text-slate-800 dark:text-slate-100"
@@ -719,7 +709,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
               className="text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1 font-semibold"
             >
               {copiedId === 'all-memo' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-              <span>{copiedId === 'all-memo' ? '已複製全部' : '複製全部筆記'}</span>
+              <span>{copiedId === 'all-memo' ? '已複製' : '複製筆記'}</span>
             </button>
           </div>
         </div>
@@ -729,7 +719,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
       <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 shadow-2xs space-y-3">
         <h4 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
           <Info className="w-4 h-4 text-teal-600" />
-          <span>出國出發前必查叮嚀事項</span>
+          <span>行前提醒</span>
         </h4>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
           <div className="p-3.5 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-100 dark:border-teal-900/40 space-y-1">
@@ -762,13 +752,8 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
           <div>
             <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
               <ShieldAlert className="w-5 h-5 text-rose-600" />
-              <span>當地緊急聯絡電話與安全專區</span>
+              <span>緊急求助</span>
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {lang === 'zh'
-                ? '內建官方警察、救護車、外交部急難救助熱線，並可新增飯店及隨行緊急聯絡人'
-                : 'Built-in police, ambulance, embassy emergency contacts and custom personal contacts'}
-            </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <button
@@ -777,7 +762,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
               className="px-3.5 py-2 min-h-[40px] rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-semibold text-xs flex items-center gap-1.5 transition active:scale-95 border border-rose-200/60 dark:border-rose-900/60"
             >
               <BookOpen className="w-4 h-4" />
-              <span>求助應變指引</span>
+              <span>應變指引</span>
             </button>
             <button
               type="button"
@@ -794,7 +779,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-wider uppercase">
-              官方與當地緊急求助專線 (一鍵快速撥號)
+              緊急專線
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

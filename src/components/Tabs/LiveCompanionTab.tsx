@@ -302,7 +302,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
             </div>
             <div>
               <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                本日已記錄支出 ({todayExpenses.length} 筆)
+                今日支出 ({todayExpenses.length})
               </div>
               <div className="text-base sm:text-lg font-black font-mono text-amber-700 dark:text-amber-300">
                 {trip.currency || detectTripCurrency(trip)} {todayTotalSpent.toLocaleString()}
@@ -314,7 +314,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
             <button
               onClick={() => onOpenQuickAction('expense')}
               className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs transition active:scale-95 flex items-center gap-1 shrink-0"
-              title="一秒速記本日花費"
+              title="記帳"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>記一筆</span>
@@ -352,7 +352,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
               {activeDay.theme && (
                 <div className="flex items-center gap-2 flex-wrap mb-1">
                   <span className="text-[10px] font-bold tracking-wider text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800">
-                    {lang === 'zh' ? '本日重點' : 'Day Focus'}
+                    {lang === 'zh' ? '焦點' : 'Focus'}
                   </span>
                   <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
                     {activeDay.theme}
@@ -550,7 +550,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
             <div className="mt-3 p-3 rounded-2xl bg-white/15 backdrop-blur-md text-white text-xs border border-white/20 space-y-1">
               <div className="flex items-center gap-1.5 text-amber-300 font-bold text-[11px]">
                 <FileText className="w-3.5 h-3.5" />
-                <span>{lang === 'zh' ? '行程說明與重點叮嚀' : 'Itinerary Notes & Tips'}</span>
+                <span>{lang === 'zh' ? '說明' : 'Notes'}</span>
               </div>
               <p className="text-teal-50 text-xs leading-relaxed whitespace-pre-wrap">
                 {nextItem.notes}
@@ -562,7 +562,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
             <div className="mt-2.5 p-2.5 rounded-xl bg-white/10 backdrop-blur-md text-teal-50 text-xs flex items-start gap-2 border border-white/10">
               <Bus className="w-4 h-4 text-teal-300 shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold text-[11px] text-teal-200 block">{lang === 'zh' ? '交通搭乘指引' : 'Transit Guide'}:</span>
+                <span className="font-bold text-[11px] text-teal-200 block">{lang === 'zh' ? '交通' : 'Transit'}:</span>
                 <span>{nextItem.transportNote}</span>
               </div>
             </div>
@@ -619,11 +619,8 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
         <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
           <div>
             <h4 className="font-bold text-slate-800 dark:text-slate-200 text-xs sm:text-sm">
-              {t.day.replace('{n}', String(activeDay.dayNumber))} ({formatDateSlash(activeDay.date)}) {lang === 'zh' ? '完整行程與說明' : 'Full Itinerary'}
+              {t.day.replace('{n}', String(activeDay.dayNumber))} ({formatDateSlash(activeDay.date)}) {lang === 'zh' ? '行程清單' : 'Itinerary'}
             </h4>
-            <p className="text-[10px] text-slate-400 mt-0.5">
-              {lang === 'zh' ? '包含詳細參觀說明、轉乘提示與門票憑證' : 'Includes all spot notes, transit instructions, and booking codes'}
-            </p>
           </div>
           <span className="font-bold text-xs px-2.5 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
             {completedCount} / {totalCount} ({progressPercent}%)
@@ -737,7 +734,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                       <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800/80">
                         <div className="flex items-center gap-1 text-[11px] font-bold text-teal-700 dark:text-teal-400 mb-1">
                           <FileText className="w-3.5 h-3.5 text-teal-600" />
-                          <span>{lang === 'zh' ? '景點說明與參觀須知' : 'Spot Notes'}:</span>
+                          <span>{lang === 'zh' ? '備註' : 'Notes'}:</span>
                         </div>
                         <p className="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap text-[11px]">
                           {item.notes}
@@ -751,7 +748,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                         <Bus className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" />
                         <div>
                           <strong className="block text-teal-800 dark:text-teal-300 font-semibold mb-0.5">
-                            {lang === 'zh' ? '交通方式 / 轉乘指引' : 'Transit Directions'}:
+                            {lang === 'zh' ? '交通' : 'Transit'}:
                           </strong>
                           <span>{item.transportNote}</span>
                         </div>
@@ -762,7 +759,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                     {typeof item.cost === 'number' && item.cost > 0 && (
                       <div className="text-[11px] text-slate-500 flex items-center gap-1">
                         <DollarSign className="w-3.5 h-3.5 text-teal-600" />
-                        <span>{lang === 'zh' ? '預估門票/消費' : 'Cost'}: <strong className="text-slate-800 dark:text-slate-200 font-mono">{trip.currency} {item.cost.toLocaleString()}</strong></span>
+                        <span>{lang === 'zh' ? '預估費用' : 'Cost'}: <strong className="text-slate-800 dark:text-slate-200 font-mono">{trip.currency} {item.cost.toLocaleString()}</strong></span>
                       </div>
                     )}
 

@@ -35,12 +35,12 @@ export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
           <div>
             <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
               <FileText className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-              <span>{lang === 'zh' ? '行前準備與隨行備忘' : 'Trip Prep & Notes'}</span>
+              <span>{lang === 'zh' ? '行前與備忘' : 'Prep & Notes'}</span>
             </h3>
             <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-zinc-500 mt-0.5">
-              <span>{packedCount}/{totalPacking} 件行李已打包</span>
+              <span>{packedCount}/{totalPacking} 打包</span>
               <span aria-hidden="true">·</span>
-              <span>{completedTodos}/{totalTodos} 項待辦已完成</span>
+              <span>{completedTodos}/{totalTodos} 待辦</span>
             </div>
           </div>
 
@@ -56,7 +56,7 @@ export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
               }`}
             >
               <CheckSquare className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-              <span>{lang === 'zh' ? '行李與待辦清單' : 'Checklists'}</span>
+              <span>{lang === 'zh' ? '清單' : 'Checklists'}</span>
             </button>
 
             <button
@@ -69,7 +69,7 @@ export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
               }`}
             >
               <FileText className="w-3.5 h-3.5 text-amber-500" />
-              <span>{lang === 'zh' ? '便籤筆記與安全專區' : 'Notes & Safety'}</span>
+              <span>{lang === 'zh' ? '便籤與安全' : 'Notes & Safety'}</span>
             </button>
           </div>
         </div>

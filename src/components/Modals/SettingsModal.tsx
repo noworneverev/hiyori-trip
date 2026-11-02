@@ -115,9 +115,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <h3 className="font-bold text-base text-slate-900 dark:text-white">
               {t.settings}
             </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              {lang === 'zh' ? '帳號同步、離線儲存與自訂偏好' : 'Account sync, storage & preferences'}
-            </p>
           </div>
 
           <div className="flex items-center gap-2">

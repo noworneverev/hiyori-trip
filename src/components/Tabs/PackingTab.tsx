@@ -301,8 +301,8 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
             onChange={(e) => setInlineTitle(e.target.value)}
             placeholder={
               activeType === 'todo'
-                ? '新增待辦事項 (輸入後按 Enter 快速新增)...'
-                : '新增隨身物品 (輸入後按 Enter 快速新增)...'
+                ? '新增待辦事項...'
+                : '新增隨身物品...'
             }
             className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none"
           />

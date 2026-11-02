@@ -287,11 +287,8 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onCl
             </div>
             <div>
               <h3 className="font-bold text-base text-slate-900 dark:text-white">
-                {isEditing ? '編輯旅程資訊' : '新增旅遊行程'}
+                {isEditing ? '編輯旅程' : '新增旅程'}
               </h3>
-              <p className="text-xs text-slate-500 dark:text-zinc-400">
-                {isEditing ? '調整名稱、目的地或日期' : '輸入名稱即可建立，隨時上傳照片與排程'}
-              </p>
             </div>
           </div>
           <button

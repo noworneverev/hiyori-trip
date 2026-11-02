@@ -373,7 +373,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             }`}
           >
             <Route className="w-3.5 h-3.5" />
-            <span>{lang === 'zh' ? '每日行程時序' : 'Daily Timeline'}</span>
+            <span>{lang === 'zh' ? '每日時序' : 'Daily'}</span>
           </button>
           <button
             type="button"
@@ -385,7 +385,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             }`}
           >
             <Calendar className="w-3.5 h-3.5" />
-            <span>{lang === 'zh' ? '全程 9 天總覽大表' : 'Trip Overview Table'}</span>
+            <span>{lang === 'zh' ? '行程總覽' : 'Overview'}</span>
           </button>
         </div>
 
@@ -395,7 +395,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold shrink-0 transition"
           >
             <MapIcon className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-            <span>{isMapExpanded ? (lang === 'zh' ? '收合地圖' : 'Hide Map') : (lang === 'zh' ? '展開地圖' : 'Show Map')}</span>
+            <span>{isMapExpanded ? (lang === 'zh' ? '收合' : 'Hide') : (lang === 'zh' ? '地圖' : 'Map')}</span>
             {isMapExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
         )}
@@ -483,11 +483,11 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 <div className="flex items-center gap-2 text-xs">
                   <Camera className="w-4 h-4 text-rose-500" />
                   <span className="font-bold text-rose-900 dark:text-rose-200">
-                    Day {activeDay.dayNumber} 共有 {dayMems.length} 張回憶相片與隨拍
+                    Day {activeDay.dayNumber} 相片 ({dayMems.length})
                   </span>
                 </div>
                 <span className="text-xs font-semibold text-rose-600 dark:text-rose-400 group-hover:translate-x-0.5 transition flex items-center gap-1">
-                  <span>前往相簿</span>
+                  <span>相簿</span>
                   <span>→</span>
                 </span>
               </div>
@@ -532,7 +532,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       {activeDay.items.length === 0 ? (
         <div className="p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center">
           <p className="text-slate-500 dark:text-slate-400 text-xs">
-            {lang === 'zh' ? '目前尚無行程，點選按鈕開始規劃' : 'No schedule yet. Tap below to add a spot.'}
+            {lang === 'zh' ? '尚無行程安排' : 'No schedule yet.'}
           </p>
           <button
             onClick={() => onOpenAddItem(activeDay.dayNumber, '09:00')}

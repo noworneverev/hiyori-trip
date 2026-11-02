@@ -142,11 +142,8 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-base text-slate-900 dark:text-white">
-                {lang === 'zh' ? '行程即時分享與協作' : 'Share Trip & Live Collaboration'}
+                {lang === 'zh' ? '行程分享' : 'Share Trip'}
               </h3>
-              <p className="text-xs text-slate-500 dark:text-zinc-400">
-                {lang === 'zh' ? '仿 Notion 模式，單一即時連結，內容修改自動同步' : 'Notion-style live link with auto-sync'}
-              </p>
             </div>
           </div>
           <button
@@ -188,18 +185,14 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
             /* Publish Prompt Step */
             <div className="py-4 text-center space-y-4">
               <div className="max-w-md mx-auto text-xs text-slate-600 dark:text-zinc-300 leading-relaxed space-y-2">
-                <div className="p-3 bg-teal-50 dark:bg-teal-950/40 rounded-2xl border border-teal-100 dark:border-teal-900/60 text-teal-900 dark:text-teal-200 text-left space-y-1.5">
+                <div className="p-3 bg-teal-50 dark:bg-teal-950/40 rounded-2xl border border-teal-100 dark:border-teal-900/60 text-teal-900 dark:text-teal-200 text-left space-y-1">
                   <div className="flex items-center gap-1.5 font-bold text-xs">
-                    <Radio className="w-4 h-4 text-teal-600 dark:text-teal-400 animate-pulse" />
-                    <span>仿 Notion 雲端即時同步機制：</span>
+                    <Radio className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                    <span>即時雲端同步</span>
                   </div>
-                  <ul className="list-disc list-inside text-xs space-y-1 text-slate-600 dark:text-zinc-300">
-                    <li>產生單一即時連結，親友免下載 App 或註冊即可在手機開啟。</li>
-                    <li>
-                      <strong className="text-teal-700 dark:text-teal-300 font-bold">自動持續同步：</strong>
-                      後續您新增景點、修改備忘或勾選待辦，連結內容皆會即時自動更新給所有人！
-                    </li>
-                  </ul>
+                  <p className="text-xs text-slate-600 dark:text-zinc-300">
+                    產生專屬連結，親友可直接瀏覽，後續任何變更皆會自動更新。
+                  </p>
                 </div>
               </div>
 
@@ -212,12 +205,12 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
                 {isPublishing ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>正在建立即時協同連結...</span>
+                    <span>建立連結中...</span>
                   </>
                 ) : (
                   <>
                     <Globe className="w-4 h-4" />
-                    <span>產生 Notion 式即時雲端連結</span>
+                    <span>建立分享連結</span>
                   </>
                 )}
               </button>

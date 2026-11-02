@@ -202,11 +202,8 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-base text-slate-900 dark:text-white">
-                {lang === 'zh' ? '行程成員與協作權限管理' : 'Trip Members & Permissions'}
+                {lang === 'zh' ? '成員與權限' : 'Members & Permissions'}
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                {lang === 'zh' ? '新增成員 Email 並指定編輯或檢視權限' : 'Manage collaborators and access roles'}
-              </p>
             </div>
           </div>
           <button
@@ -239,7 +236,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
               <UserPlus className="w-3.5 h-3.5 text-teal-600" />
-              <span>新增協作成員權限：</span>
+              <span>新增成員：</span>
             </label>
 
             <form onSubmit={handleAddMember} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
@@ -248,7 +245,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                 required
                 value={emailInput}
                 onChange={(e) => setEmailInput(e.target.value)}
-                placeholder={lang === 'zh' ? '輸入旅伴的 Google 帳號或 Email (如: friend@gmail.com)' : 'Enter collaborator email'}
+                placeholder={lang === 'zh' ? '輸入旅伴 Email...' : 'Enter collaborator email'}
                 className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500 focus:outline-hidden"
               />
 
@@ -259,8 +256,8 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                     onChange={(e) => setRoleInput(e.target.value as CollaboratorRole)}
                     className="appearance-none pl-3 pr-8 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-hidden cursor-pointer"
                   >
-                    <option value="editor">✏️ 可編輯 (Editor)</option>
-                    <option value="viewer">👁️ 僅檢視 (Viewer)</option>
+                    <option value="editor">✏️ 可編輯</option>
+                    <option value="viewer">👁️ 僅檢視</option>
                   </select>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 pointer-events-none" />
                 </div>
@@ -280,10 +277,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
           {/* Member List with Permissions */}
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
-              <span>已授權成員名單：</span>
-              <span className="text-[11px] text-slate-400 font-normal">
-                擁有者可隨時切換成員為「可編輯」或「僅檢視」
-              </span>
+              <span>成員名單：</span>
             </label>
 
             <div className="rounded-2xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden bg-white dark:bg-slate-900">
@@ -353,7 +347,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
               <div className="flex items-center gap-2">
                 <Globe className="w-4 h-4 text-teal-600" />
                 <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                  一般存取權限（連結權限）
+                  連結權限
                 </span>
               </div>
 
@@ -363,7 +357,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                   onChange={(e) => handleChangeGeneralAccess(e.target.value as GeneralAccessType)}
                   className="appearance-none pl-3 pr-8 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-hidden cursor-pointer shadow-2xs"
                 >
-                  <option value="restricted">🔒 僅限受邀成員 (Restricted)</option>
+                  <option value="restricted">🔒 僅限受邀成員</option>
                   <option value="link_editor">✏️ 知道連結的人皆可編輯</option>
                   <option value="link_viewer">👁️ 知道連結的人僅可檢視</option>
                 </select>
@@ -372,23 +366,23 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
               {trip.generalAccess === 'restricted'
-                ? '只有在上方成員名單內的 Email 帳號登入後才能存取此旅程。'
+                ? '僅名單內的 Email 可存取此行程。'
                 : trip.generalAccess === 'link_viewer'
-                ? '任何取得連結的人皆可瀏覽行程，但只有被指派為編輯者的成員才可修改。'
-                : '只要收到專屬連結的親友旅伴皆可直接加入即時共編。'}
+                ? '取得連結者可瀏覽，僅編輯者可修改。'
+                : '取得連結者皆可即時共同編輯。'}
             </p>
           </div>
 
           {/* Share Link & QR section */}
           <div className="space-y-2 pt-1 border-t border-slate-100 dark:border-slate-800">
             <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-              行程共編邀請連結：
+              共編連結：
             </label>
             <div className="flex items-center gap-2">
               <input
                 type="text"
                 readOnly
-                value={collabUrl || '點擊下方按鈕即可複製專屬邀請連結'}
+                value={collabUrl || '點擊產生共編邀請連結'}
                 className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-mono outline-hidden select-all"
               />
               <button
@@ -409,7 +403,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                 className="py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
               >
                 <Send className="w-3.5 h-3.5 text-teal-600" />
-                <span>傳送至 LINE / 通訊軟體</span>
+                <span>分享邀請</span>
               </button>
 
               <button
@@ -418,7 +412,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                 className="py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
               >
                 <QrCode className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
-                <span>{showQr ? '隱藏 QR Code' : '顯示 QR 碼'}</span>
+                <span>{showQr ? '隱藏 QR' : '顯示 QR'}</span>
               </button>
             </div>
 
