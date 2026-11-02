@@ -7,6 +7,7 @@ import {
   formatDateSlash,
   formatMonthDaySlash,
   getDayOfWeek,
+  isDateToday,
   sortItineraryItemsByTime,
   getSuggestedNextStartTime,
   parseTimeToMinutes,
@@ -404,6 +405,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             const totalCount = day.items.length;
             const weekday = getDayOfWeek(day.date, lang);
             const dateStr = formatMonthDaySlash(day.date);
+            const isToday = isDateToday(day.date);
+            const isEmpty = totalCount === 0;
 
             return (
               <motion.button
@@ -429,9 +432,13 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     }
                   }, 60);
                 }}
-                className={`min-w-[110px] px-3.5 py-2.5 rounded-xl text-left shrink-0 snap-center snap-always flex flex-col justify-between cursor-pointer select-none transition-colors duration-200 ${
+                className={`min-w-[110px] px-3.5 py-2.5 rounded-xl text-left shrink-0 snap-center snap-always flex flex-col justify-between cursor-pointer select-none transition-colors duration-200 relative ${
                   isCurrent
-                    ? 'bg-teal-700 text-white shadow-md ring-2 ring-teal-500/40 z-1'
+                    ? `bg-teal-700 text-white shadow-md ring-2 ring-teal-500/40 z-1 ${isToday ? 'border-amber-400/80' : ''}`
+                    : isToday
+                    ? 'bg-amber-50/50 dark:bg-amber-950/20 hover:bg-amber-100/60 dark:hover:bg-amber-900/30 text-slate-800 dark:text-slate-200 border border-amber-300 dark:border-amber-500/60 ring-1.5 ring-amber-400/80 shadow-xs'
+                    : isEmpty
+                    ? 'bg-slate-50/40 dark:bg-slate-900/30 hover:bg-amber-50/30 dark:hover:bg-amber-950/20 text-slate-500 dark:text-slate-400 border border-dashed border-amber-300/60 dark:border-amber-800/50 opacity-80 hover:opacity-100'
                     : 'bg-slate-50 dark:bg-slate-800/60 hover:bg-teal-50/60 dark:hover:bg-teal-950/30 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
                 }`}
               >
@@ -452,13 +459,31 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                       {completedCount > 0 ? `✓ ${completedCount}/${totalCount}` : `${totalCount}`}
                     </span>
                   ) : (
-                    <span className="text-[10px] opacity-40 font-mono">0</span>
+                    <span
+                      className={`text-[9px] font-mono px-1.5 py-0.2 rounded-md ${
+                        isCurrent
+                          ? 'bg-teal-900/70 text-amber-200/90 border border-teal-600/50'
+                          : 'bg-amber-100/70 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/40'
+                      }`}
+                    >
+                      {lang === 'zh' ? '空行程' : 'Empty'}
+                    </span>
                   )}
                 </div>
 
-                <div className="flex items-center gap-1 mt-1 text-[10px] font-mono opacity-85">
-                  <span>{dateStr}</span>
-                  {weekday && <span>({weekday})</span>}
+                <div className="flex items-center justify-between mt-1 text-[10px] font-mono opacity-85">
+                  <div className="flex items-center gap-1">
+                    <span>{dateStr}</span>
+                    {weekday && <span>({weekday})</span>}
+                  </div>
+                  {isToday && (
+                    <span className="flex items-center gap-1 shrink-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-xs animate-pulse" />
+                      <span className={`text-[9px] font-bold ${isCurrent ? 'text-amber-300' : 'text-amber-600 dark:text-amber-400'}`}>
+                        {lang === 'zh' ? '今日' : 'Today'}
+                      </span>
+                    </span>
+                  )}
                 </div>
               </motion.button>
             );

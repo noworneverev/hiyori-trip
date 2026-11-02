@@ -39,6 +39,20 @@ export function getDayOfWeek(dateStr?: string, lang: string = 'zh'): string {
 }
 
 /**
+ * Check if a date string matches today's local date (YYYY-MM-DD or YYYY/MM/DD)
+ */
+export function isDateToday(dateStr?: string): boolean {
+  if (!dateStr) return false;
+  const clean = dateStr.slice(0, 10).replace(/\//g, '-');
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const todayStr = `${year}-${month}-${day}`;
+  return clean === todayStr;
+}
+
+/**
  * Parse time string (e.g. "09:30", "9:30", "14:00") into minutes from midnight.
  * Returns 99999 if time is empty or invalid, so unscheduled items appear at the end.
  */
