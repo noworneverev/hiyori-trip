@@ -11,10 +11,8 @@ import {
   getWeatherDescription,
 } from '../../utils/weather';
 import { detectTripCurrency } from '../../utils/currency';
-import { resolveDestinationTimezone } from '../../utils/timezone';
 import {
   Navigation,
-  Clock,
   MapPin,
   CheckCircle2,
   Circle,
@@ -107,13 +105,6 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
 
   const [expandedItemIds, setExpandedItemIds] = useState<Record<string, boolean>>({});
 
-  // Live Clocks (Destination vs Home)
-  const [currentTime, setCurrentTime] = useState(new Date());
-  useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
   // Weather States
   const [weather, setWeather] = useState<WeatherData | null>(null);
   const [isWeatherLoading, setIsWeatherLoading] = useState(false);
@@ -131,14 +122,6 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
 
   const nextItem = activeDay.items.find((it) => !it.completed) || null;
 
-  // Determine destination timezone worldwide dynamically from destination and item coordinates
-  const destCoordsRef = userGpsCoords || (nextItem && typeof nextItem.lat === 'number' && typeof nextItem.lng === 'number' ? { lat: nextItem.lat, lng: nextItem.lng } : null);
-  const destTzInfo = resolveDestinationTimezone(trip.destination, destCoordsRef);
-
-  const destTimeFormatted = destTzInfo.tz
-    ? currentTime.toLocaleTimeString('zh-TW', { timeZone: destTzInfo.tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-    : currentTime.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-  const homeTimeFormatted = currentTime.toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false });
   const completedCount = activeDay.items.filter((it) => it.completed).length;
   const totalCount = activeDay.items.length;
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
@@ -267,60 +250,33 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* 0. Live Dual Timezone Clock & In-Transit Spending Snapshot */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-        {/* Dual Timezone Clock Card */}
-        <div className="p-3 sm:p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xs flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 flex items-center justify-center text-teal-700 dark:text-teal-300 shrink-0">
-              <Clock className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                <span>{destTzInfo.flag}</span>
-                <span>{destTzInfo.label}</span>
-              </div>
-              <div className="text-lg sm:text-xl font-black font-mono text-slate-900 dark:text-white tracking-tight">
-                {destTimeFormatted}
-              </div>
-            </div>
+      {/* 0. In-Transit Spending Snapshot */}
+      <div className="p-3 sm:p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xs flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 flex items-center justify-center text-amber-700 dark:text-amber-300 shrink-0">
+            <DollarSign className="w-4 h-4" />
           </div>
-
-          <div className="text-right border-l border-slate-100 dark:border-slate-800 pl-3">
-            <div className="text-[10px] font-medium text-slate-400">🇹🇼 台北/家鄉時間</div>
-            <div className="text-xs sm:text-sm font-bold font-mono text-slate-600 dark:text-slate-300">
-              {homeTimeFormatted}
+          <div>
+            <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+              今日支出 ({todayExpenses.length})
+            </div>
+            <div className="text-base sm:text-lg font-black font-mono text-amber-700 dark:text-amber-300">
+              {trip.currency || detectTripCurrency(trip)} {todayTotalSpent.toLocaleString()}
             </div>
           </div>
         </div>
 
-        {/* Today's In-Transit Spend Snapshot */}
-        <div className="p-3 sm:p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xs flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 flex items-center justify-center text-amber-700 dark:text-amber-300 shrink-0">
-              <DollarSign className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                今日支出 ({todayExpenses.length})
-              </div>
-              <div className="text-base sm:text-lg font-black font-mono text-amber-700 dark:text-amber-300">
-                {trip.currency || detectTripCurrency(trip)} {todayTotalSpent.toLocaleString()}
-              </div>
-            </div>
-          </div>
-
-          {onOpenQuickAction && (
-            <button
-              onClick={() => onOpenQuickAction('expense')}
-              className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs transition active:scale-95 flex items-center gap-1 shrink-0"
-              title="記帳"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>記一筆</span>
-            </button>
-          )}
-        </div>
+        {onOpenQuickAction && (
+          <button
+            type="button"
+            onClick={() => onOpenQuickAction('expense')}
+            className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs transition active:scale-95 flex items-center gap-1 shrink-0 cursor-pointer"
+            title="記帳"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>記一筆</span>
+          </button>
+        )}
       </div>
 
       {/* 1. Day Selector Ribbon */}
