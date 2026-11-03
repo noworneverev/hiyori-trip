@@ -12,8 +12,17 @@ import {
   X,
   ChevronDown,
   ChevronUp,
-  RotateCcw,
   Sparkles,
+  Ticket,
+  Train,
+  Building,
+  Briefcase,
+  CreditCard,
+  Bookmark,
+  FileText,
+  Smartphone,
+  Shirt,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface PackingTabProps {
@@ -22,22 +31,29 @@ interface PackingTabProps {
   onUpdateTrip: (updatedTrip: Trip) => void;
 }
 
-const PACKING_CATEGORY_MAP: Record<PackingCategory, { label: string; icon: string }> = {
-  documents: { label: '證件與資金', icon: '📄' },
-  electronics: { label: '電子 3C', icon: '📱' },
-  clothing: { label: '衣物鞋帽', icon: '👕' },
-  medicine: { label: '個人醫藥', icon: '💊' },
-  toiletries: { label: '衛浴保養', icon: '🧴' },
-  other: { label: '其他隨身', icon: '🎒' },
+// Clean Lucide Icon mapping without emojis
+const TODO_CATEGORY_MAP: Record<
+  TodoCategory,
+  { label: string; Icon: React.ComponentType<{ className?: string }> }
+> = {
+  tickets: { label: '票券預約', Icon: Ticket },
+  transport: { label: '交通乘車', Icon: Train },
+  booking: { label: '住宿登記', Icon: Building },
+  preparation: { label: '行前準備', Icon: Briefcase },
+  finance: { label: '外幣資金', Icon: CreditCard },
+  other: { label: '其他待辦', Icon: Bookmark },
 };
 
-const TODO_CATEGORY_MAP: Record<TodoCategory, { label: string; icon: string }> = {
-  tickets: { label: '票券預約', icon: '🎟️' },
-  transport: { label: '交通乘車', icon: '🚄' },
-  booking: { label: '住宿登記', icon: '🏨' },
-  preparation: { label: '行前準備', icon: '💼' },
-  finance: { label: '外幣資金', icon: '💵' },
-  other: { label: '其他待辦', icon: '📌' },
+const PACKING_CATEGORY_MAP: Record<
+  PackingCategory,
+  { label: string; Icon: React.ComponentType<{ className?: string }> }
+> = {
+  documents: { label: '證件與資金', Icon: FileText },
+  electronics: { label: '電子 3C', Icon: Smartphone },
+  clothing: { label: '衣物鞋帽', Icon: Shirt },
+  medicine: { label: '個人醫藥', Icon: ShieldCheck },
+  toiletries: { label: '衛浴保養', Icon: Sparkles },
+  other: { label: '其他隨身', Icon: Luggage },
 };
 
 const DEFAULT_ESSENTIALS: Array<{ name: string; category: PackingCategory }> = [
@@ -86,202 +102,244 @@ const DEFAULT_TODOS: TodoItem[] = [
 ];
 
 export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip }) => {
-  // Main sub-view: Todos vs Packing
-  const [activeType, setActiveType] = useState<'todo' | 'packing'>('todo');
-  const [filterState, setFilterState] = useState<'all' | 'pending' | 'completed'>('all');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<TodoCategory | 'all'>('all');
   const [showCompleted, setShowCompleted] = useState(false);
 
-  // Quick Addition Sheet State
+  // Luggage Packing Modal State (Quiet on-demand tool, separate from main to-dos)
+  const [isPackingModalOpen, setIsPackingModalOpen] = useState(false);
+  useBodyScrollLock(isPackingModalOpen);
+  const [packingCategoryFilter, setPackingCategoryFilter] = useState<PackingCategory | 'all'>('all');
+  const [inlinePackingTitle, setInlinePackingTitle] = useState('');
+
+  // Quick Addition Sheet State for detailed Todo creation
   const [isAddSheetOpen, setIsAddSheetOpen] = useState(false);
   useBodyScrollLock(isAddSheetOpen);
   const [inputTitle, setInputTitle] = useState('');
   const [selectedTodoCategory, setSelectedTodoCategory] = useState<TodoCategory>('preparation');
-  const [selectedPackingCategory, setSelectedPackingCategory] = useState<PackingCategory>('documents');
   const [inputDueDate, setInputDueDate] = useState('');
 
-  // Apple Reminders-style inline input
+  // Inline Quick Add input
   const [inlineTitle, setInlineTitle] = useState('');
+
+  const todos = trip.todos || [];
+  const packingList = trip.packingList || [];
+
+  const pendingTodos = useMemo(() => todos.filter((t) => !t.completed), [todos]);
+  const completedTodos = useMemo(() => todos.filter((t) => t.completed), [todos]);
+
+  const pendingPacking = useMemo(() => packingList.filter((p) => !p.packed), [packingList]);
+  const completedPacking = useMemo(() => packingList.filter((p) => p.packed), [packingList]);
+
+  const progressPercent = todos.length > 0
+    ? Math.round((completedTodos.length / todos.length) * 100)
+    : 0;
+
+  // Filtered Todos for display
+  const displayedTodos = useMemo(() => {
+    let list = pendingTodos;
+    if (selectedCategoryFilter !== 'all') {
+      list = list.filter((t) => t.category === selectedCategoryFilter);
+    }
+    return list;
+  }, [pendingTodos, selectedCategoryFilter]);
+
+  // Filtered Packing items for modal
+  const displayedPacking = useMemo(() => {
+    let list = pendingPacking;
+    if (packingCategoryFilter !== 'all') {
+      list = list.filter((p) => p.category === packingCategoryFilter);
+    }
+    return list;
+  }, [pendingPacking, packingCategoryFilter]);
+
+  // Handlers for Todos
+  const handleToggleTodo = (id: string) => {
+    const updated = todos.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t));
+    onUpdateTrip({ ...trip, todos: updated, updatedAt: Date.now() });
+  };
+
+  const handleDeleteTodo = (id: string) => {
+    const updated = todos.filter((t) => t.id !== id);
+    onUpdateTrip({ ...trip, todos: updated, updatedAt: Date.now() });
+  };
 
   const handleInlineAdd = (e: React.FormEvent) => {
     e.preventDefault();
     const text = inlineTitle.trim();
     if (!text) return;
 
-    if (activeType === 'todo') {
-      const newTodo: TodoItem = {
-        id: `todo-${Date.now()}`,
-        title: text,
-        category: 'preparation',
-        completed: false,
-      };
-      onUpdateTrip({ ...trip, todos: [newTodo, ...todos], updatedAt: Date.now() });
-    } else {
-      const newPack: PackingItem = {
-        id: `pack-${Date.now()}`,
-        name: text,
-        category: 'other',
-        packed: false,
-      };
-      onUpdateTrip({ ...trip, packingList: [newPack, ...packingList], updatedAt: Date.now() });
-    }
+    const newTodo: TodoItem = {
+      id: `todo-${Date.now()}`,
+      title: text,
+      category: selectedCategoryFilter !== 'all' ? selectedCategoryFilter : 'preparation',
+      completed: false,
+    };
+    onUpdateTrip({ ...trip, todos: [newTodo, ...todos], updatedAt: Date.now() });
     setInlineTitle('');
   };
 
-  // 1. Data Collections
-  const todos = useMemo<TodoItem[]>(() => {
-    if (Array.isArray(trip.todos) && trip.todos.length > 0) return trip.todos;
-    return DEFAULT_TODOS;
-  }, [trip.todos]);
-
-  const packingList = useMemo<PackingItem[]>(() => {
-    if (Array.isArray(trip.packingList) && trip.packingList.length > 0) return trip.packingList;
-    return DEFAULT_ESSENTIALS.map((item, idx) => ({
-      id: `pack-def-${idx}`,
-      name: item.name,
-      category: item.category,
-      packed: false,
-      essential: true,
-    }));
-  }, [trip.packingList]);
-
-  // Counts
-  const pendingTodos = todos.filter((t) => !t.completed);
-  const completedTodos = todos.filter((t) => t.completed);
-
-  const pendingPacking = packingList.filter((p) => !p.packed);
-  const completedPacking = packingList.filter((p) => p.packed);
-
-  // Filtered Items
-  const displayedTodos = useMemo(() => {
-    if (filterState === 'pending') return pendingTodos;
-    if (filterState === 'completed') return completedTodos;
-    return pendingTodos;
-  }, [filterState, pendingTodos, completedTodos]);
-
-  const displayedPacking = useMemo(() => {
-    if (filterState === 'pending') return pendingPacking;
-    if (filterState === 'completed') return completedPacking;
-    return pendingPacking;
-  }, [filterState, pendingPacking, completedPacking]);
-
-  // 2. Handlers
-  const handleToggleTodo = (id: string) => {
-    const nextTodos = todos.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t));
-    onUpdateTrip({ ...trip, todos: nextTodos, updatedAt: Date.now() });
-  };
-
-  const handleDeleteTodo = (id: string) => {
-    const nextTodos = todos.filter((t) => t.id !== id);
-    onUpdateTrip({ ...trip, todos: nextTodos, updatedAt: Date.now() });
-  };
-
-  const handleTogglePacking = (id: string) => {
-    const nextPacking = packingList.map((p) => (p.id === id ? { ...p, packed: !p.packed } : p));
-    onUpdateTrip({ ...trip, packingList: nextPacking, updatedAt: Date.now() });
-  };
-
-  const handleDeletePacking = (id: string) => {
-    const nextPacking = packingList.filter((p) => p.id !== id);
-    onUpdateTrip({ ...trip, packingList: nextPacking, updatedAt: Date.now() });
-  };
-
-  const handleQuickAdd = (e: React.FormEvent) => {
+  const handleDetailedAdd = (e: React.FormEvent) => {
     e.preventDefault();
-    const title = inputTitle.trim();
-    if (!title) return;
+    const text = inputTitle.trim();
+    if (!text) return;
 
-    if (activeType === 'todo') {
-      const newTodo: TodoItem = {
-        id: `todo-${Date.now()}`,
-        title,
-        category: selectedTodoCategory,
-        dueDate: inputDueDate || undefined,
-        completed: false,
-      };
-      onUpdateTrip({ ...trip, todos: [newTodo, ...todos], updatedAt: Date.now() });
-    } else {
-      const newPack: PackingItem = {
-        id: `pack-${Date.now()}`,
-        name: title,
-        category: selectedPackingCategory,
-        packed: false,
-      };
-      onUpdateTrip({ ...trip, packingList: [newPack, ...packingList], updatedAt: Date.now() });
-    }
-
+    const newTodo: TodoItem = {
+      id: `todo-${Date.now()}`,
+      title: text,
+      category: selectedTodoCategory,
+      completed: false,
+      dueDate: inputDueDate || undefined,
+    };
+    onUpdateTrip({ ...trip, todos: [newTodo, ...todos], updatedAt: Date.now() });
     setInputTitle('');
     setInputDueDate('');
     setIsAddSheetOpen(false);
   };
 
-  const handleResetRecommended = () => {
-    if (activeType === 'todo') {
-      const existing = new Set(todos.map((t) => t.title));
-      const additions = DEFAULT_TODOS.filter((t) => !existing.has(t.title));
-      onUpdateTrip({ ...trip, todos: [...todos, ...additions], updatedAt: Date.now() });
-    } else {
-      const existing = new Set(packingList.map((p) => p.name));
-      const additions = DEFAULT_ESSENTIALS.filter((e) => !existing.has(e.name)).map((e, idx) => ({
-        id: `pack-add-${Date.now()}-${idx}`,
-        name: e.name,
-        category: e.category,
-        packed: false,
-        essential: true,
-      }));
-      onUpdateTrip({ ...trip, packingList: [...packingList, ...additions], updatedAt: Date.now() });
-    }
+  const handleLoadRecommendedTodos = () => {
+    const existing = new Set(todos.map((t) => t.title));
+    const additions = DEFAULT_TODOS.filter((t) => !existing.has(t.title));
+    onUpdateTrip({ ...trip, todos: [...todos, ...additions], updatedAt: Date.now() });
+  };
+
+  // Handlers for Packing Items (Inside Modal)
+  const handleTogglePacking = (id: string) => {
+    const updated = packingList.map((p) => (p.id === id ? { ...p, packed: !p.packed } : p));
+    onUpdateTrip({ ...trip, packingList: updated, updatedAt: Date.now() });
+  };
+
+  const handleDeletePacking = (id: string) => {
+    const updated = packingList.filter((p) => p.id !== id);
+    onUpdateTrip({ ...trip, packingList: updated, updatedAt: Date.now() });
+  };
+
+  const handleInlineAddPacking = (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = inlinePackingTitle.trim();
+    if (!text) return;
+
+    const newPack: PackingItem = {
+      id: `pack-${Date.now()}`,
+      name: text,
+      category: packingCategoryFilter !== 'all' ? packingCategoryFilter : 'other',
+      packed: false,
+    };
+    onUpdateTrip({ ...trip, packingList: [newPack, ...packingList], updatedAt: Date.now() });
+    setInlinePackingTitle('');
+  };
+
+  const handleLoadRecommendedPacking = () => {
+    const existing = new Set(packingList.map((p) => p.name));
+    const additions = DEFAULT_ESSENTIALS.filter((e) => !existing.has(e.name)).map((e, idx) => ({
+      id: `pack-add-${Date.now()}-${idx}`,
+      name: e.name,
+      category: e.category,
+      packed: false,
+      essential: true,
+    }));
+    onUpdateTrip({ ...trip, packingList: [...packingList, ...additions], updatedAt: Date.now() });
   };
 
   return (
-    <div className="relative pb-24 max-w-3xl mx-auto">
-      {/* Apple-style Top Bar & Segmented Control */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 px-1">
-        {/* Apple Segmented Switcher */}
-        <div className="inline-flex p-1 bg-slate-200/80 dark:bg-zinc-800 rounded-2xl border border-slate-300/40 dark:border-white/10 self-start sm:self-auto">
-          <button
-            type="button"
-            onClick={() => setActiveType('todo')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-              activeType === 'todo'
-                ? 'bg-white dark:bg-[#1C1C1E] text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <CheckSquare className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-            <span>待辦事項</span>
-            <span className="text-[11px] font-mono text-slate-400 dark:text-zinc-500 ml-0.5">
-              ({pendingTodos.length})
-            </span>
-          </button>
+    <div className="relative pb-24 max-w-3xl mx-auto space-y-4">
+      {/* Top Header Card: Title, Progress & Quiet Luggage Tool Button */}
+      <div className="bg-white dark:bg-[#1C1C1E] rounded-3xl p-4 sm:p-5 border border-slate-200/90 dark:border-zinc-800 shadow-2xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+                <CheckSquare className="w-4 h-4" />
+              </div>
+              <h3 className="font-bold text-slate-900 dark:text-white text-base sm:text-lg">
+                {lang === 'zh' ? '待辦清單' : 'To-Do Checklist'}
+              </h3>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-zinc-400 mt-1.5">
+              <span>
+                {completedTodos.length} / {todos.length} {lang === 'zh' ? '已完成' : 'Completed'} ({progressPercent}%)
+              </span>
+            </div>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => setActiveType('packing')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-              activeType === 'packing'
-                ? 'bg-white dark:bg-[#1C1C1E] text-slate-900 dark:text-white shadow-xs'
-                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <Luggage className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-            <span>行李裝備</span>
-            <span className="text-[11px] font-mono text-slate-400 dark:text-zinc-500 ml-0.5">
-              ({pendingPacking.length})
-            </span>
-          </button>
+          {/* Quick Actions (Quiet Luggage Button & Recommended Templates) */}
+          <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+            <button
+              type="button"
+              onClick={handleLoadRecommendedTodos}
+              className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/60 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-2xs active:scale-95"
+              title="載入常用行前待辦範本"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+              <span>載入推薦</span>
+            </button>
+
+            {/* Quiet Luggage Button: opens packing modal without cluttering the main screen */}
+            <button
+              type="button"
+              onClick={() => setIsPackingModalOpen(true)}
+              className="px-3 py-1.5 rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/50 hover:bg-teal-100/60 dark:hover:bg-teal-900/40 text-teal-800 dark:text-teal-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-2xs active:scale-95"
+              title="開啟出發前行李打包清單"
+            >
+              <Luggage className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+              <span>行李裝備</span>
+              <span className="text-[10px] font-mono opacity-80">
+                ({pendingPacking.length})
+              </span>
+            </button>
+          </div>
         </div>
 
-        {/* Quiet Quick Actions */}
-        <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-zinc-400 self-end sm:self-auto">
+        {/* Progress Bar */}
+        {todos.length > 0 && (
+          <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden mt-3.5">
+            <div
+              className="bg-teal-600 h-full rounded-full transition-all duration-300"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+        )}
+
+        {/* Category Filter Pills (No emojis, clean Lucide icons) */}
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pt-3 mt-1">
           <button
             type="button"
-            onClick={handleResetRecommended}
-            className="hover:text-teal-600 dark:hover:text-teal-400 flex items-center gap-1 transition cursor-pointer"
-            title="載入推薦必備清單"
+            onClick={() => setSelectedCategoryFilter('all')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 cursor-pointer ${
+              selectedCategoryFilter === 'all'
+                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-2xs'
+                : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
           >
-            <Sparkles className="w-3.5 h-3.5 text-teal-500" />
-            <span>載入推薦</span>
+            全部 ({pendingTodos.length})
           </button>
+
+          {(Object.keys(TODO_CATEGORY_MAP) as TodoCategory[]).map((cat) => {
+            const meta = TODO_CATEGORY_MAP[cat];
+            const count = pendingTodos.filter((t) => t.category === cat).length;
+            const isSelected = selectedCategoryFilter === cat;
+            const IconComponent = meta.Icon;
+
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setSelectedCategoryFilter(cat)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                  isSelected
+                    ? 'bg-teal-600 text-white shadow-2xs'
+                    : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <IconComponent className="w-3.5 h-3.5" />
+                <span>{meta.label}</span>
+                {count > 0 && (
+                  <span className="text-[10px] font-mono opacity-80 font-normal">
+                    ({count})
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -299,19 +357,15 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
             type="text"
             value={inlineTitle}
             onChange={(e) => setInlineTitle(e.target.value)}
-            placeholder={
-              activeType === 'todo'
-                ? '新增待辦事項...'
-                : '新增隨身物品...'
-            }
-            className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none"
+            placeholder="新增待辦事項... (例如：購買環球影城快通票、開通漫遊)"
+            className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-hidden"
           />
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => setIsAddSheetOpen(true)}
-              className="px-2 py-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-200/50 dark:hover:bg-zinc-800 transition cursor-pointer text-xs"
-              title="展開詳細分類與日期"
+              className="px-2.5 py-1 rounded-lg text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition cursor-pointer text-xs font-medium"
+              title="展開詳細分類與截止日期"
             >
               詳細
             </button>
@@ -326,125 +380,68 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
           </div>
         </form>
 
-        {/* Active Items List */}
-        {activeType === 'todo' ? (
-          displayedTodos.length === 0 ? (
-            <div className="py-16 text-center px-4">
-              <div className="w-12 h-12 rounded-full bg-teal-50 dark:bg-zinc-800 text-teal-600 dark:text-teal-400 flex items-center justify-center mx-auto mb-3">
-                <Check className="w-6 h-6 stroke-[2.5]" />
-              </div>
-              <p className="text-sm font-medium text-slate-700 dark:text-zinc-300">
-                {filterState === 'all' || filterState === 'pending'
-                  ? '目前沒有未完成待辦！'
-                  : '尚無已完成項目'}
-              </p>
-              <p className="text-xs text-slate-400 dark:text-zinc-500 mt-1">
-                於上方輸入列直接鍵入或按「詳細」設定分類
-              </p>
-            </div>
-          ) : (
-            <div className="divide-y divide-slate-100 dark:divide-zinc-800/80">
-              {displayedTodos.map((todo) => {
-                const categoryInfo = TODO_CATEGORY_MAP[todo.category || 'preparation'];
-                return (
-                  <div
-                    key={todo.id}
-                    className="flex items-center justify-between p-3.5 sm:p-4 hover:bg-slate-50/70 dark:hover:bg-white/5 transition group"
-                  >
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      {/* Apple Round Checkbox */}
-                      <button
-                        type="button"
-                        onClick={() => handleToggleTodo(todo.id)}
-                        className="mt-0.5 w-5 h-5 rounded-full border-2 border-slate-300 dark:border-zinc-600 hover:border-teal-500 dark:hover:border-teal-400 flex items-center justify-center transition cursor-pointer shrink-0"
-                        title="標記完成"
-                      >
-                        {todo.completed && <Check className="w-3 h-3 text-teal-600" />}
-                      </button>
-
-                      <div className="min-w-0 flex-1">
-                        <span className="text-sm text-slate-900 dark:text-zinc-100 font-medium block leading-snug break-words">
-                          {todo.title}
-                        </span>
-                        <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-zinc-400 mt-1">
-                          <span>
-                            {categoryInfo?.icon} {categoryInfo?.label || '待辦'}
-                          </span>
-                          {todo.dueDate && (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span className="flex items-center gap-1 text-slate-500 dark:text-zinc-400">
-                                <Calendar className="w-3 h-3" />
-                                {todo.dueDate}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteTodo(todo.id)}
-                      className="p-1.5 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 sm:opacity-0 group-hover:opacity-100 ml-2"
-                      title="刪除"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )
-        ) : displayedPacking.length === 0 ? (
+        {/* Active Todos List */}
+        {displayedTodos.length === 0 ? (
           <div className="py-16 text-center px-4">
             <div className="w-12 h-12 rounded-full bg-teal-50 dark:bg-zinc-800 text-teal-600 dark:text-teal-400 flex items-center justify-center mx-auto mb-3">
               <Check className="w-6 h-6 stroke-[2.5]" />
             </div>
             <p className="text-sm font-medium text-slate-700 dark:text-zinc-300">
-              {filterState === 'all' || filterState === 'pending'
-                ? '行李裝備已全部打包完畢！'
-                : '尚無已打包物品'}
+              {selectedCategoryFilter === 'all'
+                ? '目前沒有未完成的待辦事項！'
+                : '此分類下暫無待辦事項'}
             </p>
             <p className="text-xs text-slate-400 dark:text-zinc-500 mt-1">
-              於上方輸入列直接鍵入或按「詳細」設定分類
+              可於上方輸入框鍵入項目，或點擊「載入推薦」取得常用待辦
             </p>
           </div>
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-zinc-800/80">
-            {displayedPacking.map((item) => {
-              const categoryInfo = PACKING_CATEGORY_MAP[item.category || 'other'];
+            {displayedTodos.map((todo) => {
+              const categoryInfo = TODO_CATEGORY_MAP[todo.category || 'other'];
+              const IconComp = categoryInfo?.Icon || Bookmark;
+
               return (
                 <div
-                  key={item.id}
+                  key={todo.id}
                   className="flex items-center justify-between p-3.5 sm:p-4 hover:bg-slate-50/70 dark:hover:bg-white/5 transition group"
                 >
                   <div className="flex items-start gap-3 min-w-0 flex-1">
                     {/* Apple Round Checkbox */}
                     <button
                       type="button"
-                      onClick={() => handleTogglePacking(item.id)}
+                      onClick={() => handleToggleTodo(todo.id)}
                       className="mt-0.5 w-5 h-5 rounded-full border-2 border-slate-300 dark:border-zinc-600 hover:border-teal-500 dark:hover:border-teal-400 flex items-center justify-center transition cursor-pointer shrink-0"
-                      title="標記打包"
+                      title="標記完成"
                     >
-                      {item.packed && <Check className="w-3 h-3 text-teal-600" />}
+                      {todo.completed && <Check className="w-3 h-3 text-teal-600" />}
                     </button>
 
                     <div className="min-w-0 flex-1">
                       <span className="text-sm text-slate-900 dark:text-zinc-100 font-medium block leading-snug break-words">
-                        {item.name}
+                        {todo.title}
                       </span>
                       <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-zinc-400 mt-1">
-                        <span>
-                          {categoryInfo?.icon} {categoryInfo?.label || '物品'}
+                        <span className="inline-flex items-center gap-1">
+                          <IconComp className="w-3 h-3 text-slate-400" />
+                          <span>{categoryInfo?.label || '待辦'}</span>
                         </span>
+                        {todo.dueDate && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="flex items-center gap-1 text-slate-500 dark:text-zinc-400 font-mono text-[11px]">
+                              <Calendar className="w-3 h-3" />
+                              {todo.dueDate}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
 
                   <button
                     type="button"
-                    onClick={() => handleDeletePacking(item.id)}
+                    onClick={() => handleDeleteTodo(todo.id)}
                     className="p-1.5 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 sm:opacity-0 group-hover:opacity-100 ml-2"
                     title="刪除"
                   >
@@ -457,18 +454,14 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
         )}
 
         {/* Apple-style Collapsible Completed Section */}
-        {((activeType === 'todo' && completedTodos.length > 0) ||
-          (activeType === 'packing' && completedPacking.length > 0)) && (
+        {completedTodos.length > 0 && (
           <div className="border-t border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/40">
             <button
               type="button"
               onClick={() => setShowCompleted(!showCompleted)}
               className="w-full px-4 py-3 flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 transition cursor-pointer select-none"
             >
-              <span>
-                已完成項目 (
-                {activeType === 'todo' ? completedTodos.length : completedPacking.length})
-              </span>
+              <span>已完成項目 ({completedTodos.length})</span>
               <div className="flex items-center gap-1 text-[11px] text-slate-400">
                 <span>{showCompleted ? '收起' : '展開'}</span>
                 {showCompleted ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -477,70 +470,235 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
 
             {showCompleted && (
               <div className="divide-y divide-slate-100 dark:divide-zinc-800/60 px-2 pb-2">
-                {activeType === 'todo'
-                  ? completedTodos.map((todo) => (
-                      <div
-                        key={todo.id}
-                        className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100/50 dark:hover:bg-zinc-800/40 transition group opacity-75"
+                {completedTodos.map((todo) => (
+                  <div
+                    key={todo.id}
+                    className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100/50 dark:hover:bg-zinc-800/40 transition group opacity-75"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleTodo(todo.id)}
+                        className="w-5 h-5 rounded-full bg-teal-600 dark:bg-teal-500 text-white flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
+                        title="恢復待辦"
                       >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleTodo(todo.id)}
-                            className="w-5 h-5 rounded-full bg-teal-600 dark:bg-teal-500 text-white flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
-                            title="恢復待辦"
-                          >
-                            <Check className="w-3 h-3 stroke-[2.5]" />
-                          </button>
-                          <span className="text-sm line-through text-slate-400 dark:text-zinc-500 truncate flex-1">
-                            {todo.title}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteTodo(todo.id)}
-                          className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
-                          title="刪除"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))
-                  : completedPacking.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100/50 dark:hover:bg-zinc-800/40 transition group opacity-75"
-                      >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <button
-                            type="button"
-                            onClick={() => handleTogglePacking(item.id)}
-                            className="w-5 h-5 rounded-full bg-teal-600 dark:bg-teal-500 text-white flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
-                            title="移回待打包"
-                          >
-                            <Check className="w-3 h-3 stroke-[2.5]" />
-                          </button>
-                          <span className="text-sm line-through text-slate-400 dark:text-zinc-500 truncate flex-1">
-                            {item.name}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleDeletePacking(item.id)}
-                          className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
-                          title="刪除"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
+                        <Check className="w-3 h-3 stroke-[2.5]" />
+                      </button>
+                      <span className="text-sm line-through text-slate-400 dark:text-zinc-500 truncate flex-1">
+                        {todo.title}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTodo(todo.id)}
+                      className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
+                      title="刪除"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>
         )}
       </div>
 
-      {/* Apple-style Bottom Drawer / Add Modal */}
+      {/* On-Demand Luggage Packing Modal (Apple Sheet Style, clean, no emojis) */}
+      {isPackingModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150"
+          onClick={() => setIsPackingModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-lg bg-white dark:bg-[#1C1C1E] rounded-3xl border border-slate-200 dark:border-zinc-800 shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-zinc-800 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+                  <Luggage className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-base text-slate-900 dark:text-white">
+                    行李裝備打包清單
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">
+                    {completedPacking.length} / {packingList.length} 已打包
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleLoadRecommendedPacking}
+                  className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 text-xs text-slate-600 dark:text-zinc-300 font-semibold flex items-center gap-1 transition cursor-pointer"
+                  title="載入行李打包範本"
+                >
+                  <Sparkles className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                  <span>載入範本</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPackingModalOpen(false)}
+                  className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Add Form in Modal */}
+            <form
+              onSubmit={handleInlineAddPacking}
+              className="p-3 border-b border-slate-100 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/40 flex items-center gap-2 shrink-0"
+            >
+              <Plus className="w-4 h-4 text-slate-400 shrink-0" />
+              <input
+                type="text"
+                value={inlinePackingTitle}
+                onChange={(e) => setInlinePackingTitle(e.target.value)}
+                placeholder="新增隨身或託運行李物品..."
+                className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-hidden"
+              />
+              {inlinePackingTitle.trim() && (
+                <button
+                  type="submit"
+                  className="px-3 py-1 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold cursor-pointer transition shadow-xs"
+                >
+                  新增
+                </button>
+              )}
+            </form>
+
+            {/* Category Pills in Modal (Clean text and icons, NO EMOJIS) */}
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none px-4 py-2.5 border-b border-slate-100 dark:border-zinc-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => setPackingCategoryFilter('all')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition shrink-0 cursor-pointer ${
+                  packingCategoryFilter === 'all'
+                    ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold'
+                    : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400'
+                }`}
+              >
+                全部 ({pendingPacking.length})
+              </button>
+
+              {(Object.keys(PACKING_CATEGORY_MAP) as PackingCategory[]).map((cat) => {
+                const meta = PACKING_CATEGORY_MAP[cat];
+                const count = pendingPacking.filter((p) => p.category === cat).length;
+                const isSelected = packingCategoryFilter === cat;
+                const IconComp = meta.Icon;
+
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setPackingCategoryFilter(cat)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition shrink-0 flex items-center gap-1 cursor-pointer ${
+                      isSelected
+                        ? 'bg-teal-600 text-white font-bold'
+                        : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400'
+                    }`}
+                  >
+                    <IconComp className="w-3 h-3" />
+                    <span>{meta.label}</span>
+                    {count > 0 && <span className="opacity-75 font-mono text-[10px]">({count})</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Scrollable Packing Items List */}
+            <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-zinc-800/80 p-2">
+              {displayedPacking.length === 0 ? (
+                <div className="py-12 text-center px-4">
+                  <Check className="w-8 h-8 text-teal-500 mx-auto mb-2" />
+                  <p className="text-xs text-slate-500 dark:text-zinc-400 font-medium">
+                    {packingCategoryFilter === 'all' ? '行李物品已全部打包完畢！' : '此分類下無待打包物品'}
+                  </p>
+                </div>
+              ) : (
+                displayedPacking.map((item) => {
+                  const meta = PACKING_CATEGORY_MAP[item.category || 'other'];
+                  const IconComp = meta?.Icon || Luggage;
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-2.5 hover:bg-slate-50/70 dark:hover:bg-white/5 transition rounded-xl"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePacking(item.id)}
+                          className="w-4 h-4 rounded-full border-2 border-slate-300 dark:border-zinc-600 hover:border-teal-500 flex items-center justify-center transition cursor-pointer shrink-0"
+                        >
+                          {item.packed && <Check className="w-2.5 h-2.5 text-teal-600" />}
+                        </button>
+                        <span className="text-xs sm:text-sm text-slate-900 dark:text-zinc-100 font-medium truncate">
+                          {item.name}
+                        </span>
+                        <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 dark:text-zinc-500 shrink-0 ml-1">
+                          <IconComp className="w-3 h-3" />
+                          <span>{meta?.label}</span>
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePacking(item.id)}
+                        className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer ml-1"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+
+              {/* Completed Packing in Modal */}
+              {completedPacking.length > 0 && (
+                <div className="pt-2 mt-2 border-t border-slate-100 dark:border-zinc-800">
+                  <div className="px-2 py-1 text-[11px] font-semibold text-slate-400 dark:text-zinc-500">
+                    已打包項目 ({completedPacking.length})
+                  </div>
+                  {completedPacking.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-2 hover:bg-slate-50/50 dark:hover:bg-zinc-800/30 transition rounded-xl opacity-60"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePacking(item.id)}
+                          className="w-4 h-4 rounded-full bg-teal-600 text-white flex items-center justify-center shrink-0 cursor-pointer"
+                        >
+                          <Check className="w-2.5 h-2.5" />
+                        </button>
+                        <span className="text-xs line-through text-slate-400 dark:text-zinc-500 truncate">
+                          {item.name}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePacking(item.id)}
+                        className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer ml-1"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detailed Todo Modal (Detailed Sheet) */}
       {isAddSheetOpen && (
         <div
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-150"
@@ -550,10 +708,9 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
             className="w-full sm:max-w-md bg-white dark:bg-[#1C1C1E] rounded-t-3xl sm:rounded-3xl border border-slate-200 dark:border-zinc-800 shadow-2xl overflow-hidden p-5 animate-in slide-in-from-bottom duration-200"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-zinc-800">
               <h4 className="font-bold text-base text-slate-900 dark:text-white">
-                新增{activeType === 'todo' ? '待辦事項' : '行李裝備'}
+                新增待辦事項
               </h4>
               <button
                 type="button"
@@ -564,86 +721,60 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
               </button>
             </div>
 
-            {/* Form */}
-            <form onSubmit={handleQuickAdd} className="mt-4 space-y-4">
+            <form onSubmit={handleDetailedAdd} className="mt-4 space-y-4">
               <div>
                 <input
                   type="text"
                   autoFocus
                   required
-                  placeholder={
-                    activeType === 'todo'
-                      ? '輸入待辦名稱（例如：購買環球影城門票）'
-                      : '輸入裝備名稱（例如：相機電池充電器）'
-                  }
+                  placeholder="輸入待辦名稱（例如：購買環球影城快通門票）"
                   value={inputTitle}
                   onChange={(e) => setInputTitle(e.target.value)}
-                  className="w-full px-3.5 py-3 rounded-2xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+                  className="w-full px-3.5 py-3 rounded-2xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-sm focus:outline-hidden focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
                 />
               </div>
 
-              {/* Category Picker */}
+              {/* Category Picker (No Emojis) */}
               <div>
                 <label className="block text-xs font-semibold text-slate-500 dark:text-zinc-400 mb-2">
                   分類標籤
                 </label>
                 <div className="grid grid-cols-3 gap-2">
-                  {activeType === 'todo'
-                    ? (Object.keys(TODO_CATEGORY_MAP) as TodoCategory[]).map((cat) => {
-                        const meta = TODO_CATEGORY_MAP[cat];
-                        const isSelected = selectedTodoCategory === cat;
-                        return (
-                          <button
-                            key={cat}
-                            type="button"
-                            onClick={() => setSelectedTodoCategory(cat)}
-                            className={`py-2 px-2.5 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 border transition cursor-pointer ${
-                              isSelected
-                                ? 'bg-teal-50 dark:bg-teal-950/60 border-teal-500 text-teal-800 dark:text-teal-200'
-                                : 'bg-slate-50 dark:bg-zinc-800/50 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300'
-                            }`}
-                          >
-                            <span>{meta.icon}</span>
-                            <span>{meta.label}</span>
-                          </button>
-                        );
-                      })
-                    : (Object.keys(PACKING_CATEGORY_MAP) as PackingCategory[]).map((cat) => {
-                        const meta = PACKING_CATEGORY_MAP[cat];
-                        const isSelected = selectedPackingCategory === cat;
-                        return (
-                          <button
-                            key={cat}
-                            type="button"
-                            onClick={() => setSelectedPackingCategory(cat)}
-                            className={`py-2 px-2.5 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 border transition cursor-pointer ${
-                              isSelected
-                                ? 'bg-teal-50 dark:bg-teal-950/60 border-teal-500 text-teal-800 dark:text-teal-200'
-                                : 'bg-slate-50 dark:bg-zinc-800/50 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300'
-                            }`}
-                          >
-                            <span>{meta.icon}</span>
-                            <span>{meta.label}</span>
-                          </button>
-                        );
-                      })}
+                  {(Object.keys(TODO_CATEGORY_MAP) as TodoCategory[]).map((cat) => {
+                    const meta = TODO_CATEGORY_MAP[cat];
+                    const isSelected = selectedTodoCategory === cat;
+                    const IconComponent = meta.Icon;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setSelectedTodoCategory(cat)}
+                        className={`py-2 px-2.5 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 border transition cursor-pointer ${
+                          isSelected
+                            ? 'bg-teal-50 dark:bg-teal-950/60 border-teal-500 text-teal-800 dark:text-teal-200'
+                            : 'bg-slate-50 dark:bg-zinc-800/50 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300'
+                        }`}
+                      >
+                        <IconComponent className="w-3.5 h-3.5" />
+                        <span>{meta.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Due Date (for Todos only) */}
-              {activeType === 'todo' && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 dark:text-zinc-400 mb-2">
-                    預計完成日期 (選填)
-                  </label>
-                  <input
-                    type="date"
-                    value={inputDueDate}
-                    onChange={(e) => setInputDueDate(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-teal-500"
-                  />
-                </div>
-              )}
+              {/* Due Date */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 dark:text-zinc-400 mb-2">
+                  預計完成日期 (選填)
+                </label>
+                <input
+                  type="date"
+                  value={inputDueDate}
+                  onChange={(e) => setInputDueDate(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-xs focus:outline-hidden focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
 
               {/* Action Buttons */}
               <div className="pt-2 flex items-center justify-end gap-2.5">
