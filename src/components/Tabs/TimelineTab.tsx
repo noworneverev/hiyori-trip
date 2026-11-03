@@ -70,8 +70,29 @@ const CATEGORY_MAP: Record<string, { labelKey: string; icon: React.ComponentType
   hotel: { labelKey: 'cat_hotel', icon: Hotel, text: 'text-violet-700 dark:text-violet-300' },
   shopping: { labelKey: 'cat_shopping', icon: ShoppingBag, text: 'text-pink-700 dark:text-pink-300' },
   activity: { labelKey: 'cat_activity', icon: Sparkles, text: 'text-rose-700 dark:text-rose-300' },
-  other: { labelKey: 'cat_other', icon: Pin, text: 'text-slate-700 dark:text-slate-300' },
 };
+
+/**
+ * Generic debounce utility with cancel capability to prevent excessive re-renders
+ * during rapid scrolling bursts.
+ */
+function debounce<T extends (...args: any[]) => void>(fn: T, delay: number) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const debounced = (...args: Parameters<T>) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      fn(...args);
+      timer = null;
+    }, delay);
+  };
+  debounced.cancel = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+  return debounced;
+}
 
 export const TimelineTab: React.FC<TimelineTabProps> = ({
   trip,
@@ -97,57 +118,64 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
-  // Scroll Detection for Compact Mode of Date Filter Bar with strict hysteresis & debounced cooldown
+  // Scroll Detection for Date Filter Bar and Header Expansion State using requestAnimationFrame and debounce
   const [isCompact, setIsCompact] = useState(false);
   const lastScrollYRef = useRef(0);
   const isCompactRef = useRef(false);
-  const lastToggleTimeRef = useRef(0);
+  const rafIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     isCompactRef.current = isCompact;
   }, [isCompact]);
 
   useEffect(() => {
-    let ticking = false;
+    // Debounce function to prevent excessive re-renders during rapid scrolling that causes UI stutter
+    const debouncedSetExpansion = debounce((shouldCompact: boolean) => {
+      if (isCompactRef.current !== shouldCompact) {
+        setIsCompact(shouldCompact);
+      }
+    }, 60);
 
     const handleWindowScroll = () => {
-      if (ticking) return;
-      ticking = true;
+      // Cancel previous pending animation frame to avoid queuing frame updates
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+      }
 
-      window.requestAnimationFrame(() => {
+      // Use requestAnimationFrame for frame-aligned measurement and updating the expansion state
+      rafIdRef.current = window.requestAnimationFrame(() => {
         const currentScrollY = window.scrollY || document.documentElement.scrollTop || 0;
         const diff = currentScrollY - lastScrollYRef.current;
-        const now = Date.now();
 
-        // 300ms transition cooldown prevents height-reduction feedback loops
-        const canToggle = now - lastToggleTimeRef.current > 300;
-
-        // Reset to full mode when near the top of the page
+        // Reset to full mode immediately when near the top of the page
         if (currentScrollY <= 80) {
+          debouncedSetExpansion.cancel();
           if (isCompactRef.current) {
             setIsCompact(false);
-            lastToggleTimeRef.current = now;
           }
-        } else if (canToggle) {
-          // Downward scroll deep into timeline schedule -> compact
-          if (!isCompactRef.current && currentScrollY > 180 && diff > 15) {
-            setIsCompact(true);
-            lastToggleTimeRef.current = now;
-          }
-          // Deliberate upward scroll -> expand
-          else if (isCompactRef.current && diff < -25) {
-            setIsCompact(false);
-            lastToggleTimeRef.current = now;
-          }
+        }
+        // Downward scroll deep into timeline schedule -> compact mode via debounce
+        else if (currentScrollY > 180 && diff > 15) {
+          debouncedSetExpansion(true);
+        }
+        // Deliberate upward scroll -> restore full expansion mode via debounce
+        else if (diff < -25) {
+          debouncedSetExpansion(false);
         }
 
         lastScrollYRef.current = currentScrollY;
-        ticking = false;
+        rafIdRef.current = null;
       });
     };
 
     window.addEventListener('scroll', handleWindowScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleWindowScroll);
+    return () => {
+      window.removeEventListener('scroll', handleWindowScroll);
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+      }
+      debouncedSetExpansion.cancel();
+    };
   }, []);
 
   // Safe Haptic Feedback helper (10ms subtle vibration for touch devices)
