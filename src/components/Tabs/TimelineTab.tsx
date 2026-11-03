@@ -843,7 +843,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 ))}
 
               {/* Today micro marker / glowing dot */}
-              {todayProgressInfo?.todayPercent !== null && (
+              {todayProgressInfo && todayProgressInfo.todayPercent !== null && (
                 <button
                   type="button"
                   onClick={(e) => {

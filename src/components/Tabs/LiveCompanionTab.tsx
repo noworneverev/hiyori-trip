@@ -13,6 +13,7 @@ import {
 import { detectTripCurrency } from '../../utils/currency';
 import {
   Navigation,
+  Clock,
   MapPin,
   CheckCircle2,
   Circle,
