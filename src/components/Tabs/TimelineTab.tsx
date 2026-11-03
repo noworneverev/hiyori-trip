@@ -97,35 +97,53 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
-  // Scroll Detection for Compact Mode of Date Filter Bar
+  // Scroll Detection for Compact Mode of Date Filter Bar with strict hysteresis & debounced cooldown
   const [isCompact, setIsCompact] = useState(false);
   const lastScrollYRef = useRef(0);
+  const isCompactRef = useRef(false);
+  const lastToggleTimeRef = useRef(0);
+
+  useEffect(() => {
+    isCompactRef.current = isCompact;
+  }, [isCompact]);
 
   useEffect(() => {
     let ticking = false;
 
     const handleWindowScroll = () => {
-      if (!ticking) {
-        window.requestAnimationFrame(() => {
-          const currentScrollY = window.scrollY || document.documentElement.scrollTop;
-          const diff = currentScrollY - lastScrollYRef.current;
+      if (ticking) return;
+      ticking = true;
 
-          // If near the top, always expand to full mode
-          if (currentScrollY <= 70) {
+      window.requestAnimationFrame(() => {
+        const currentScrollY = window.scrollY || document.documentElement.scrollTop || 0;
+        const diff = currentScrollY - lastScrollYRef.current;
+        const now = Date.now();
+
+        // 300ms transition cooldown prevents height-reduction feedback loops
+        const canToggle = now - lastToggleTimeRef.current > 300;
+
+        // Reset to full mode when near the top of the page
+        if (currentScrollY <= 80) {
+          if (isCompactRef.current) {
             setIsCompact(false);
-          } else if (diff > 8) {
-            // Scrolling down -> compact mode
-            setIsCompact(true);
-          } else if (diff < -8) {
-            // Scrolling up -> expand mode
-            setIsCompact(false);
+            lastToggleTimeRef.current = now;
           }
+        } else if (canToggle) {
+          // Downward scroll deep into timeline schedule -> compact
+          if (!isCompactRef.current && currentScrollY > 180 && diff > 15) {
+            setIsCompact(true);
+            lastToggleTimeRef.current = now;
+          }
+          // Deliberate upward scroll -> expand
+          else if (isCompactRef.current && diff < -25) {
+            setIsCompact(false);
+            lastToggleTimeRef.current = now;
+          }
+        }
 
-          lastScrollYRef.current = currentScrollY;
-          ticking = false;
-        });
-        ticking = true;
-      }
+        lastScrollYRef.current = currentScrollY;
+        ticking = false;
+      });
     };
 
     window.addEventListener('scroll', handleWindowScroll, { passive: true });
@@ -158,8 +176,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   const checkScroll = () => {
     if (!scrollContainerRef.current) return;
     const { scrollLeft, scrollWidth, clientWidth } = scrollContainerRef.current;
-    setCanScrollLeft(scrollLeft > 4);
-    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 4);
+    setCanScrollLeft(scrollLeft > 6);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 6);
   };
 
   useEffect(() => {
@@ -456,6 +474,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
         className={`sticky top-14 z-20 group/filter bg-white/95 dark:bg-[#1c1c1e]/95 backdrop-blur-md rounded-2xl border border-slate-200/90 dark:border-white/10 transition-all duration-300 ease-in-out ${
           isCompact ? 'py-1 px-1.5 shadow-md' : 'p-2 shadow-2xs'
         }`}
+        style={{ overflowAnchor: 'none' }}
       >
         {/* Header bar with Section Label & Floating 'Return to Today' button (collapses smoothly when scrolling down) */}
         <div
@@ -513,10 +532,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           </button>
         )}
 
-        {/* Scrollable Container with Scroll Snap */}
+        {/* Scrollable Container with Scroll Snap (removed CSS scroll-smooth to prevent fighting scroll-snap) */}
         <div
           ref={scrollContainerRef}
-          className={`flex items-center gap-2 overflow-x-auto scrollbar-none scroll-smooth snap-x snap-mandatory scroll-px-4 sm:scroll-px-6 transition-all duration-300 ${
+          className={`flex items-center gap-2 overflow-x-auto scrollbar-none snap-x snap-mandatory scroll-px-4 sm:scroll-px-6 transition-all duration-300 ${
             isCompact ? 'px-1 py-0.5' : 'px-2 py-1.5'
           }`}
         >

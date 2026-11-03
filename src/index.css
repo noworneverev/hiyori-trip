@@ -5,6 +5,7 @@
 
 html {
   background-color: #f8fafc;
+  scrollbar-gutter: stable;
 }
 
 html.dark {
@@ -14,6 +15,20 @@ html.dark {
 body {
   min-height: 100vh;
   min-height: -webkit-fill-available;
+}
+
+/* Cross-browser scrollbar hiding utility (eliminates jitter and unwanted horizontal scrollbars) */
+.scrollbar-none::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.scrollbar-none,
+.no-scrollbar {
+  -ms-overflow-style: none !important; /* IE and Edge */
+  scrollbar-width: none !important; /* Firefox */
 }
 
 /* Leaflet Map overrides for modern clean look */
