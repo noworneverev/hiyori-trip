@@ -211,6 +211,36 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
   const isCurrentToday = timelineViewMode === 'daily' && selectedDayNumber === (todayDay?.dayNumber || targetTodayDay?.dayNumber);
 
+  // Travel Progress Information (Calculated for horizontal progress bar & today dot indicator)
+  const todayProgressInfo = useMemo(() => {
+    const totalDays = trip.days.length;
+    if (totalDays === 0) return null;
+
+    const todayIdx = trip.days.findIndex((d) => isDateToday(d.date));
+    const isTodayInTrip = todayIdx !== -1;
+
+    // Pinpoint today's center coordinate along the progress track
+    const todayPercent = isTodayInTrip
+      ? ((todayIdx + 0.5) / totalDays) * 100
+      : null;
+
+    // Current viewed progress fill (percentage of total trip days)
+    const selectedPercent = timelineViewMode === 'overview'
+      ? 100
+      : Math.min(100, Math.max(0, (selectedDayNumber / totalDays) * 100));
+
+    return {
+      totalDays,
+      todayIdx,
+      isTodayInTrip,
+      todayPercent,
+      selectedPercent,
+      currentDayNum: selectedDayNumber,
+      todayDayNumber: isTodayInTrip ? trip.days[todayIdx].dayNumber : null,
+      todayDate: isTodayInTrip ? trip.days[todayIdx].date : null,
+    };
+  }, [trip.days, selectedDayNumber, timelineViewMode]);
+
   const handleJumpToToday = () => {
     const target = todayDay || targetTodayDay;
     if (!target) return;
@@ -697,6 +727,99 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           >
             <ChevronRight className={isCompact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
           </button>
+        )}
+
+        {/* 細長水平進度條 (Slim Horizontal Travel Progress Bar with Today Micro Marker) */}
+        {trip.days.length > 0 && (
+          <div className={`transition-all duration-300 ${isCompact ? 'mt-1 px-1 pb-0.5' : 'mt-1.5 px-1.5 pb-0.5'}`}>
+            {/* Header label row for progress (collapses smoothly in compact mode) */}
+            <div
+              className={`flex items-center justify-between text-[10px] font-mono text-slate-400 dark:text-slate-500 overflow-hidden transition-all duration-300 ${
+                isCompact
+                  ? 'max-h-0 opacity-0 mb-0 pointer-events-none'
+                  : 'max-h-6 opacity-100 mb-1'
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-slate-600 dark:text-slate-300">
+                  {lang === 'zh' ? '行程進度' : 'Progress'}
+                </span>
+                <span className="text-teal-600 dark:text-teal-400 font-bold">
+                  {timelineViewMode === 'overview'
+                    ? (lang === 'zh' ? '全景總覽 (100%)' : 'All Days (100%)')
+                    : `${Math.round(todayProgressInfo?.selectedPercent ?? 0)}% (Day ${selectedDayNumber}/${trip.days.length})`}
+                </span>
+              </div>
+
+              {todayProgressInfo?.isTodayInTrip && (
+                <button
+                  type="button"
+                  onClick={handleJumpToToday}
+                  className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold hover:underline cursor-pointer"
+                  title={lang === 'zh' ? '點擊跳轉至今日' : 'Click to jump to today'}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  <span>
+                    {lang === 'zh'
+                      ? `今日位於 Day ${todayProgressInfo.todayDayNumber}`
+                      : `Today: Day ${todayProgressInfo.todayDayNumber}`}
+                  </span>
+                </button>
+              )}
+            </div>
+
+            {/* The progress track container */}
+            <div
+              className="relative w-full h-1.5 bg-slate-100 dark:bg-white/10 rounded-full overflow-visible select-none"
+              title={
+                lang === 'zh'
+                  ? `當前進度：${Math.round(todayProgressInfo?.selectedPercent ?? 0)}%`
+                  : `Progress: ${Math.round(todayProgressInfo?.selectedPercent ?? 0)}%`
+              }
+            >
+              {/* Filled progress bar with smooth transition */}
+              <motion.div
+                className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-teal-500 via-teal-600 to-emerald-500 rounded-full shadow-xs"
+                initial={false}
+                animate={{ width: `${todayProgressInfo?.selectedPercent ?? 0}%` }}
+                transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+              />
+
+              {/* Day segment dividers */}
+              {trip.days.length > 1 &&
+                Array.from({ length: trip.days.length - 1 }).map((_, idx) => (
+                  <div
+                    key={idx}
+                    className="absolute top-0 bottom-0 w-[1.5px] -ml-[0.75px] bg-white/70 dark:bg-[#1c1c1e]/80 z-1 pointer-events-none"
+                    style={{ left: `${((idx + 1) / trip.days.length) * 100}%` }}
+                  />
+                ))}
+
+              {/* Today micro marker / glowing dot */}
+              {todayProgressInfo?.todayPercent !== null && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleJumpToToday();
+                  }}
+                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 flex flex-col items-center group cursor-pointer p-0.5 bg-transparent border-none"
+                  style={{ left: `${todayProgressInfo.todayPercent}%` }}
+                  title={
+                    lang === 'zh'
+                      ? `今日位置 (Day ${todayProgressInfo.todayDayNumber}) - 點擊定位`
+                      : `Today (Day ${todayProgressInfo.todayDayNumber}) - Click to jump`
+                  }
+                  aria-label="今日位置"
+                >
+                  <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-400 ring-2 ring-white dark:ring-[#1c1c1e] shadow-sm group-hover:scale-125 transition-transform" />
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </div>
 
