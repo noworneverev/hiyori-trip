@@ -97,6 +97,41 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
+  // Scroll Detection for Compact Mode of Date Filter Bar
+  const [isCompact, setIsCompact] = useState(false);
+  const lastScrollYRef = useRef(0);
+
+  useEffect(() => {
+    let ticking = false;
+
+    const handleWindowScroll = () => {
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const currentScrollY = window.scrollY || document.documentElement.scrollTop;
+          const diff = currentScrollY - lastScrollYRef.current;
+
+          // If near the top, always expand to full mode
+          if (currentScrollY <= 70) {
+            setIsCompact(false);
+          } else if (diff > 8) {
+            // Scrolling down -> compact mode
+            setIsCompact(true);
+          } else if (diff < -8) {
+            // Scrolling up -> expand mode
+            setIsCompact(false);
+          }
+
+          lastScrollYRef.current = currentScrollY;
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+
+    window.addEventListener('scroll', handleWindowScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleWindowScroll);
+  }, []);
+
   // Safe Haptic Feedback helper (10ms subtle vibration for touch devices)
   const triggerHaptic = (ms = 10) => {
     try {
@@ -386,10 +421,20 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
   return (
     <div className="space-y-3.5">
-      {/* 水平捲動日期/天數篩選列 (Horizontal Day & Date Filter Bar) */}
-      <div className="relative group/filter bg-white dark:bg-[#1c1c1e] rounded-2xl border border-slate-200/90 dark:border-white/10 p-2 shadow-2xs">
-        {/* Header bar with Section Label & Floating 'Return to Today' button */}
-        <div className="flex items-center justify-between px-1 pb-2 pt-0.5">
+      {/* 水平捲動日期/天數篩選列 (Horizontal Day & Date Filter Bar with Scroll Detection & Compact Mode) */}
+      <div
+        className={`sticky top-14 z-20 group/filter bg-white/95 dark:bg-[#1c1c1e]/95 backdrop-blur-md rounded-2xl border border-slate-200/90 dark:border-white/10 transition-all duration-300 ease-in-out ${
+          isCompact ? 'py-1 px-1.5 shadow-md' : 'p-2 shadow-2xs'
+        }`}
+      >
+        {/* Header bar with Section Label & Floating 'Return to Today' button (collapses smoothly when scrolling down) */}
+        <div
+          className={`flex items-center justify-between px-1 transition-all duration-300 ease-in-out overflow-hidden ${
+            isCompact
+              ? 'max-h-0 opacity-0 mb-0 pointer-events-none pb-0 pt-0'
+              : 'max-h-12 opacity-100 mb-1 pb-1.5 pt-0.5'
+          }`}
+        >
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
               <Calendar className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
@@ -423,22 +468,27 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             )}
           </motion.button>
         </div>
+
         {/* Left scroll arrow button */}
         {canScrollLeft && (
           <button
             type="button"
             onClick={() => handleScrollDays('left')}
-            className="absolute left-1.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
+            className={`absolute left-1.5 top-1/2 -translate-y-1/2 z-10 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer ${
+              isCompact ? 'w-6 h-6' : 'w-7 h-7'
+            }`}
             aria-label="往左捲動天數"
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className={isCompact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
           </button>
         )}
 
         {/* Scrollable Container with Scroll Snap */}
         <div
           ref={scrollContainerRef}
-          className="flex items-center gap-2 overflow-x-auto scrollbar-none px-2 py-1.5 scroll-smooth snap-x snap-mandatory scroll-px-4 sm:scroll-px-6"
+          className={`flex items-center gap-2 overflow-x-auto scrollbar-none scroll-smooth snap-x snap-mandatory scroll-px-4 sm:scroll-px-6 transition-all duration-300 ${
+            isCompact ? 'px-1 py-0.5' : 'px-2 py-1.5'
+          }`}
         >
           {/* Overview button option */}
           <motion.button
@@ -456,19 +506,37 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               setTimelineViewMode('overview');
               scrollToCenterChip('day-filter-chip-overview');
             }}
-            className={`min-w-[84px] px-3.5 py-2.5 rounded-xl text-left shrink-0 snap-center snap-always flex flex-col justify-between cursor-pointer select-none transition-colors duration-200 ${
+            className={`rounded-xl text-left shrink-0 snap-center snap-always cursor-pointer select-none transition-all duration-200 ${
+              isCompact
+                ? 'min-w-[76px] px-2.5 py-1.5 h-9 flex items-center justify-center gap-1.5'
+                : 'min-w-[84px] px-3.5 py-2.5 h-[56px] flex flex-col justify-between'
+            } ${
               timelineViewMode === 'overview'
                 ? 'bg-teal-700 text-white shadow-md ring-2 ring-teal-500/40 z-1'
                 : 'bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
             }`}
           >
-            <span className="text-[11px] font-bold flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5" />
-              {lang === 'zh' ? '行程總覽' : 'Overview'}
-            </span>
-            <span className="text-[10px] opacity-75 font-mono mt-0.5">
-              {trip.days.length} 天日程
-            </span>
+            {isCompact ? (
+              <>
+                <Calendar className="w-3.5 h-3.5 shrink-0" />
+                <span className="text-[11px] font-bold whitespace-nowrap">
+                  {lang === 'zh' ? '總覽' : 'All'}
+                </span>
+                <span className="text-[10px] opacity-75 font-mono whitespace-nowrap">
+                  ({trip.days.length})
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="text-[11px] font-bold flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5" />
+                  {lang === 'zh' ? '行程總覽' : 'Overview'}
+                </span>
+                <span className="text-[10px] opacity-75 font-mono mt-0.5">
+                  {trip.days.length} 天日程
+                </span>
+              </>
+            )}
           </motion.button>
 
           {/* Individual Day Chips */}
@@ -505,7 +573,11 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     }
                   }, 60);
                 }}
-                className={`min-w-[110px] px-3.5 py-2.5 rounded-xl text-left shrink-0 snap-center snap-always flex flex-col justify-between cursor-pointer select-none transition-colors duration-200 relative ${
+                className={`rounded-xl text-left shrink-0 snap-center snap-always cursor-pointer select-none transition-all duration-200 relative ${
+                  isCompact
+                    ? 'min-w-[88px] px-2.5 py-1.5 h-9 flex items-center justify-between gap-1.5'
+                    : 'min-w-[110px] px-3.5 py-2.5 h-[56px] flex flex-col justify-between'
+                } ${
                   isCurrent
                     ? `bg-teal-700 text-white shadow-md ring-2 ring-teal-500/40 z-1 ${isToday ? 'border-amber-400/80' : ''}`
                     : isToday
@@ -515,49 +587,80 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     : 'bg-slate-50 dark:bg-slate-800/60 hover:bg-teal-50/60 dark:hover:bg-teal-950/30 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
                 }`}
               >
-                <div className="flex items-center justify-between gap-1.5">
-                  <span className={`text-xs font-black ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
-                    Day {day.dayNumber}
-                  </span>
-                  {totalCount > 0 ? (
-                    <span
-                      className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${
-                        isCurrent
-                          ? 'bg-teal-900/60 text-teal-100 font-bold'
-                          : completedCount === totalCount
-                          ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold'
-                          : 'bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                      }`}
-                    >
-                      {completedCount > 0 ? `✓ ${completedCount}/${totalCount}` : `${totalCount}`}
-                    </span>
-                  ) : (
-                    <span
-                      className={`text-[9px] font-mono px-1.5 py-0.2 rounded-md ${
-                        isCurrent
-                          ? 'bg-teal-900/70 text-amber-200/90 border border-teal-600/50'
-                          : 'bg-amber-100/70 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/40'
-                      }`}
-                    >
-                      {lang === 'zh' ? '空行程' : 'Empty'}
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between mt-1 text-[10px] font-mono opacity-85">
-                  <div className="flex items-center gap-1">
-                    <span>{dateStr}</span>
-                    {weekday && <span>({weekday})</span>}
-                  </div>
-                  {isToday && (
-                    <span className="flex items-center gap-1 shrink-0">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-xs animate-pulse" />
-                      <span className={`text-[9px] font-bold ${isCurrent ? 'text-amber-300' : 'text-amber-600 dark:text-amber-400'}`}>
-                        {lang === 'zh' ? '今日' : 'Today'}
+                {isCompact ? (
+                  /* Compact Single-line Layout */
+                  <>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className={`text-xs font-black ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                        D{day.dayNumber}
                       </span>
-                    </span>
-                  )}
-                </div>
+                      {isToday && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-xs animate-pulse" />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 text-[10px] font-mono shrink-0">
+                      <span className={isCurrent ? 'text-teal-100' : 'text-slate-500 dark:text-slate-400'}>
+                        {dateStr}
+                      </span>
+                      {isEmpty ? (
+                        <span className={`text-[9px] ${isCurrent ? 'text-amber-200' : 'text-amber-500 dark:text-amber-400'}`}>
+                          (空)
+                        </span>
+                      ) : (
+                        <span className={`text-[10px] ${isCurrent ? 'text-teal-100 font-bold' : 'opacity-70'}`}>
+                          ·{totalCount}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  /* Full Two-Row Layout */
+                  <>
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className={`text-xs font-black ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                        Day {day.dayNumber}
+                      </span>
+                      {totalCount > 0 ? (
+                        <span
+                          className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${
+                            isCurrent
+                              ? 'bg-teal-900/60 text-teal-100 font-bold'
+                              : completedCount === totalCount
+                              ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold'
+                              : 'bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                          }`}
+                        >
+                          {completedCount > 0 ? `✓ ${completedCount}/${totalCount}` : `${totalCount}`}
+                        </span>
+                      ) : (
+                        <span
+                          className={`text-[9px] font-mono px-1.5 py-0.2 rounded-md ${
+                            isCurrent
+                              ? 'bg-teal-900/70 text-amber-200/90 border border-teal-600/50'
+                              : 'bg-amber-100/70 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/40'
+                          }`}
+                        >
+                          {lang === 'zh' ? '空行程' : 'Empty'}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between mt-1 text-[10px] font-mono opacity-85">
+                      <div className="flex items-center gap-1">
+                        <span>{dateStr}</span>
+                        {weekday && <span>({weekday})</span>}
+                      </div>
+                      {isToday && (
+                        <span className="flex items-center gap-1 shrink-0">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-xs animate-pulse" />
+                          <span className={`text-[9px] font-bold ${isCurrent ? 'text-amber-300' : 'text-amber-600 dark:text-amber-400'}`}>
+                            {lang === 'zh' ? '今日' : 'Today'}
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
               </motion.button>
             );
           })}
@@ -571,7 +674,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               triggerHaptic(10);
               handleAddDay();
             }}
-            className="h-[52px] px-3 rounded-xl border border-dashed border-teal-500/70 hover:border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center gap-1 shrink-0 snap-center transition-colors cursor-pointer"
+            className={`rounded-xl border border-dashed border-teal-500/70 hover:border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center justify-center gap-1 shrink-0 snap-center transition-all cursor-pointer ${
+              isCompact ? 'h-9 px-2.5' : 'h-[52px] px-3'
+            }`}
             title={lang === 'zh' ? '增加一天' : 'Add Day'}
             aria-label="增加一天"
           >
@@ -585,10 +690,12 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           <button
             type="button"
             onClick={() => handleScrollDays('right')}
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
+            className={`absolute right-1.5 top-1/2 -translate-y-1/2 z-10 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer ${
+              isCompact ? 'w-6 h-6' : 'w-7 h-7'
+            }`}
             aria-label="往右捲動天數"
           >
-            <ChevronRight className="w-4 h-4" />
+            <ChevronRight className={isCompact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
           </button>
         )}
       </div>
