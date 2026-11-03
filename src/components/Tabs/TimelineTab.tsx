@@ -153,6 +153,44 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     scrollContainerRef.current.scrollBy({ left: offset, behavior: 'smooth' });
   };
 
+  // Identify actual today Day or closest Day in the itinerary
+  const todayDay = useMemo(() => {
+    return trip.days.find((d) => isDateToday(d.date));
+  }, [trip.days]);
+
+  const targetTodayDay = useMemo(() => {
+    if (todayDay) return todayDay;
+    const nowMs = new Date().setHours(0, 0, 0, 0);
+    let closest = trip.days[0];
+    let minDiff = Infinity;
+    for (const d of trip.days) {
+      const dMs = new Date(d.date + 'T00:00:00').getTime();
+      const diff = Math.abs(dMs - nowMs);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = d;
+      }
+    }
+    return closest || trip.days[0];
+  }, [todayDay, trip.days]);
+
+  const isCurrentToday = timelineViewMode === 'daily' && selectedDayNumber === (todayDay?.dayNumber || targetTodayDay?.dayNumber);
+
+  const handleJumpToToday = () => {
+    const target = todayDay || targetTodayDay;
+    if (!target) return;
+    triggerHaptic(12);
+    handleSelectDay(target.dayNumber);
+    setTimelineViewMode('daily');
+    scrollToCenterChip(`day-filter-chip-${target.dayNumber}`);
+    setTimeout(() => {
+      const scheduleEl = document.getElementById('day-schedule-section');
+      if (scheduleEl) {
+        scheduleEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 60);
+  };
+
   // High-Resolution Photo Overlay State for intercepting thumbnail clicks & displaying original high-res URL
   const [overlaySpotPhoto, setOverlaySpotPhoto] = useState<{
     item: ItineraryItem;
@@ -350,6 +388,41 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     <div className="space-y-3.5">
       {/* 水平捲動日期/天數篩選列 (Horizontal Day & Date Filter Bar) */}
       <div className="relative group/filter bg-white dark:bg-[#1c1c1e] rounded-2xl border border-slate-200/90 dark:border-white/10 p-2 shadow-2xs">
+        {/* Header bar with Section Label & Floating 'Return to Today' button */}
+        <div className="flex items-center justify-between px-1 pb-2 pt-0.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+              <span>{lang === 'zh' ? '行程日程' : 'Itinerary Days'}</span>
+            </span>
+            <span className="text-[10px] font-mono text-slate-400">
+              · {trip.days.length} 天
+            </span>
+          </div>
+
+          {/* 返回今日浮動小按鈕 (Floating Jump to Today Button) */}
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.95 }}
+            whileHover={{ scale: 1.03 }}
+            onClick={handleJumpToToday}
+            className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer ${
+              isCurrentToday
+                ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 ring-2 ring-amber-400/30'
+                : 'bg-slate-50 dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-amber-400/80 shadow-2xs'
+            }`}
+            title={lang === 'zh' ? '快速捲動至今日行程' : 'Jump to Today'}
+            aria-label="返回今日"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse" />
+            <span>{lang === 'zh' ? '返回今日' : 'Today'}</span>
+            {targetTodayDay && (
+              <span className="text-[10px] font-mono opacity-80 font-normal">
+                (Day {targetTodayDay.dayNumber})
+              </span>
+            )}
+          </motion.button>
+        </div>
         {/* Left scroll arrow button */}
         {canScrollLeft && (
           <button
