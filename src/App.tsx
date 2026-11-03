@@ -1258,7 +1258,7 @@ export default function App() {
             }`}
           >
             <CheckCircle className="w-4 h-4" />
-            <span>{lang === 'zh' ? '待辦清單' : 'Prep & Notes'}</span>
+            <span>{lang === 'zh' ? '待辦清單' : 'Checklists'}</span>
           </button>
 
           <button
