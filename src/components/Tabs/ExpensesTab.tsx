@@ -46,6 +46,15 @@ import {
   Coins,
   TableProperties,
   Search,
+  Utensils,
+  Train,
+  Ticket,
+  ShoppingBag,
+  Gift,
+  Hotel,
+  Bookmark,
+  CreditCard,
+  Smartphone,
 } from 'lucide-react';
 import { canUploadImages } from '../../utils/userPermissions';
 import { calculateTripSplits, formatSplitsForSharing } from '../../utils/billSplitter';
@@ -70,21 +79,21 @@ interface ExpensesTabProps {
 }
 
 // Built-in categories
-const DEFAULT_CATEGORIES: Record<string, { label: string; icon: string; color: string; bg: string }> = {
-  food: { label: '美食餐飲', icon: '🍜', color: '#F59E0B', bg: 'bg-amber-500/10 text-amber-700 dark:text-amber-300' },
-  transport: { label: '交通車資', icon: '🚄', color: '#3B82F6', bg: 'bg-blue-500/10 text-blue-700 dark:text-blue-300' },
-  tickets: { label: '門票票券', icon: '🎟️', color: '#10B981', bg: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' },
-  shopping: { label: '購物商場', icon: '🛍️', color: '#EC4899', bg: 'bg-pink-500/10 text-pink-700 dark:text-pink-300' },
-  souvenir: { label: '紀念品伴手禮', icon: '🎁', color: '#8B5CF6', bg: 'bg-purple-500/10 text-purple-700 dark:text-purple-300' },
-  stay: { label: '住宿飯店', icon: '🏨', color: '#6366F1', bg: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300' },
-  other: { label: '其他雜支', icon: '📌', color: '#64748B', bg: 'bg-slate-500/10 text-slate-700 dark:text-slate-300' },
+const DEFAULT_CATEGORIES: Record<string, { label: string; Icon: React.ComponentType<{ className?: string }>; color: string; bg: string }> = {
+  food: { label: '美食餐飲', Icon: Utensils, color: '#F59E0B', bg: 'bg-amber-500/10 text-amber-700 dark:text-amber-300' },
+  transport: { label: '交通車資', Icon: Train, color: '#3B82F6', bg: 'bg-blue-500/10 text-blue-700 dark:text-blue-300' },
+  tickets: { label: '門票票券', Icon: Ticket, color: '#10B981', bg: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' },
+  shopping: { label: '購物商場', Icon: ShoppingBag, color: '#EC4899', bg: 'bg-pink-500/10 text-pink-700 dark:text-pink-300' },
+  souvenir: { label: '紀念品伴手禮', Icon: Gift, color: '#8B5CF6', bg: 'bg-purple-500/10 text-purple-700 dark:text-purple-300' },
+  stay: { label: '住宿飯店', Icon: Hotel, color: '#6366F1', bg: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300' },
+  other: { label: '其他雜支', Icon: Bookmark, color: '#64748B', bg: 'bg-slate-500/10 text-slate-700 dark:text-slate-300' },
 };
 
-const PAYMENT_LABELS: Record<PaymentMethod, Record<Language, string> & { icon: string }> = {
-  cash: { zh: '現金', en: 'Cash', ja: '現金', ko: '현금', 'zh-CN': '现金', icon: '💵' },
-  card: { zh: '信用卡', en: 'Credit Card', ja: 'クレジットカード', ko: '신용카드', 'zh-CN': '信用卡', icon: '💳' },
-  ic_card: { zh: '交通卡/IC卡', en: 'Transit Card', ja: '交通系ICカード', ko: '교통카드', 'zh-CN': '交通卡', icon: '🏷️' },
-  mobile: { zh: '行動支付', en: 'Mobile Pay', ja: 'スマホ決済', ko: '간편결제', 'zh-CN': '移动支付', icon: '📱' },
+const PAYMENT_LABELS: Record<PaymentMethod, Record<Language, string> & { Icon: React.ComponentType<{ className?: string }> }> = {
+  cash: { zh: '現金', en: 'Cash', ja: '現金', ko: '현금', 'zh-CN': '现金', Icon: Coins },
+  card: { zh: '信用卡', en: 'Credit Card', ja: 'クレジットカード', ko: '신용카드', 'zh-CN': '信用卡', Icon: CreditCard },
+  ic_card: { zh: '交通卡/IC卡', en: 'Transit Card', ja: '交通系ICカード', ko: '교통카드', 'zh-CN': '交通卡', Icon: Tag },
+  mobile: { zh: '行動支付', en: 'Mobile Pay', ja: 'スマホ決済', ko: '간편결제', 'zh-CN': '移动支付', Icon: Smartphone },
 };
 
 export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTrip }) => {
@@ -199,7 +208,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
     }
     return {
       label: customLabel || catKey,
-      icon: '🏷️',
+      Icon: Tag,
       color: '#0d9488',
       bg: 'bg-teal-500/10 text-teal-700 dark:text-teal-300',
     };
@@ -304,7 +313,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
           name: meta.label,
           value: Math.round(val),
           color: meta.color,
-          icon: meta.icon,
+          Icon: meta.Icon,
           percentage: totalSpentInBase > 0 ? ((val / totalSpentInBase) * 100).toFixed(1) : '0',
         };
       })
@@ -1164,7 +1173,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                 : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
             }`}
           >
-            <span>📋 支出明細與圓餅圖</span>
+            <Receipt className="w-3.5 h-3.5" />
+            <span>支出明細與圓餅圖</span>
           </button>
           <button
             type="button"
@@ -1176,7 +1186,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             }`}
           >
             <TableProperties className="w-3.5 h-3.5" />
-            <span>📅 每日支出統計表</span>
+            <span>每日支出統計表</span>
           </button>
           <button
             type="button"
@@ -1188,7 +1198,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             }`}
           >
             <BarChart3 className="w-3.5 h-3.5" />
-            <span>📊 統計圖表</span>
+            <span>統計圖表</span>
           </button>
           {!trip.isSoloTrip && trip.isSplitEnabled && (
             <button
@@ -1201,7 +1211,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
               }`}
             >
               <Users className="w-3.5 h-3.5" />
-              <span>🤝 朋友分帳與結算 ({splitMembersList.length} 人)</span>
+              <span>朋友分帳與結算 ({splitMembersList.length} 人)</span>
             </button>
           )}
         </div>
@@ -1344,7 +1354,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
 
                   {summary.personalExpense > 0 && (
                     <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-400">
-                      <span>🛍️ 個人自費總計</span>
+                      <span className="flex items-center gap-1">
+                        <ShoppingBag className="w-3 h-3 text-slate-500" />
+                        <span>個人自費總計</span>
+                      </span>
                       <span className="font-mono font-bold text-slate-600 dark:text-slate-300">
                         {formatCurrencyAmount(Math.round(summary.personalExpense), baseCurrency)}
                       </span>
@@ -1391,7 +1404,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             {/* Transfers List */}
             {splitsResult.transfers.length === 0 ? (
               <div className="p-6 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-center space-y-1">
-                <span className="text-2xl">✨</span>
+                <Sparkles className="w-6 h-6 mx-auto text-amber-500 mb-1" />
                 <p className="font-bold text-slate-800 dark:text-slate-100 text-sm">
                   太棒了！大家的代墊與消費完全打平，目前無須轉帳！
                 </p>
@@ -1648,8 +1661,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                       className="w-3 h-3 rounded-full shrink-0"
                       style={{ backgroundColor: item.color }}
                     />
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">
-                      {item.icon} {item.name}
+                    <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <item.Icon className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
+                      <span>{item.name}</span>
                     </span>
                     {chartCategoryDetail === item.key && (
                       <span className="text-[10px] font-bold text-teal-600 dark:text-teal-400">
@@ -1732,7 +1746,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                       className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 text-xs"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="text-base shrink-0">{catMeta.icon}</span>
+                        <span className="p-1.5 rounded-lg bg-slate-200/60 dark:bg-slate-700/60 text-slate-700 dark:text-slate-300 shrink-0">
+                          <catMeta.Icon className="w-3.5 h-3.5" />
+                        </span>
                         <div className="min-w-0">
                           <p className="font-bold text-slate-900 dark:text-white truncate">{exp.title}</p>
                           <div className="text-[10px] text-slate-400 flex items-center gap-1.5 font-mono">
@@ -1746,8 +1762,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                               </>
                             )}
                             {exp.receiptImages && exp.receiptImages.length > 0 && (
-                              <span className="text-teal-600 dark:text-teal-400 font-bold">
-                                · 📷 附發票
+                              <span className="text-teal-600 dark:text-teal-400 font-bold flex items-center gap-0.5">
+                                · <Receipt className="w-3 h-3 inline" /> 附發票
                               </span>
                             )}
                           </div>
@@ -1823,8 +1839,18 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                     <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800 font-bold select-none">
                       <th className="py-3 px-3.5 whitespace-nowrap">日期 / 行程天數</th>
                       <th className="py-3 px-3 text-center whitespace-nowrap">筆數</th>
-                      <th className="py-3 px-3.5 text-right whitespace-nowrap">💵 現金支出</th>
-                      <th className="py-3 px-3.5 text-right whitespace-nowrap">💳 信用卡/電子</th>
+                      <th className="py-3 px-3.5 text-right whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1 justify-end">
+                          <Coins className="w-3.5 h-3.5 text-amber-500" />
+                          <span>現金支出</span>
+                        </span>
+                      </th>
+                      <th className="py-3 px-3.5 text-right whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1 justify-end">
+                          <CreditCard className="w-3.5 h-3.5 text-blue-500" />
+                          <span>信用卡/電子</span>
+                        </span>
+                      </th>
                       <th className="py-3 px-3.5 text-right whitespace-nowrap">當日總計 ({baseCurrency})</th>
                       <th className="py-3 px-3.5 text-center whitespace-nowrap">明細操作</th>
                     </tr>
@@ -2000,7 +2026,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                                             >
                                               <div className="flex items-start gap-2.5 min-w-0">
                                                 <div className={`w-8 h-8 rounded-xl ${catMeta.bg} flex items-center justify-center text-sm shrink-0`}>
-                                                  {catMeta.icon}
+                                                  <catMeta.Icon className="w-4 h-4" />
                                                 </div>
 
                                                 <div className="min-w-0">
@@ -2008,8 +2034,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                                                     <span className="font-bold text-slate-900 dark:text-white text-xs truncate">
                                                       {item.title}
                                                     </span>
-                                                    <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-400 font-semibold flex items-center gap-0.5">
-                                                      <span>{PAYMENT_LABELS[item.paymentMethod]?.icon || '💵'}</span>
+                                                    <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-400 font-semibold flex items-center gap-1">
+                                                      {PAYMENT_LABELS[item.paymentMethod]?.Icon ? (
+                                                        React.createElement(PAYMENT_LABELS[item.paymentMethod].Icon, { className: 'w-3 h-3' })
+                                                      ) : (
+                                                        <Coins className="w-3 h-3" />
+                                                      )}
                                                       <span>{PAYMENT_LABELS[item.paymentMethod]?.[lang] || item.paymentMethod}</span>
                                                     </span>
                                                     <span className="text-[10px] text-slate-400">
@@ -2253,8 +2283,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                                 className="w-2.5 h-2.5 rounded-full shrink-0"
                                 style={{ backgroundColor: item.color }}
                               />
-                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">
-                                {item.icon} {item.name}
+                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate flex items-center gap-1.5">
+                                <item.Icon className="w-3 h-3 shrink-0 text-slate-500" />
+                                <span>{item.name}</span>
                               </span>
                               {isSelected && (
                                 <span className="text-[9px] font-bold text-teal-600 dark:text-teal-400 shrink-0">
@@ -2356,7 +2387,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                   : 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-100'
               }`}
             >
-              <span>⭐ 今日</span>
+              <span>今日</span>
               {todayExpensesCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full bg-teal-800/40 text-[9px] font-mono">
                   {todayExpensesCount}
@@ -2375,7 +2406,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                     : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
                 }`}
               >
-                🎒 行前準備
+                行前準備
               </button>
             )}
 
@@ -2419,7 +2450,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                   : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
               }`}
             >
-              <span>💵 僅看現金</span>
+              <Coins className="w-3.5 h-3.5 text-amber-500" />
+              <span>僅看現金</span>
             </button>
           </div>
 
@@ -2428,7 +2460,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             <div className="p-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 flex items-center justify-between text-xs text-teal-900 dark:text-teal-200 animate-in fade-in duration-100">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="font-bold">
-                  📅 目前顯示：{selectedDateFilter === 'today' ? `今日 (${todayStr})` : selectedDateFilter === 'pre' ? '行前準備' : selectedDateFilter === 'cash_only' ? '僅現金支出' : selectedDateFilter} 的全部明細
+                  目前顯示：{selectedDateFilter === 'today' ? `今日 (${todayStr})` : selectedDateFilter === 'pre' ? '行前準備' : selectedDateFilter === 'cash_only' ? '僅現金支出' : selectedDateFilter} 的全部明細
                 </span>
                 <span className="font-mono font-bold text-teal-700 dark:text-teal-300 text-[11px]">
                   (共 {filteredExpenses.length} 筆 · 合計 {formatCurrencyAmount(filteredTotalInBase, baseCurrency)})
@@ -2484,13 +2516,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                   key={catKey}
                   type="button"
                   onClick={() => setSelectedCategoryFilter(catKey)}
-                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 ${
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 flex items-center gap-1 ${
                     selectedCategoryFilter === catKey
                       ? 'bg-teal-600 text-white shadow-2xs'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
                   }`}
                 >
-                  {meta.icon} {meta.label}
+                  <meta.Icon className="w-3 h-3" />
+                  <span>{meta.label}</span>
                 </button>
               );
             })}
@@ -2503,13 +2536,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                   key={catKey}
                   type="button"
                   onClick={() => setSelectedCategoryFilter(catKey)}
-                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 ${
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 flex items-center gap-1 ${
                     selectedCategoryFilter === catKey
                       ? 'bg-teal-600 text-white shadow-2xs'
                       : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
                   }`}
                 >
-                  🏷️ {catKey}
+                  <Tag className="w-3 h-3" />
+                  <span>{catKey}</span>
                 </button>
               );
             })}
@@ -2639,8 +2673,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                         className="p-3 sm:px-4 hover:bg-slate-50/80 dark:hover:bg-white/5 transition flex items-center justify-between gap-3 cursor-pointer group"
                       >
                         <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 text-lg group-hover:scale-105 transition-transform">
-                            {catMeta.icon}
+                          <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 text-slate-700 dark:text-slate-200 group-hover:scale-105 transition-transform">
+                            <catMeta.Icon className="w-5 h-5" />
                           </div>
 
                           <div className="min-w-0 space-y-0.5 flex-1">
@@ -2659,7 +2693,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                             <div className="flex items-center gap-2 text-[11px] text-slate-400 flex-wrap">
                               <span>{catMeta.label}</span>
                               <span>·</span>
-                              <span>{payInfo.icon} {payInfo[lang]}</span>
+                              <span className="flex items-center gap-1">
+                                {payInfo.Icon ? (
+                                  React.createElement(payInfo.Icon, { className: 'w-3 h-3' })
+                                ) : (
+                                  <Coins className="w-3 h-3" />
+                                )}
+                                <span>{payInfo[lang]}</span>
+                              </span>
                               {item.paidBy && !trip.isSoloTrip && trip.isSplitEnabled && (
                                 <>
                                   <span>·</span>
@@ -2845,13 +2886,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                       key={m}
                       type="button"
                       onClick={() => setPaymentMethod(m)}
-                      className={`py-2 px-2.5 rounded-xl border text-center transition flex items-center justify-center gap-1 text-xs ${
+                      className={`py-2 px-2.5 rounded-xl border text-center transition flex items-center justify-center gap-1.5 text-xs ${
                         paymentMethod === m
                           ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 font-bold text-teal-900 dark:text-teal-200'
                           : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                       }`}
                     >
-                      <span>{PAYMENT_LABELS[m].icon}</span>
+                      {PAYMENT_LABELS[m]?.Icon ? (
+                        React.createElement(PAYMENT_LABELS[m].Icon, { className: 'w-3.5 h-3.5 shrink-0' })
+                      ) : (
+                        <Coins className="w-3.5 h-3.5 shrink-0" />
+                      )}
                       <span>{PAYMENT_LABELS[m][lang]}</span>
                     </button>
                   ))}
@@ -2890,7 +2935,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                             : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                         }`}
                       >
-                        <span className="text-sm shrink-0">{meta.icon}</span>
+                        <meta.Icon className="w-3.5 h-3.5 shrink-0 text-slate-600 dark:text-slate-400" />
                         <span className="truncate text-[11px]">{meta.label}</span>
                       </button>
                     );
@@ -2911,7 +2956,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                             : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                         }`}
                       >
-                        <span className="text-sm shrink-0">🏷️</span>
+                        <Tag className="w-3.5 h-3.5 shrink-0 text-teal-600 dark:text-teal-400" />
                         <span className="truncate text-[11px]">{displayName}</span>
                       </button>
                     );
@@ -3015,13 +3060,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
                               key={m}
                               type="button"
                               onClick={() => setItemPaidBy(m)}
-                              className={`px-3 py-1 rounded-xl text-xs font-bold transition shrink-0 ${
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1 ${
                                 itemPaidBy === m
                                   ? 'bg-indigo-600 text-white shadow-2xs'
                                   : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
                               }`}
                             >
-                              {m === '我' ? '🙋‍♂️ 我' : `👤 ${m}`}
+                              <User className="w-3 h-3" />
+                              <span>{m === '我' ? '我' : m}</span>
                             </button>
                           ))}
                         </div>

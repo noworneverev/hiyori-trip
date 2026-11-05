@@ -36,6 +36,12 @@ import {
   ChevronUp,
   ShieldAlert,
   Plus,
+  Landmark,
+  Utensils,
+  Train,
+  Hotel,
+  ShoppingBag,
+  Ticket,
 } from 'lucide-react';
 
 interface LiveCompanionTabProps {
@@ -46,14 +52,14 @@ interface LiveCompanionTabProps {
   onOpenQuickAction?: (tab: 'calc' | 'expense' | 'scratchpad') => void;
 }
 
-const CATEGORY_TAGS: Record<CategoryType, { label: string; icon: string; badgeClass: string }> = {
-  spot: { label: '景點', icon: '🏛️', badgeClass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' },
-  food: { label: '美食', icon: '🍜', badgeClass: 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800' },
-  transport: { label: '交通', icon: '🚄', badgeClass: 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800' },
-  hotel: { label: '住宿', icon: '🏨', badgeClass: 'bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200 dark:border-purple-800' },
-  shopping: { label: '購物', icon: '🛍️', badgeClass: 'bg-pink-50 text-pink-700 dark:bg-pink-950/60 dark:text-pink-300 border-pink-200 dark:border-pink-800' },
-  activity: { label: '活動', icon: '🎟️', badgeClass: 'bg-teal-50 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300 border-teal-200 dark:border-teal-800' },
-  other: { label: '其他', icon: '📌', badgeClass: 'bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700' },
+const CATEGORY_TAGS: Record<CategoryType, { label: string; Icon: React.ComponentType<{ className?: string }>; badgeClass: string }> = {
+  spot: { label: '景點', Icon: Landmark, badgeClass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' },
+  food: { label: '美食', Icon: Utensils, badgeClass: 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800' },
+  transport: { label: '交通', Icon: Train, badgeClass: 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800' },
+  hotel: { label: '住宿', Icon: Hotel, badgeClass: 'bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200 dark:border-purple-800' },
+  shopping: { label: '購物', Icon: ShoppingBag, badgeClass: 'bg-pink-50 text-pink-700 dark:bg-pink-950/60 dark:text-pink-300 border-pink-200 dark:border-pink-800' },
+  activity: { label: '活動', Icon: Ticket, badgeClass: 'bg-teal-50 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300 border-teal-200 dark:border-teal-800' },
+  other: { label: '其他', Icon: Bookmark, badgeClass: 'bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700' },
 };
 
 export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
@@ -336,7 +342,9 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
             onClick={() => setIsWeatherExpanded(!isWeatherExpanded)}
             className="flex items-center gap-2.5 min-w-0 text-left hover:opacity-85 transition group"
           >
-            <span className="text-xl shrink-0 select-none">{weatherDesc?.icon || '🌤️'}</span>
+            <span className="text-xl shrink-0 select-none flex items-center justify-center">
+              {weatherDesc?.icon || <CloudSun className="w-5 h-5 text-amber-500" />}
+            </span>
             <div className="flex items-center gap-1.5 flex-wrap text-xs text-slate-700 dark:text-slate-300">
               <span className="font-black font-mono text-sm sm:text-base text-slate-900 dark:text-white">
                 {weather ? `${weather.temperature}°C` : '--°C'}
@@ -477,7 +485,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                 <>
                   <span aria-hidden="true" className="text-slate-500">·</span>
                   <span className="text-xs text-teal-100 flex items-center gap-1 font-medium">
-                    <span>{CATEGORY_TAGS[nextItem.category].icon}</span>
+                    {React.createElement(CATEGORY_TAGS[nextItem.category].Icon, { className: 'w-3 h-3' })}
                     <span>{CATEGORY_TAGS[nextItem.category].label}</span>
                   </span>
                 </>
@@ -629,7 +637,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                           {item.startTime} {item.endTime ? `~ ${item.endTime}` : ''}
                         </span>
                         <span className={`px-2 py-0.5 rounded-md border text-[10px] font-bold flex items-center gap-1 ${catTag.badgeClass}`}>
-                          <span>{catTag.icon}</span>
+                          <catTag.Icon className="w-3 h-3" />
                           <span>{catTag.label}</span>
                         </span>
                         {item.bookingCode && (

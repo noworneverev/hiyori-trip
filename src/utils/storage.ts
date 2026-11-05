@@ -88,8 +88,12 @@ export function saveTrips(trips: Trip[]): void {
       }
     });
     localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(Array.from(uniqueMap.values())));
-  } catch (err) {
-    console.error('Error saving trips to local storage:', err);
+  } catch (err: any) {
+    if (err?.name === 'QuotaExceededError' || err?.code === 22 || err?.code === 1014) {
+      console.warn('LocalStorage quota exceeded when saving trips data:', err);
+    } else {
+      console.error('Error saving trips to local storage:', err);
+    }
   }
 }
 

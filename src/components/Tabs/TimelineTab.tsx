@@ -241,6 +241,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
   const targetTodayDay = useMemo(() => {
     if (todayDay) return todayDay;
+    if (trip.days.length === 0) return null;
     const nowMs = new Date().setHours(0, 0, 0, 0);
     let closest = trip.days[0];
     let minDiff = Infinity;
@@ -252,7 +253,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
         closest = d;
       }
     }
-    return closest || trip.days[0];
+    return closest || trip.days[0] || null;
   }, [todayDay, trip.days]);
 
   const isCurrentToday = timelineViewMode === 'daily' && selectedDayNumber === (todayDay?.dayNumber || targetTodayDay?.dayNumber);
@@ -987,8 +988,30 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
         )}
       </div>
 
-      {/* If overview mode: show ItineraryOverviewTable */}
-      {timelineViewMode === 'overview' ? (
+      {/* If zero days: show inviting empty state */}
+      {trip.days.length === 0 ? (
+        <div className="py-14 px-6 text-center rounded-3xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 shadow-sm max-w-md mx-auto my-6 space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center mx-auto shadow-2xs">
+            <Calendar className="w-7 h-7" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="font-bold text-slate-900 dark:text-white text-base">
+              {lang === 'zh' ? '尚未規劃任何天數' : 'No itinerary days yet'}
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+              {lang === 'zh' ? '目前這趟旅程還沒有任何天數，立即建立第 1 天開始安排精彩景點！' : 'This trip has no days planned yet. Create Day 1 to start adding spots!'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleAddDay}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md shadow-teal-600/20 active:scale-95 transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span>{lang === 'zh' ? '建立第 1 天行程' : 'Create Day 1'}</span>
+          </button>
+        </div>
+      ) : timelineViewMode === 'overview' ? (
         <ItineraryOverviewTable
           trip={trip}
           selectedDayNumber={selectedDayNumber}
