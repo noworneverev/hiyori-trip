@@ -17,6 +17,7 @@ import {
   Phone,
   FileText,
   DollarSign,
+  BookOpen,
 } from 'lucide-react';
 
 interface PDFExportModalProps {
@@ -274,18 +275,20 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
             <button
               type="button"
               onClick={applyPresetDailyOnly}
-              className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-semibold border border-slate-200 dark:border-slate-700 transition active:scale-95"
+              className="px-2.5 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-semibold border border-slate-200 dark:border-slate-700 transition active:scale-95 flex items-center gap-1.5"
               title="僅顯示每日詳細景點與清單，不含大表"
             >
-              🗺️ {lang === 'zh' ? '僅每日日程' : 'Daily Only'}
+              <Calendar className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+              <span>{lang === 'zh' ? '僅每日日程' : 'Daily Only'}</span>
             </button>
             <button
               type="button"
               onClick={applyPresetFull}
-              className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 font-semibold border border-slate-300 dark:border-slate-700 transition active:scale-95"
+              className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 text-slate-700 dark:text-slate-200 font-semibold border border-slate-300 dark:border-slate-700 transition active:scale-95 flex items-center gap-1.5"
               title="包含大表、每日景點細節、待辦票券與行李清單，適合深度旅遊"
             >
-              📖 {lang === 'zh' ? '完整手冊版' : 'Full Guide'}
+              <BookOpen className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+              <span>{lang === 'zh' ? '完整手冊版' : 'Full Guide'}</span>
             </button>
           </div>
         </div>

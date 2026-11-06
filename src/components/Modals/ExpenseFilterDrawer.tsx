@@ -59,9 +59,9 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
         <div className="w-12 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-3 mb-1 shrink-0 sm:hidden" />
 
         {/* Drawer Header */}
-        <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/40 shrink-0">
+        <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/50 shrink-0">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 flex items-center justify-center">
+            <div className="w-7 h-7 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 flex items-center justify-center">
               <Filter className="w-4 h-4" />
             </div>
             <div>
@@ -79,7 +79,7 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
               <button
                 type="button"
                 onClick={onResetAll}
-                className="px-2.5 py-1 text-xs font-bold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/40 rounded-lg transition flex items-center gap-1"
+                className="px-2.5 py-1 text-xs font-bold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/60 rounded-lg transition flex items-center gap-1"
               >
                 <RotateCcw className="w-3 h-3" />
                 <span>{lang === 'zh' ? '重設' : 'Reset'}</span>
@@ -112,8 +112,8 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
                 onClick={() => onSelectDateFilter('all')}
                 className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
                   selectedDateFilter === 'all'
-                    ? 'border-teal-600 bg-teal-50/90 dark:bg-teal-950/60 text-teal-900 dark:text-teal-200 shadow-2xs font-bold ring-1 ring-teal-500/20'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
+                    : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
                 }`}
               >
                 <span>{lang === 'zh' ? '全部日期' : 'All Dates'}</span>
@@ -126,8 +126,8 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
                 onClick={() => onSelectDateFilter('today')}
                 className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
                   selectedDateFilter === 'today'
-                    ? 'border-teal-600 bg-teal-50/90 dark:bg-teal-950/60 text-teal-900 dark:text-teal-200 shadow-2xs font-bold ring-1 ring-teal-500/20'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
+                    : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
                 }`}
               >
                 <div className="min-w-0">
@@ -144,8 +144,8 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
                   onClick={() => onSelectDateFilter('pre')}
                   className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
                     selectedDateFilter === 'pre'
-                      ? 'border-teal-600 bg-teal-50/90 dark:bg-teal-950/60 text-teal-900 dark:text-teal-200 shadow-2xs font-bold ring-1 ring-teal-500/20'
-                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                      ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
+                      : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
                   }`}
                 >
                   <span>{lang === 'zh' ? '行前準備' : 'Pre-trip'}</span>
@@ -161,8 +161,8 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
                   onClick={() => onSelectDateFilter(d.date)}
                   className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
                     selectedDateFilter === d.date
-                      ? 'border-teal-600 bg-teal-50/90 dark:bg-teal-950/60 text-teal-900 dark:text-teal-200 shadow-2xs font-bold ring-1 ring-teal-500/20'
-                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                      ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
+                      : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
                   }`}
                 >
                   <div className="min-w-0">
@@ -179,8 +179,8 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
                 onClick={() => onSelectDateFilter('cash_only')}
                 className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
                   selectedDateFilter === 'cash_only'
-                    ? 'border-teal-600 bg-teal-50/90 dark:bg-teal-950/60 text-teal-900 dark:text-teal-200 shadow-2xs font-bold ring-1 ring-teal-500/20'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
+                    : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
                 }`}
               >
                 <div className="flex items-center gap-1.5 min-w-0">
@@ -206,8 +206,8 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
                 onClick={() => onSelectCategoryFilter('all')}
                 className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
                   selectedCategoryFilter === 'all'
-                    ? 'border-teal-600 bg-teal-50/90 dark:bg-teal-950/60 text-teal-900 dark:text-teal-200 shadow-2xs font-bold ring-1 ring-teal-500/20'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
+                    : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
                 }`}
               >
                 <span>{lang === 'zh' ? '全部分類' : 'All Categories'}</span>
@@ -220,8 +220,8 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
                 onClick={() => onSelectCategoryFilter('with_receipt')}
                 className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
                   selectedCategoryFilter === 'with_receipt'
-                    ? 'border-teal-600 bg-teal-50/90 dark:bg-teal-950/60 text-teal-900 dark:text-teal-200 shadow-2xs font-bold ring-1 ring-teal-500/20'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
+                    : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
                 }`}
               >
                 <div className="flex items-center gap-1.5 min-w-0">
@@ -239,8 +239,8 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
                   onClick={() => onSelectCategoryFilter(catKey)}
                   className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
                     selectedCategoryFilter === catKey
-                      ? 'border-teal-600 bg-teal-50/90 dark:bg-teal-950/60 text-teal-900 dark:text-teal-200 shadow-2xs font-bold ring-1 ring-teal-500/20'
-                      : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                      ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
+                      : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
                   }`}
                 >
                   <div className="flex items-center gap-1.5 min-w-0">
@@ -261,8 +261,8 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
                     onClick={() => onSelectCategoryFilter(catKey)}
                     className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
                       selectedCategoryFilter === catKey
-                        ? 'border-teal-600 bg-teal-50/90 dark:bg-teal-950/60 text-teal-900 dark:text-teal-200 shadow-2xs font-bold ring-1 ring-teal-500/20'
-                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-850 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                        ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
+                        : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
                     }`}
                   >
                     <div className="flex items-center gap-1.5 min-w-0">
@@ -278,7 +278,7 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
         </div>
 
         {/* Bottom Action Footer */}
-        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/40 shrink-0">
+        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 shrink-0">
           <button
             type="button"
             onClick={onClose}

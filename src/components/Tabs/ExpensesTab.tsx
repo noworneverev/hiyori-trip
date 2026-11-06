@@ -2373,14 +2373,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
             className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 border shadow-2xs active:scale-95 ${
               (selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all')
                 ? 'bg-teal-600 text-white border-teal-600 shadow-teal-600/20'
-                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750'
+                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700'
             }`}
             title="開啟篩選抽屜"
           >
             <Filter className="w-3.5 h-3.5" />
             <span>{lang === 'zh' ? '篩選' : 'Filter'}</span>
             {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all') && (
-              <span className="w-4 h-4 rounded-full bg-white text-teal-700 text-[10px] font-black flex items-center justify-center">
+              <span className="w-4 h-4 rounded-full bg-white dark:bg-slate-900 text-teal-700 dark:text-teal-300 text-[10px] font-black flex items-center justify-center">
                 {(selectedDateFilter !== 'all' ? 1 : 0) + (selectedCategoryFilter !== 'all' ? 1 : 0)}
               </span>
             )}

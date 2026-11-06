@@ -256,8 +256,8 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                     onChange={(e) => setRoleInput(e.target.value as CollaboratorRole)}
                     className="appearance-none pl-3 pr-8 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-hidden cursor-pointer"
                   >
-                    <option value="editor">✏️ 可編輯</option>
-                    <option value="viewer">👁️ 僅檢視</option>
+                    <option value="editor">可編輯</option>
+                    <option value="viewer">僅檢視</option>
                   </select>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 pointer-events-none" />
                 </div>
@@ -357,9 +357,9 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                   onChange={(e) => handleChangeGeneralAccess(e.target.value as GeneralAccessType)}
                   className="appearance-none pl-3 pr-8 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-hidden cursor-pointer shadow-2xs"
                 >
-                  <option value="restricted">🔒 僅限受邀成員</option>
-                  <option value="link_editor">✏️ 知道連結的人皆可編輯</option>
-                  <option value="link_viewer">👁️ 知道連結的人僅可檢視</option>
+                  <option value="restricted">僅限受邀成員</option>
+                  <option value="link_editor">知道連結的人皆可編輯</option>
+                  <option value="link_viewer">知道連結的人僅可檢視</option>
                 </select>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 pointer-events-none" />
               </div>

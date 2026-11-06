@@ -217,7 +217,7 @@ export const CategoryManageModal: React.FC<CategoryManageModalProps> = ({
                       className="p-3 rounded-2xl bg-slate-50/90 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-2 transition hover:border-slate-300 dark:hover:border-slate-700"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="text-base shrink-0">🏷️</span>
+                        <Tag className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
                         <span className="font-bold text-xs text-slate-800 dark:text-slate-200 truncate">
                           {displayName}
                         </span>
