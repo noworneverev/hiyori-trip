@@ -60,6 +60,7 @@ import {
 import { canUploadImages } from '../../utils/userPermissions';
 import { calculateTripSplits, formatSplitsForSharing } from '../../utils/billSplitter';
 import { CategoryManageModal } from '../Modals/CategoryManageModal';
+import { ExpenseFilterDrawer } from '../Modals/ExpenseFilterDrawer';
 import {
   ResponsiveContainer,
   PieChart,
@@ -122,6 +123,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
   const [receiptImages, setReceiptImages] = useState<string[]>([]);
   const [isCompressingReceipts, setIsCompressingReceipts] = useState(false);
 
+
+  // Filter Drawer Bottom Sheet state
+  const [showFilterDrawer, setShowFilterDrawer] = useState(false);
 
   // Custom Category Add & Dedicated Modal Manage states
   const [showCategoryManageModal, setShowCategoryManageModal] = useState(false);
@@ -2336,326 +2340,136 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
           </button>
         </div>
 
-        {/* Instant Search Bar for Expenses */}
-        <div className="relative">
-          <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 focus-within:ring-2 focus-within:ring-teal-500/50 focus-within:border-teal-500 transition">
-            <Search className="w-4 h-4 text-slate-400 shrink-0" />
-            <input
-              type="text"
-              value={expenseSearchQuery}
-              onChange={(e) => setExpenseSearchQuery(e.target.value)}
-              placeholder={lang === 'zh' ? '搜尋品名、店家、付款方式、備註或金額...' : 'Search expense title, payee, method, notes, amount...'}
-              className="w-full bg-transparent text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden"
-            />
-            {expenseSearchQuery && (
-              <button
-                type="button"
-                onClick={() => setExpenseSearchQuery('')}
-                className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition shrink-0"
-                aria-label="清除搜尋"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Filters Section: Date Filter & Category Filter */}
-        {/* Filters Section: Date Filter & Category Filter (Multi-line Wrap layout & Quick Dropdowns) */}
-        <div className="space-y-3 pb-2.5 border-b border-slate-100 dark:border-slate-800">
-          {/* 1. Date Selector Filter */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                <Calendar className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                <span>{lang === 'zh' ? '依日期篩選' : 'Filter by Date'}：</span>
-              </div>
-
-              {/* Date Quick Dropdown Selector */}
-              <div className="relative inline-flex items-center">
-                <select
-                  value={selectedDateFilter}
-                  onChange={(e) => setSelectedDateFilter(e.target.value)}
-                  className="appearance-none pl-2.5 pr-7 py-1 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer shadow-2xs"
-                  aria-label="選擇篩選日期"
-                >
-                  <option value="all">{lang === 'zh' ? '全部日期' : 'All Dates'}</option>
-                  <option value="today">{lang === 'zh' ? `今日 (${todayStr})` : `Today (${todayStr})`}</option>
-                  {trip.expenses.some((e) => trip.startDate && e.date < trip.startDate) && (
-                    <option value="pre">{lang === 'zh' ? '行前準備' : 'Pre-trip'}</option>
-                  )}
-                  {trip.days.map((d) => (
-                    <option key={d.id} value={d.date}>
-                      Day {d.dayNumber} ({d.date.slice(5).replace('-', '/')})
-                    </option>
-                  ))}
-                  <option value="cash_only">{lang === 'zh' ? '僅看現金支出' : 'Cash Only'}</option>
-                </select>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 pointer-events-none" />
-              </div>
-            </div>
-
-            {/* Date Flow Wrap Chips (Multi-line Wrap) */}
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <button
-                type="button"
-                onClick={() => setSelectedDateFilter('all')}
-                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition shrink-0 active:scale-95 ${
-                  selectedDateFilter === 'all'
-                    ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-2xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                {lang === 'zh' ? '全部日期' : 'All'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedDateFilter(selectedDateFilter === 'today' ? 'all' : 'today')}
-                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 active:scale-95 ${
-                  selectedDateFilter === 'today'
-                    ? 'bg-teal-600 text-white shadow-2xs ring-2 ring-teal-500/30'
-                    : 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 hover:bg-teal-100'
-                }`}
-              >
-                <span>{lang === 'zh' ? '今日' : 'Today'}</span>
-                {todayExpensesCount > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-teal-800/40 text-[9px] font-mono">
-                    {todayExpensesCount}
-                  </span>
-                )}
-              </button>
-
-              {/* Pre-trip preparations chip */}
-              {trip.expenses.some((e) => trip.startDate && e.date < trip.startDate) && (
+        {/* Compact Search & Filter Action Bar */}
+        <div className="flex items-center gap-2">
+          {/* Instant Search Bar */}
+          <div className="relative flex-1">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 focus-within:ring-2 focus-within:ring-teal-500/50 focus-within:border-teal-500 transition">
+              <Search className="w-4 h-4 text-slate-400 shrink-0" />
+              <input
+                type="text"
+                value={expenseSearchQuery}
+                onChange={(e) => setExpenseSearchQuery(e.target.value)}
+                placeholder={lang === 'zh' ? '搜尋品名、店家、付款方式、備註或金額...' : 'Search expenses...'}
+                className="w-full bg-transparent text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden"
+              />
+              {expenseSearchQuery && (
                 <button
                   type="button"
-                  onClick={() => setSelectedDateFilter(selectedDateFilter === 'pre' ? 'all' : 'pre')}
-                  className={`px-2.5 py-1 rounded-xl text-xs font-bold transition shrink-0 active:scale-95 ${
-                    selectedDateFilter === 'pre'
-                      ? 'bg-teal-600 text-white shadow-2xs'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                  }`}
+                  onClick={() => setExpenseSearchQuery('')}
+                  className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition shrink-0"
+                  aria-label="清除搜尋"
                 >
-                  {lang === 'zh' ? '行前準備' : 'Pre-trip'}
+                  <X className="w-3.5 h-3.5" />
                 </button>
               )}
-
-              {/* Trip days with daily spending tags */}
-              {trip.days.map((d) => {
-                const dayExp = dailyTableData.find((x) => x.date === d.date);
-                const dayTotal = dayExp?.totalAmount || 0;
-                const isSelected = selectedDateFilter === d.date;
-
-                return (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => setSelectedDateFilter(isSelected ? 'all' : d.date)}
-                    className={`px-2.5 py-1 rounded-xl text-xs font-mono transition shrink-0 flex items-center gap-1 active:scale-95 ${
-                      isSelected
-                        ? 'bg-teal-600 text-white font-bold shadow-2xs ring-2 ring-teal-500/30'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <span className="font-bold">D{d.dayNumber}</span>
-                    <span className="text-[10px] opacity-75">{d.date.slice(5).replace('-', '/')}</span>
-                    {dayTotal > 0 && (
-                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded-md ${
-                        isSelected ? 'bg-teal-700 text-teal-100' : 'bg-slate-200/80 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                      }`}>
-                        {formatCurrencyAmount(dayTotal, baseCurrency)}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-
-              {/* Cash Only Filter Chip */}
-              <button
-                type="button"
-                onClick={() => setSelectedDateFilter(selectedDateFilter === 'cash_only' ? 'all' : 'cash_only')}
-                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 active:scale-95 ${
-                  selectedDateFilter === 'cash_only'
-                    ? 'bg-emerald-600 text-white shadow-2xs'
-                    : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
-                }`}
-              >
-                <Coins className="w-3.5 h-3.5 text-amber-500" />
-                <span>{lang === 'zh' ? '僅看現金' : 'Cash'}</span>
-              </button>
             </div>
           </div>
 
-          {/* Active Filter Banner */}
-          {selectedDateFilter !== 'all' && (
-            <div className="p-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 flex items-center justify-between text-xs text-teal-900 dark:text-teal-200 animate-in fade-in duration-100">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="font-bold">
-                  {lang === 'zh' ? '目前顯示：' : 'Viewing: '}
-                  {selectedDateFilter === 'today'
-                    ? `今日 (${todayStr})`
-                    : selectedDateFilter === 'pre'
-                    ? '行前準備'
-                    : selectedDateFilter === 'cash_only'
-                    ? '僅現金支出'
-                    : selectedDateFilter} 的全部明細
-                </span>
-                <span className="font-mono font-bold text-teal-700 dark:text-teal-300 text-[11px]">
-                  (共 {filteredExpenses.length} 筆 · 合計 {formatCurrencyAmount(filteredTotalInBase, baseCurrency)})
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedDateFilter('all')}
-                className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 text-teal-800 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-slate-700 font-bold text-[10px] transition border border-teal-200 dark:border-teal-700 shrink-0 shadow-2xs"
-              >
-                {lang === 'zh' ? '清除篩選 (查看全部)' : 'Clear Filter'}
-              </button>
-            </div>
-          )}
-
-          {/* 2. Category & Receipt Filter (Multi-line Wrap layout & Quick Dropdown) */}
-          <div className="space-y-1.5 pt-1.5 border-t border-slate-100/80 dark:border-slate-800/80">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400">
-                <Filter className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                <span>{lang === 'zh' ? '依類別篩選' : 'Filter by Category'}：</span>
-              </div>
-
-              {/* Category Quick Dropdown Selector */}
-              <div className="relative inline-flex items-center">
-                <select
-                  value={selectedCategoryFilter}
-                  onChange={(e) => setSelectedCategoryFilter(e.target.value)}
-                  className="appearance-none pl-2.5 pr-7 py-1 rounded-xl text-xs font-semibold bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-1 focus:ring-teal-500 cursor-pointer shadow-2xs"
-                  aria-label="選擇支出類別"
-                >
-                  <option value="all">{lang === 'zh' ? '全部分類' : 'All Categories'}</option>
-                  <option value="with_receipt">{lang === 'zh' ? '附發票 / 收據' : 'With Receipts'}</option>
-                  {Object.entries(DEFAULT_CATEGORIES).map(([catKey, meta]) => (
-                    <option key={catKey} value={catKey}>
-                      {meta.label}
-                    </option>
-                  ))}
-                  {customCategories.map((catKey) => (
-                    <option key={catKey} value={catKey}>
-                      {trip.customCategoryLabels?.[catKey] || catKey}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 pointer-events-none" />
-              </div>
-            </div>
-
-            {/* Category Multi-line Flow Wrap Chips (Wrap layout: no horizontal scrolling needed!) */}
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <button
-                type="button"
-                onClick={() => setSelectedCategoryFilter('all')}
-                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 ${
-                  selectedCategoryFilter === 'all'
-                    ? 'bg-teal-600 text-white shadow-2xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                {lang === 'zh' ? '全部分類' : 'All'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedCategoryFilter('with_receipt')}
-                className={`px-2.5 py-1 rounded-xl text-[11px] font-bold flex items-center gap-1 transition shrink-0 ${
-                  selectedCategoryFilter === 'with_receipt'
-                    ? 'bg-teal-600 text-white shadow-2xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                }`}
-              >
-                <Receipt className="w-3 h-3" />
-                <span>{lang === 'zh' ? '附發票' : 'Receipts'}</span>
-              </button>
-
-              {/* Standard categories */}
-              {Object.keys(DEFAULT_CATEGORIES).map((catKey) => {
-                const count = trip.expenses.filter((e) => e.category === catKey).length;
-                if (count === 0) return null;
-                const meta = DEFAULT_CATEGORIES[catKey];
-                return (
-                  <button
-                    key={catKey}
-                    type="button"
-                    onClick={() => setSelectedCategoryFilter(catKey)}
-                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 flex items-center gap-1 ${
-                      selectedCategoryFilter === catKey
-                        ? 'bg-teal-600 text-white shadow-2xs'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                    }`}
-                  >
-                    <meta.Icon className="w-3 h-3" />
-                    <span>{meta.label}</span>
-                  </button>
-                );
-              })}
-
-              {/* Custom categories */}
-              {customCategories.map((catKey) => {
-                const count = trip.expenses.filter((e) => e.category === catKey).length;
-                if (count === 0) return null;
-                return (
-                  <button
-                    key={catKey}
-                    type="button"
-                    onClick={() => setSelectedCategoryFilter(catKey)}
-                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition shrink-0 flex items-center gap-1 ${
-                      selectedCategoryFilter === catKey
-                        ? 'bg-teal-600 text-white shadow-2xs'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                    }`}
-                  >
-                    <Tag className="w-3 h-3" />
-                    <span>{catKey}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Active Filter Summary Bar if filtered or searched */}
-          {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all' || expenseSearchQuery.trim()) && (
-            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-teal-50/80 dark:bg-teal-950/40 border border-teal-200/60 dark:border-teal-900/60 text-xs">
-              <div className="flex items-center gap-1.5 text-teal-900 dark:text-teal-200 font-medium flex-wrap">
-                <span>正在檢視：</span>
-                {expenseSearchQuery.trim() && (
-                  <span className="font-bold underline">
-                    搜尋「{expenseSearchQuery}」
-                  </span>
-                )}
-                {selectedDateFilter !== 'all' && (
-                  <span>
-                    · 日期: {selectedDateFilter === 'today' ? `今日 (${todayStr})` : selectedDateFilter === 'pre' ? '行前準備' : selectedDateFilter === 'cash_only' ? '僅現金' : selectedDateFilter}
-                  </span>
-                )}
-                {selectedCategoryFilter !== 'all' && (
-                  <span>
-                    · 類別: {selectedCategoryFilter === 'with_receipt' ? '附發票' : (getCategoryMeta(selectedCategoryFilter).label || selectedCategoryFilter)}
-                  </span>
-                )}
-                <span className="font-mono font-bold ml-1">
-                  (共 {filteredExpenses.length} 筆 · 小計 {formatCurrencyAmount(filteredTotalInBase, baseCurrency)})
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedDateFilter('all');
-                  setSelectedCategoryFilter('all');
-                  setExpenseSearchQuery('');
-                }}
-                className="text-[11px] font-bold text-teal-700 dark:text-teal-300 hover:underline shrink-0 ml-2"
-              >
-                清除篩選
-              </button>
-            </div>
-          )}
+          {/* Filter Drawer Trigger Button */}
+          <button
+            type="button"
+            onClick={() => setShowFilterDrawer(true)}
+            className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 border shadow-2xs active:scale-95 ${
+              (selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all')
+                ? 'bg-teal-600 text-white border-teal-600 shadow-teal-600/20'
+                : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750'
+            }`}
+            title="開啟篩選抽屜"
+          >
+            <Filter className="w-3.5 h-3.5" />
+            <span>{lang === 'zh' ? '篩選' : 'Filter'}</span>
+            {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all') && (
+              <span className="w-4 h-4 rounded-full bg-white text-teal-700 text-[10px] font-black flex items-center justify-center">
+                {(selectedDateFilter !== 'all' ? 1 : 0) + (selectedCategoryFilter !== 'all' ? 1 : 0)}
+              </span>
+            )}
+          </button>
         </div>
+
+        {/* Quiet Active Filter Ribbon (僅在有條件時顯示，完全不佔用多餘版面) */}
+        {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all' || expenseSearchQuery.trim()) && (
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/50 dark:border-teal-900/40 text-xs">
+            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+              <span className="text-[11px] font-medium text-slate-400 shrink-0">
+                {lang === 'zh' ? '已套用：' : 'Active: '}
+              </span>
+
+              {/* Date active chip */}
+              {selectedDateFilter !== 'all' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-teal-200/80 dark:border-teal-800 text-[11px] font-semibold text-teal-800 dark:text-teal-200">
+                  <span>
+                    {selectedDateFilter === 'today'
+                      ? `今日 (${todayStr.slice(5).replace('-', '/')})`
+                      : selectedDateFilter === 'pre'
+                      ? '行前準備'
+                      : selectedDateFilter === 'cash_only'
+                      ? '僅看現金'
+                      : `Day ${trip.days.find(d => d.date === selectedDateFilter)?.dayNumber || ''} (${selectedDateFilter.slice(5).replace('-', '/')})`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDateFilter('all')}
+                    className="hover:text-rose-500 transition p-0.5"
+                    aria-label="移除日期篩選"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {/* Category active chip */}
+              {selectedCategoryFilter !== 'all' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-teal-200/80 dark:border-teal-800 text-[11px] font-semibold text-teal-800 dark:text-teal-200">
+                  <span>
+                    {selectedCategoryFilter === 'with_receipt'
+                      ? '附發票'
+                      : (getCategoryMeta(selectedCategoryFilter).label || selectedCategoryFilter)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategoryFilter('all')}
+                    className="hover:text-rose-500 transition p-0.5"
+                    aria-label="移除類別篩選"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {/* Search query chip */}
+              {expenseSearchQuery.trim() && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-teal-200/80 dark:border-teal-800 text-[11px] font-semibold text-teal-800 dark:text-teal-200">
+                  <span>搜尋「{expenseSearchQuery}」</span>
+                  <button
+                    type="button"
+                    onClick={() => setExpenseSearchQuery('')}
+                    className="hover:text-rose-500 transition p-0.5"
+                    aria-label="移除搜尋關鍵字"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              <span className="text-[10px] text-slate-400 font-mono">
+                ({filteredExpenses.length} 筆)
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedDateFilter('all');
+                setSelectedCategoryFilter('all');
+                setExpenseSearchQuery('');
+              }}
+              className="text-[11px] font-bold text-teal-700 dark:text-teal-300 hover:underline shrink-0"
+            >
+              {lang === 'zh' ? '全部清除' : 'Clear All'}
+            </button>
+          </div>
+        )}
 
         {filteredExpenses.length === 0 ? (
           <div className="py-12 px-4 text-center space-y-3">
@@ -3676,6 +3490,28 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
           onClose={() => setShowCategoryManageModal(false)}
         />
       )}
+
+      {/* Expense Filter Drawer */}
+      <ExpenseFilterDrawer
+        isOpen={showFilterDrawer}
+        onClose={() => setShowFilterDrawer(false)}
+        selectedDateFilter={selectedDateFilter}
+        onSelectDateFilter={setSelectedDateFilter}
+        selectedCategoryFilter={selectedCategoryFilter}
+        onSelectCategoryFilter={setSelectedCategoryFilter}
+        defaultCategories={DEFAULT_CATEGORIES}
+        customCategories={customCategories}
+        customCategoryLabels={trip.customCategoryLabels}
+        tripDays={trip.days}
+        todayStr={todayStr}
+        hasPreTripExpenses={trip.expenses.some((e) => trip.startDate && e.date < trip.startDate)}
+        filteredCount={filteredExpenses.length}
+        onResetAll={() => {
+          setSelectedDateFilter('all');
+          setSelectedCategoryFilter('all');
+        }}
+        lang={lang}
+      />
     </div>
   );
 };
