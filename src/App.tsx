@@ -13,6 +13,7 @@ import {
 import { formatDateSlash, sortItineraryItemsByTime, findInsertionPosition } from './utils/date';
 import { Language, TRANSLATIONS, getStoredLanguage, setStoredLanguage } from './utils/i18n';
 import { useDarkMode } from './hooks/useDarkMode';
+import { useScrollDirection } from './hooks/useScrollDirection';
 import { TimelineTab } from './components/Tabs/TimelineTab';
 import { LiveCompanionTab } from './components/Tabs/LiveCompanionTab';
 import { ExpensesTab } from './components/Tabs/ExpensesTab';
@@ -142,6 +143,14 @@ export default function App() {
   const [pendingConflicts, setPendingConflicts] = useState<TripConflict[]>([]);
   const [showConflictModal, setShowConflictModal] = useState(false);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Mobile scroll-to-hide dynamic chrome
+  const { isNavHidden, resetNavVisibility } = useScrollDirection();
+
+  // Reset navigation visibility whenever switching tabs or opening modals
+  useEffect(() => {
+    resetNavVisibility();
+  }, [activeTab, showQuickActionModal, showGlobalHubModal, resetNavVisibility]);
 
   const showToast = (msg: string) => {
     if (toastTimeoutRef.current) {
@@ -778,7 +787,9 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors overflow-x-hidden">
       {/* Top Navbar */}
-      <header className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/90 dark:border-slate-800 shadow-2xs pt-[env(safe-area-inset-top,0px)]">
+      <header className={`sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/90 dark:border-slate-800 shadow-2xs pt-[env(safe-area-inset-top,0px)] max-sm:transition-transform max-sm:duration-300 max-sm:ease-in-out ${
+        isNavHidden ? 'max-sm:-translate-y-full' : 'max-sm:translate-y-0'
+      }`}>
         <div className="max-w-6xl mx-auto px-2.5 sm:px-6 h-14 flex items-center justify-between gap-1 sm:gap-3">
           {/* Brand */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
@@ -1365,8 +1376,10 @@ export default function App() {
       {/* Mobile Bottom Thumb Navigation Bar (Native iOS Translucent Frosted Glass Tab Bar) */}
       <nav
         aria-label="主要分頁導覽"
-        style={{ position: 'fixed', transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)', zIndex: 45 }}
-        className="sm:hidden fixed bottom-0 inset-x-0 bg-white/85 dark:bg-slate-900/85 backdrop-blur-2xl backdrop-saturate-150 border-t border-slate-200/80 dark:border-white/10 grid grid-cols-5 items-stretch h-[calc(3.5rem+env(safe-area-inset-bottom,0px))] pb-[env(safe-area-inset-bottom,0px)] px-1 shadow-[0_-4px_24px_rgba(0,0,0,0.04)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.35)] select-none"
+        style={{ position: 'fixed', zIndex: 45 }}
+        className={`sm:hidden fixed bottom-0 inset-x-0 bg-white/85 dark:bg-slate-900/85 backdrop-blur-2xl backdrop-saturate-150 border-t border-slate-200/80 dark:border-white/10 grid grid-cols-5 items-stretch h-[calc(3.5rem+env(safe-area-inset-bottom,0px))] pb-[env(safe-area-inset-bottom,0px)] px-1 shadow-[0_-4px_24px_rgba(0,0,0,0.04)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.35)] select-none max-sm:transition-transform max-sm:duration-300 max-sm:ease-in-out ${
+          isNavHidden ? 'max-sm:translate-y-full' : 'max-sm:translate-y-0'
+        }`}
       >
         {/* Tab 1: 行程 */}
         <button
@@ -1613,8 +1626,12 @@ export default function App() {
 
       {/* Floating Travel Quick Action Button (Single Clean FAB) */}
       <div
-        style={{ position: 'fixed', transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)', zIndex: 40 }}
-        className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] right-4 sm:bottom-8 sm:right-8 flex flex-col items-end gap-2 animate-in fade-in select-none"
+        style={{ position: 'fixed', zIndex: 40 }}
+        className={`fixed right-4 sm:bottom-8 sm:right-8 flex flex-col items-end gap-2 animate-in fade-in select-none max-sm:transition-all max-sm:duration-300 max-sm:ease-in-out ${
+          isNavHidden
+            ? 'max-sm:bottom-[calc(1.25rem+env(safe-area-inset-bottom,0px))]'
+            : 'max-sm:bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))]'
+        }`}
       >
         {/* Optional Secondary Todos Pill if expanded */}
         {showFabNote && (
