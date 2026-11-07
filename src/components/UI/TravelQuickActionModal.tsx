@@ -12,14 +12,11 @@ import {
 } from '../../utils/currency';
 import {
   X,
-  Calculator,
   DollarSign,
-  FileText,
   Plus,
   Trash2,
-  Copy,
   Check,
-  ArrowRightLeft,
+  CheckSquare,
   Utensils,
   Train,
   ShoppingBag,
@@ -31,9 +28,6 @@ import {
   Wallet,
   Smartphone,
   Tag,
-  Package,
-  Key,
-  Bookmark,
   Edit2,
   Users,
   Camera,
@@ -41,6 +35,8 @@ import {
   Loader2,
   Calendar,
   Maximize2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 interface TravelQuickActionModalProps {
@@ -48,17 +44,8 @@ interface TravelQuickActionModalProps {
   lang: Language;
   onUpdateTrip: (updatedTrip: Trip) => void;
   onClose: () => void;
-  initialTab?: 'expense' | 'scratchpad' | 'calc';
+  initialTab?: 'expense' | 'todos';
   onShowToast?: (msg: string) => void;
-}
-
-interface ScratchpadNote {
-  id: string;
-  category: 'locker' | 'seat' | 'hotel' | 'other';
-  label: string;
-  content: string;
-  createdAt: number;
-  completed?: boolean;
 }
 
 export const getLocalTodayDate = (): string => {
@@ -97,13 +84,6 @@ const PAYMENT_METHODS: { key: PaymentMethod; label: string; icon: React.ElementT
   { key: 'ic_card', label: '交通卡', icon: Tag },
 ];
 
-const SCRATCHPAD_CATS = [
-  { key: 'locker', label: '置物櫃', icon: Package },
-  { key: 'seat', label: '車次座位', icon: Train },
-  { key: 'hotel', label: '住宿密碼', icon: Key },
-  { key: 'other', label: '隨身備忘', icon: Bookmark },
-] as const;
-
 export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   trip,
   lang,
@@ -113,8 +93,8 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   onShowToast,
 }) => {
   useBodyScrollLock(true);
-  // Default to 'expense' as requested
-  const [activeTab, setActiveTab] = useState<'expense' | 'scratchpad' | 'calc'>(initialTab);
+  // Default to 'expense'
+  const [activeTab, setActiveTab] = useState<'expense' | 'todos'>(initialTab);
 
   // Auto-detect trip currency (e.g. EUR for Europe, JPY for Japan, USD for USA, or trip.currency)
   const defaultTripCurrency = detectTripCurrency(trip);
@@ -310,142 +290,69 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     onClose();
   };
 
-  // --- 2. Scratchpad States (便簽免標題，直接快速記筆記，支援打勾完成) ---
-  const STORAGE_KEY_NOTES = `hiyori_scratchpad_${trip.id}`;
-  const [notes, setNotes] = useState<ScratchpadNote[]>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_NOTES);
-      if (raw) return JSON.parse(raw);
-    } catch {}
-    return [
-      {
-        id: '1',
-        category: 'locker',
-        label: '置物櫃',
-        content: '剪票口旁 28 號置物櫃，密碼 5183',
-        createdAt: Date.now(),
-        completed: false,
-      },
-      {
-        id: '2',
-        category: 'seat',
-        label: '車次座位',
-        content: '車次 7 車 14A (靠窗位)',
-        createdAt: Date.now(),
-        completed: false,
-      },
-    ];
-  });
+  // --- 2. Synced Trip Todos States & Handlers ---
+  const [newTodoTitle, setNewTodoTitle] = useState('');
+  const [newTodoDueDate, setNewTodoDueDate] = useState('');
+  const [showTodoDatePicker, setShowTodoDatePicker] = useState(false);
+  const [showCompletedTodos, setShowCompletedTodos] = useState(false);
 
-  const [newNoteContent, setNewNoteContent] = useState('');
-  const [newNoteCat, setNewNoteCat] = useState<'locker' | 'seat' | 'hotel' | 'other'>('other');
-  const [noteFilter, setNoteFilter] = useState<'all' | 'pending' | 'completed'>('all');
-  const [copiedNoteId, setCopiedNoteId] = useState<string | null>(null);
+  const todos = trip.todos || [];
+  const pendingTodos = todos.filter((t) => !t.completed);
+  const completedTodos = todos.filter((t) => t.completed);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(notes));
-    } catch {}
-  }, [notes, STORAGE_KEY_NOTES]);
-
-  const handleToggleNoteComplete = (id: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    setNotes((prevNotes) =>
-      prevNotes.map((n) =>
-        n.id === id ? { ...n, completed: !n.completed } : n
-      )
-    );
-  };
-
-  const handleClearCompletedNotes = () => {
-    const remaining = notes.filter((n) => !n.completed);
-    setNotes(remaining);
-    if (onShowToast) {
-      onShowToast('已清除所有已打勾備忘');
-    }
-  };
-
-  const handleAddNote = (e: React.FormEvent) => {
+  const handleAddTodo = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newNoteContent.trim()) return;
+    const title = newTodoTitle.trim();
+    if (!title) return;
 
-    const matched = SCRATCHPAD_CATS.find((c) => c.key === newNoteCat);
-    const item: ScratchpadNote = {
-      id: `note-${Date.now()}`,
-      category: newNoteCat,
-      label: matched?.label || '隨手便簽',
-      content: newNoteContent.trim(),
-      createdAt: Date.now(),
+    const newTodo = {
+      id: `todo-${Date.now()}`,
+      title,
+      category: 'other' as const,
       completed: false,
+      dueDate: newTodoDueDate || undefined,
     };
 
-    setNotes([item, ...notes]);
-    setNewNoteContent('');
-    if (onShowToast) {
-      onShowToast('便簽已儲存！');
-    }
+    onUpdateTrip({
+      ...trip,
+      todos: [newTodo, ...todos],
+      updatedAt: Date.now(),
+    });
+    setNewTodoTitle('');
+    setNewTodoDueDate('');
+    setShowTodoDatePicker(false);
+    onShowToast?.('已新增待辦事項！');
   };
 
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
-  const [editNoteContent, setEditNoteContent] = useState('');
-  const [editNoteCat, setEditNoteCat] = useState<'locker' | 'seat' | 'hotel' | 'other'>('other');
-
-  const handleStartEditNote = (note: ScratchpadNote) => {
-    setEditingNoteId(note.id);
-    setEditNoteContent(note.content);
-    setEditNoteCat(note.category);
-  };
-
-  const handleSaveEditNote = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!editingNoteId || !editNoteContent.trim()) return;
-
-    const matched = SCRATCHPAD_CATS.find((c) => c.key === editNoteCat);
-    setNotes((prevNotes) =>
-      prevNotes.map((n) =>
-        n.id === editingNoteId
-          ? {
-              ...n,
-              label: matched?.label || n.label || '隨手便簽',
-              content: editNoteContent.trim(),
-              category: editNoteCat,
-            }
-          : n
-      )
+  const handleToggleTodo = (id: string) => {
+    const updated = todos.map((t) =>
+      t.id === id ? { ...t, completed: !t.completed } : t
     );
-    setEditingNoteId(null);
-    if (onShowToast) {
-      onShowToast('便簽內容已更新！');
-    }
+    onUpdateTrip({
+      ...trip,
+      todos: updated,
+      updatedAt: Date.now(),
+    });
   };
 
-  const handleCancelEditNote = () => {
-    setEditingNoteId(null);
+  const handleDeleteTodo = (id: string) => {
+    const updated = todos.filter((t) => t.id !== id);
+    onUpdateTrip({
+      ...trip,
+      todos: updated,
+      updatedAt: Date.now(),
+    });
+    onShowToast?.('已刪除待辦事項');
   };
 
-  const handleDeleteNote = (id: string) => {
-    if (editingNoteId === id) setEditingNoteId(null);
-    setNotes(notes.filter((n) => n.id !== id));
-  };
-
-  const handleCopyNote = (content: string, id: string) => {
-    navigator.clipboard.writeText(content);
-    setCopiedNoteId(id);
-    setTimeout(() => setCopiedNoteId(null), 2000);
-  };
-
-  // --- 3. Streamlined Clean Currency Converter (No complex tax-free clutter) ---
-  const [calcFromCur, setCalcFromCur] = useState<string>(expenseCur);
-  const [calcToCur, setCalcToCur] = useState<string>('TWD');
-  const [calcInput, setCalcInput] = useState<string>('100');
-  const rawCalcNum = parseFloat(calcInput) || 0;
-  const calcConvertedResult = convertAmount(rawCalcNum, calcFromCur, calcToCur, trip.customExchangeRates);
-
-  const handleTransferCalcToExpense = () => {
-    setExpenseAmount(String(rawCalcNum));
-    setExpenseCur(calcFromCur);
-    setExpenseTitle('換算支出');
-    setActiveTab('expense');
+  const handleClearCompletedTodos = () => {
+    const remaining = todos.filter((t) => !t.completed);
+    onUpdateTrip({
+      ...trip,
+      todos: remaining,
+      updatedAt: Date.now(),
+    });
+    onShowToast?.('已清除所有已完成項目');
   };
 
   useEffect(() => {
@@ -488,7 +395,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               旅途隨身手帖
             </h3>
             <p className="text-xs text-teal-200/90 mt-0.5">
-              一秒快速記帳 · 隨身便簽 · 即時外幣換算
+              一秒快速記帳 · 行程待辦事項
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -512,11 +419,11 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
           </div>
         </div>
 
-        {/* Clean Segmented Tab Switcher (Expense is 1st & Default) */}
+        {/* Clean Segmented Tab Switcher (Expense & Todos) */}
         <div className="p-1.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 shrink-0 flex items-center gap-1">
           <button
             onClick={() => setActiveTab('expense')}
-            className={`flex-1 py-2 px-2.5 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 ${
+            className={`flex-1 py-2 px-2.5 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'expense'
                 ? 'bg-white dark:bg-slate-900 text-teal-800 dark:text-teal-300 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
@@ -527,27 +434,15 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
           </button>
 
           <button
-            onClick={() => setActiveTab('scratchpad')}
-            className={`flex-1 py-2 px-2.5 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 ${
-              activeTab === 'scratchpad'
+            onClick={() => setActiveTab('todos')}
+            className={`flex-1 py-2 px-2.5 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
+              activeTab === 'todos'
                 ? 'bg-white dark:bg-slate-900 text-teal-800 dark:text-teal-300 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            <FileText className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-            <span>隨身便籤</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('calc')}
-            className={`flex-1 py-2 px-2.5 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 ${
-              activeTab === 'calc'
-                ? 'bg-white dark:bg-slate-900 text-teal-800 dark:text-teal-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <ArrowRightLeft className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
-            <span>匯率換算</span>
+            <CheckSquare className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+            <span>行程待辦 {pendingTodos.length > 0 && `(${pendingTodos.length})`}</span>
           </button>
         </div>
 
@@ -1103,418 +998,194 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
           </form>
         )}
 
-        {/* ================= TAB 2: SCRATCHPAD (CLEAN NOTE TAKING - 免標題) ================= */}
-        {activeTab === 'scratchpad' && (
-          <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
-            {/* Quick Add Form (免標題，直接輸入內容) */}
-            <form onSubmit={handleAddNote} className="p-3.5 rounded-2xl bg-amber-50/50 dark:bg-slate-800/80 border border-amber-200/80 dark:border-slate-700 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                  <span>隨手速寫便簽</span>
-                </span>
-              </div>
-
-              {/* Category chips */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {SCRATCHPAD_CATS.map((c) => {
-                  const Icon = c.icon;
-                  const isSelected = newNoteCat === c.key;
-                  return (
-                    <button
-                      key={c.key}
-                      type="button"
-                      onClick={() => setNewNoteCat(c.key)}
-                      className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition border flex items-center gap-1 ${
-                        isSelected
-                          ? 'bg-amber-500 text-slate-950 border-amber-600 font-black shadow-xs'
-                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5" />
-                      <span>{c.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Direct Content Input */}
-              <textarea
-                rows={3}
-                required
-                value={newNoteContent}
-                onChange={(e) => setNewNoteContent(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault();
-                    handleAddNote(e);
-                  }
-                }}
-                placeholder="直接輸入便簽內容（例如：#28 寄物櫃密碼 5183 / 房間WiFi密碼 / 集合時間 14:30）..."
-                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30 resize-none leading-relaxed"
-              />
-
-              <div className="flex items-center justify-end pt-0.5">
+        {/* ================= TAB 2: TRIP TODOS (SYNCED DIRECTLY WITH TRIP.TODOS) ================= */}
+        {activeTab === 'todos' && (
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            {/* Inline Quick Add Form */}
+            <form
+              onSubmit={handleAddTodo}
+              className="p-3.5 sm:p-4 bg-slate-50/70 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 shrink-0 space-y-2.5"
+            >
+              <div className="flex items-center gap-2">
+                <div className="w-5 h-5 rounded-full border border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center shrink-0">
+                  <Plus className="w-3 h-3 text-slate-400 dark:text-slate-500" />
+                </div>
+                <input
+                  type="text"
+                  value={newTodoTitle}
+                  onChange={(e) => setNewTodoTitle(e.target.value)}
+                  placeholder="新增待辦事項... (例如：購買新幹線車票、領取網卡)"
+                  className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowTodoDatePicker(!showTodoDatePicker)}
+                  className={`p-1.5 rounded-xl border transition cursor-pointer ${
+                    showTodoDatePicker || newTodoDueDate
+                      ? 'bg-teal-50 dark:bg-teal-950/60 border-teal-500 text-teal-700 dark:text-teal-300'
+                      : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
+                  }`}
+                  title="設定到期日"
+                >
+                  <Calendar className="w-4 h-4" />
+                </button>
                 <button
                   type="submit"
-                  disabled={!newNoteContent.trim()}
-                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-40 text-slate-950 font-bold text-xs shrink-0 transition active:scale-95 flex items-center gap-1 shadow-xs"
+                  disabled={!newTodoTitle.trim()}
+                  className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white text-xs font-bold transition shadow-xs cursor-pointer shrink-0"
                 >
-                  <Plus className="w-4 h-4" />
-                  <span>新增便簽</span>
+                  新增
                 </button>
               </div>
+
+              {/* Optional Collapsible Due Date Selector */}
+              {showTodoDatePicker && (
+                <div className="flex items-center gap-2 pt-1 animate-in slide-in-from-top-1 duration-150">
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 shrink-0">
+                    預計日期：
+                  </span>
+                  <input
+                    type="date"
+                    value={newTodoDueDate}
+                    onChange={(e) => setNewTodoDueDate(e.target.value)}
+                    className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-mono focus:outline-hidden focus:ring-1 focus:ring-teal-500"
+                  />
+                  {newTodoDueDate && (
+                    <button
+                      type="button"
+                      onClick={() => setNewTodoDueDate('')}
+                      className="text-[11px] text-slate-400 hover:text-rose-500 transition cursor-pointer"
+                    >
+                      清除
+                    </button>
+                  )}
+                </div>
+              )}
             </form>
 
-            {/* Notes List Header & Controls */}
-            {(() => {
-              const pendingNotes = notes.filter((n) => !n.completed);
-              const completedNotes = notes.filter((n) => n.completed);
-              const displayedNotes =
-                noteFilter === 'pending'
-                  ? pendingNotes
-                  : noteFilter === 'completed'
-                  ? completedNotes
-                  : notes;
+            {/* Todos List Container */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
+              {pendingTodos.length === 0 ? (
+                <div className="py-12 text-center px-4">
+                  <div className="w-12 h-12 rounded-full bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center mx-auto mb-3">
+                    <Check className="w-6 h-6 stroke-[2.5]" />
+                  </div>
+                  <p className="text-sm font-medium text-slate-700 dark:text-zinc-300">
+                    目前沒有未完成的待辦事項！
+                  </p>
+                  <p className="text-xs text-slate-400 dark:text-zinc-500 mt-1">
+                    於上方快速輸入，將立即同步至行程總覽與待辦清單
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100 dark:divide-slate-800 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 overflow-hidden shadow-2xs">
+                  {pendingTodos.map((todo) => (
+                    <div
+                      key={todo.id}
+                      className="flex items-center justify-between p-3 sm:p-3.5 hover:bg-slate-50/70 dark:hover:bg-white/5 transition group"
+                    >
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                        {/* Apple-style circular checkbox */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleTodo(todo.id)}
+                          className="mt-0.5 w-5 h-5 rounded-full border-2 border-slate-300 dark:border-slate-600 hover:border-teal-500 dark:hover:border-teal-400 flex items-center justify-center transition cursor-pointer shrink-0"
+                          title="標記完成"
+                        >
+                          {todo.completed && <Check className="w-3 h-3 text-teal-600" />}
+                        </button>
 
-              return (
-                <div className="space-y-2.5">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    {/* Filter Tabs: 全部 / 待辦 / 已打勾 */}
-                    <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-0.5 rounded-xl text-[11px] font-bold">
+                        <div className="min-w-0 flex-1">
+                          <span className="text-xs sm:text-sm text-slate-900 dark:text-zinc-100 font-medium block leading-snug break-words">
+                            {todo.title}
+                          </span>
+                          {todo.dueDate && (
+                            <div className="flex items-center gap-1.5 text-slate-500 dark:text-zinc-400 font-mono text-[11px] mt-1">
+                              <Calendar className="w-3 h-3 text-slate-400" />
+                              <span>{todo.dueDate}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
                       <button
                         type="button"
-                        onClick={() => setNoteFilter('all')}
-                        className={`px-2.5 py-1 rounded-lg transition ${
-                          noteFilter === 'all'
-                            ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-2xs'
-                            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                        }`}
+                        onClick={() => handleDeleteTodo(todo.id)}
+                        className="p-1.5 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 sm:opacity-0 group-hover:opacity-100 ml-2"
+                        title="刪除"
                       >
-                        全部 ({notes.length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setNoteFilter('pending')}
-                        className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1 ${
-                          noteFilter === 'pending'
-                            ? 'bg-amber-500 text-slate-950 font-black shadow-2xs'
-                            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                        }`}
-                      >
-                        <span>待辦</span>
-                        <span>({pendingNotes.length})</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setNoteFilter('completed')}
-                        className={`px-2.5 py-1 rounded-lg transition flex items-center gap-1 ${
-                          noteFilter === 'completed'
-                            ? 'bg-emerald-600 text-white shadow-2xs'
-                            : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                        }`}
-                      >
-                        <Check className="w-3 h-3" />
-                        <span>已打勾</span>
-                        <span>({completedNotes.length})</span>
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
+                  ))}
+                </div>
+              )}
 
-                    {completedNotes.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={handleClearCompletedNotes}
-                        className="text-[11px] text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 font-semibold transition flex items-center gap-1"
-                        title="清除所有已打勾便簽"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        <span>清除已打勾 ({completedNotes.length})</span>
-                      </button>
-                    )}
+              {/* Completed Todos Accordion */}
+              {completedTodos.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-slate-50/50 dark:bg-slate-900/40">
+                  <div className="px-3.5 py-2.5 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setShowCompletedTodos(!showCompletedTodos)}
+                      className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-zinc-200 transition cursor-pointer select-none"
+                    >
+                      {showCompletedTodos ? (
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      )}
+                      <span>已完成項目 ({completedTodos.length})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearCompletedTodos}
+                      className="text-[11px] text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 font-semibold transition cursor-pointer"
+                    >
+                      全部清除
+                    </button>
                   </div>
 
-                  {displayedNotes.length === 0 ? (
-                    <div className="py-8 text-center text-xs text-slate-400">
-                      {noteFilter === 'completed'
-                        ? '目前沒有已打勾的備忘項目'
-                        : noteFilter === 'pending'
-                        ? '太棒了！所有備忘項目都已打勾完成 🎉'
-                        : '尚未記錄任何隨手便簽，在上方直接輸入內容即可儲存！'}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {displayedNotes.map((note) => {
-                        const matched = SCRATCHPAD_CATS.find((c) => c.key === note.category) || SCRATCHPAD_CATS[3];
-                        const Icon = matched.icon;
-                        const isEditingThis = editingNoteId === note.id;
-                        const isDone = !!note.completed;
-
-                        if (isEditingThis) {
-                          return (
-                            <form
-                              key={note.id}
-                              onSubmit={handleSaveEditNote}
-                              className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-slate-800 border-2 border-amber-500 space-y-2.5 shadow-md animate-in fade-in duration-100 text-xs"
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
-                                  <Edit2 className="w-3.5 h-3.5 text-amber-600" />
-                                  <span>編輯便簽內容</span>
-                                </span>
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={handleCancelEditNote}
-                                    className="px-2 py-1 rounded-lg text-slate-500 hover:bg-slate-200/60 dark:hover:bg-slate-700 text-[11px] font-medium"
-                                  >
-                                    取消
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSaveEditNote()}
-                                    className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-[11px] flex items-center gap-1 shadow-xs transition active:scale-95"
-                                  >
-                                    <Check className="w-3 h-3" />
-                                    <span>儲存修改</span>
-                                  </button>
-                                </div>
-                              </div>
-
-                              {/* Category selection */}
-                              <div className="grid grid-cols-4 gap-1">
-                                {SCRATCHPAD_CATS.map((cat) => {
-                                  const CatIcon = cat.icon;
-                                  return (
-                                    <button
-                                      key={cat.key}
-                                      type="button"
-                                      onClick={() => setEditNoteCat(cat.key)}
-                                      className={`py-1 px-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition ${
-                                        editNoteCat === cat.key
-                                          ? 'bg-amber-500 text-slate-950 font-black'
-                                          : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
-                                      }`}
-                                    >
-                                      <CatIcon className="w-3 h-3" />
-                                      <span className="truncate">{cat.label}</span>
-                                    </button>
-                                  );
-                                })}
-                              </div>
-
-                              <textarea
-                                rows={3}
-                                value={editNoteContent}
-                                onChange={(e) => setEditNoteContent(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                                    e.preventDefault();
-                                    handleSaveEditNote();
-                                  }
-                                }}
-                                placeholder="便簽內容..."
-                                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium font-mono text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-amber-500 resize-none leading-relaxed"
-                                autoFocus
-                              />
-                            </form>
-                          );
-                        }
-
-                        return (
-                          <div
-                            key={note.id}
-                            className={`p-3 sm:p-3.5 rounded-2xl border transition group flex items-start gap-2.5 sm:gap-3 ${
-                              isDone
-                                ? 'bg-slate-50/70 dark:bg-slate-900/40 border-slate-200/60 dark:border-slate-800 opacity-80'
-                                : 'bg-white dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 shadow-2xs hover:border-amber-400 dark:hover:border-amber-600'
-                            }`}
-                          >
-                            {/* Checkbox button (打勾備忘) */}
+                  {showCompletedTodos && (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800/60 border-t border-slate-200/80 dark:border-slate-800 px-2 py-1">
+                      {completedTodos.map((todo) => (
+                        <div
+                          key={todo.id}
+                          className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100/50 dark:hover:bg-slate-800/40 transition group opacity-75"
+                        >
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
                             <button
                               type="button"
-                              onClick={(e) => handleToggleNoteComplete(note.id, e)}
-                              className={`mt-0.5 shrink-0 w-6 h-6 rounded-lg flex items-center justify-center transition active:scale-90 ${
-                                isDone
-                                  ? 'bg-emerald-600 text-white shadow-xs hover:bg-emerald-700'
-                                  : 'border-2 border-slate-300 dark:border-slate-600 hover:border-amber-500 bg-white dark:bg-slate-900 text-transparent hover:text-slate-300'
-                              }`}
-                              title={isDone ? '點擊取消打勾 (標記為未完成)' : '點擊打勾 (標記為已完成)'}
+                              onClick={() => handleToggleTodo(todo.id)}
+                              className="w-5 h-5 rounded-full bg-teal-600 dark:bg-teal-500 text-white flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
+                              title="恢復待辦"
                             >
-                              <Check className={`w-3.5 h-3.5 ${isDone ? 'stroke-[3]' : 'opacity-0 hover:opacity-40'}`} />
+                              <Check className="w-3 h-3 stroke-[2.5]" />
                             </button>
-
-                            {/* Note Content */}
-                            <div
-                              onClick={() => handleStartEditNote(note)}
-                              className="min-w-0 flex-1 space-y-1.5 cursor-pointer"
-                              title="點擊可直接編輯"
-                            >
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className={`px-2 py-0.5 rounded-lg font-bold text-[11px] flex items-center gap-1 ${
-                                  isDone
-                                    ? 'bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
-                                    : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'
-                                }`}>
-                                  <Icon className="w-3 h-3" />
-                                  <span>{matched.label}</span>
-                                </span>
-                                {isDone && (
-                                  <span className="px-1.5 py-0.2 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold text-[10px] flex items-center gap-0.5">
-                                    <Check className="w-2.5 h-2.5" />
-                                    <span>已完成</span>
-                                  </span>
-                                )}
-                              </div>
-                              <p className={`text-xs sm:text-sm font-semibold font-mono p-2.5 rounded-xl border break-words transition select-text whitespace-pre-wrap leading-relaxed ${
-                                isDone
-                                  ? 'line-through text-slate-400 dark:text-slate-500 bg-slate-100/60 dark:bg-slate-900/60 border-slate-200/60 dark:border-slate-800/60'
-                                  : 'text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-amber-400 dark:hover:border-amber-600'
-                              }`}>
-                                {note.content}
-                              </p>
-                            </div>
-
-                            {/* Action Buttons */}
-                            <div className="flex flex-col gap-1 shrink-0 pt-0.5">
-                              <button
-                                type="button"
-                                onClick={() => handleCopyNote(note.content, note.id)}
-                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition"
-                                title="一鍵複製內容"
-                              >
-                                {copiedNoteId === note.id ? (
-                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
-                                ) : (
-                                  <Copy className="w-3.5 h-3.5" />
-                                )}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleStartEditNote(note)}
-                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-slate-500 hover:text-amber-600 transition"
-                                title="編輯便簽"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteNote(note.id)}
-                                className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 transition"
-                                title="刪除此便簽"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
+                            <span className="text-xs sm:text-sm line-through text-slate-400 dark:text-zinc-500 truncate flex-1">
+                              {todo.title}
+                            </span>
                           </div>
-                        );
-                      })}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTodo(todo.id)}
+                            className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
+                            title="刪除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
-              );
-            })()}
+              )}
+            </div>
           </div>
         )}
 
-        {/* ================= TAB 3: STREAMLINED CURRENCY CONVERTER ================= */}
-        {activeTab === 'calc' && (
-          <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  <select
-                    value={calcFromCur}
-                    onChange={(e) => setCalcFromCur(e.target.value)}
-                    className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1 text-xs font-bold text-slate-800 dark:text-slate-100"
-                  >
-                    {SUPPORTED_CURRENCIES.map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.flag} {c.code} ({c.name})
-                      </option>
-                    ))}
-                  </select>
-                  <ArrowRightLeft className="w-3.5 h-3.5 text-slate-400" />
-                  <select
-                    value={calcToCur}
-                    onChange={(e) => setCalcToCur(e.target.value)}
-                    className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1 text-xs font-bold text-slate-800 dark:text-slate-100"
-                  >
-                    {SUPPORTED_CURRENCIES.map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.flag} {c.code} ({c.name})
-                      </option>
-                    ))}
-                  </select>
-                </div>
 
-                <span className="text-[11px] text-slate-400 font-mono">
-                  1 {calcFromCur} ≈ {(convertAmount(1000, calcFromCur, calcToCur, trip.customExchangeRates) / 1000).toFixed(4)} {calcToCur}
-                </span>
-              </div>
-
-              {/* Amount input */}
-              <div className="relative">
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  value={calcInput}
-                  onChange={(e) => setCalcInput(e.target.value)}
-                  placeholder="輸入外幣金額..."
-                  className="w-full pl-4 pr-16 py-3 rounded-2xl bg-white dark:bg-slate-900 border-2 border-teal-500/80 text-2xl font-black font-mono text-slate-900 dark:text-white outline-none"
-                  autoFocus
-                />
-                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
-                  {calcFromCur}
-                </span>
-              </div>
-
-              {/* Quick Add Chips */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
-                {[10, 50, 100, 500, 1000].map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setCalcInput(String((parseFloat(calcInput) || 0) + v))}
-                    className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-mono font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 shrink-0 active:scale-95 transition"
-                  >
-                    +{v}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setCalcInput('0')}
-                  className="px-2 py-1 rounded-lg bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs font-bold shrink-0"
-                >
-                  歸零
-                </button>
-              </div>
-            </div>
-
-            {/* Live Result Card */}
-            <div className="p-4 rounded-3xl bg-teal-900 dark:bg-slate-950 text-white border border-teal-800 shadow-lg text-center space-y-1">
-              <span className="text-xs font-semibold text-teal-200">
-                折算後約等於
-              </span>
-              <div className="flex items-baseline justify-center gap-1.5 py-1">
-                <span className="text-3xl sm:text-4xl font-black font-mono text-amber-300 tracking-tight">
-                  {calcToCur} {Math.round(calcConvertedResult).toLocaleString()}
-                </span>
-              </div>
-              <p className="text-xs text-teal-200/90 font-mono">
-                {calcFromCur} {rawCalcNum.toLocaleString()} = {calcToCur} {Math.round(calcConvertedResult).toLocaleString()}
-              </p>
-            </div>
-
-            {/* Transfer to Expense Button */}
-            <button
-              onClick={handleTransferCalcToExpense}
-              className="w-full py-3 px-4 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition active:scale-95"
-            >
-              <DollarSign className="w-4 h-4" />
-              <span>將此金額帶入「一秒記帳」</span>
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Fullscreen Receipt Image Lightbox */}

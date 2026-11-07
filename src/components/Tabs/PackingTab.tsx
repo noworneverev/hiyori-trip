@@ -13,12 +13,6 @@ import {
   ChevronDown,
   ChevronUp,
   Sparkles,
-  Ticket,
-  Train,
-  Building,
-  Briefcase,
-  CreditCard,
-  Bookmark,
   FileText,
   Smartphone,
   Shirt,
@@ -30,19 +24,6 @@ interface PackingTabProps {
   lang: Language;
   onUpdateTrip: (updatedTrip: Trip) => void;
 }
-
-// Clean Lucide Icon mapping without emojis
-const TODO_CATEGORY_MAP: Record<
-  TodoCategory,
-  { label: string; Icon: React.ComponentType<{ className?: string }> }
-> = {
-  tickets: { label: '票券預約', Icon: Ticket },
-  transport: { label: '交通乘車', Icon: Train },
-  booking: { label: '住宿登記', Icon: Building },
-  preparation: { label: '行前準備', Icon: Briefcase },
-  finance: { label: '外幣資金', Icon: CreditCard },
-  other: { label: '其他待辦', Icon: Bookmark },
-};
 
 const PACKING_CATEGORY_MAP: Record<
   PackingCategory,
@@ -102,7 +83,6 @@ const DEFAULT_TODOS: TodoItem[] = [
 ];
 
 export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip }) => {
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<TodoCategory | 'all'>('all');
   const [showCompleted, setShowCompleted] = useState(false);
 
   // Luggage Packing Modal State (Quiet on-demand tool, separate from main to-dos)
@@ -115,7 +95,6 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
   const [isAddSheetOpen, setIsAddSheetOpen] = useState(false);
   useBodyScrollLock(isAddSheetOpen);
   const [inputTitle, setInputTitle] = useState('');
-  const [selectedTodoCategory, setSelectedTodoCategory] = useState<TodoCategory>('preparation');
   const [inputDueDate, setInputDueDate] = useState('');
 
   // Inline Quick Add input
@@ -134,14 +113,8 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
     ? Math.round((completedTodos.length / todos.length) * 100)
     : 0;
 
-  // Filtered Todos for display
-  const displayedTodos = useMemo(() => {
-    let list = pendingTodos;
-    if (selectedCategoryFilter !== 'all') {
-      list = list.filter((t) => t.category === selectedCategoryFilter);
-    }
-    return list;
-  }, [pendingTodos, selectedCategoryFilter]);
+  // Display all pending todos cleanly without category clutter
+  const displayedTodos = pendingTodos;
 
   // Filtered Packing items for modal
   const displayedPacking = useMemo(() => {
@@ -171,7 +144,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
     const newTodo: TodoItem = {
       id: `todo-${Date.now()}`,
       title: text,
-      category: selectedCategoryFilter !== 'all' ? selectedCategoryFilter : 'preparation',
+      category: 'other',
       completed: false,
     };
     onUpdateTrip({ ...trip, todos: [newTodo, ...todos], updatedAt: Date.now() });
@@ -186,7 +159,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
     const newTodo: TodoItem = {
       id: `todo-${Date.now()}`,
       title: text,
-      category: selectedTodoCategory,
+      category: 'other',
       completed: false,
       dueDate: inputDueDate || undefined,
     };
@@ -299,48 +272,6 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
           </div>
         )}
 
-        {/* Category Filter Pills (No emojis, clean Lucide icons) */}
-        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pt-3 mt-1">
-          <button
-            type="button"
-            onClick={() => setSelectedCategoryFilter('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 cursor-pointer ${
-              selectedCategoryFilter === 'all'
-                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 shadow-2xs'
-                : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            全部 ({pendingTodos.length})
-          </button>
-
-          {(Object.keys(TODO_CATEGORY_MAP) as TodoCategory[]).map((cat) => {
-            const meta = TODO_CATEGORY_MAP[cat];
-            const count = pendingTodos.filter((t) => t.category === cat).length;
-            const isSelected = selectedCategoryFilter === cat;
-            const IconComponent = meta.Icon;
-
-            return (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setSelectedCategoryFilter(cat)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5 cursor-pointer ${
-                  isSelected
-                    ? 'bg-teal-600 text-white shadow-2xs'
-                    : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <IconComponent className="w-3.5 h-3.5" />
-                <span>{meta.label}</span>
-                {count > 0 && (
-                  <span className="text-[10px] font-mono opacity-80 font-normal">
-                    ({count})
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       {/* Main Checklist Card Container */}
@@ -365,7 +296,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
               type="button"
               onClick={() => setIsAddSheetOpen(true)}
               className="px-2.5 py-1 rounded-lg text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition cursor-pointer text-xs font-medium"
-              title="展開詳細分類與截止日期"
+              title="展開詳細到期日設定"
             >
               詳細
             </button>
@@ -387,9 +318,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
               <Check className="w-6 h-6 stroke-[2.5]" />
             </div>
             <p className="text-sm font-medium text-slate-700 dark:text-zinc-300">
-              {selectedCategoryFilter === 'all'
-                ? '目前沒有未完成的待辦事項！'
-                : '此分類下暫無待辦事項'}
+              目前沒有未完成的待辦事項！
             </p>
             <p className="text-xs text-slate-400 dark:text-zinc-500 mt-1">
               可於上方輸入框鍵入項目，或點擊「載入推薦」取得常用待辦
@@ -398,9 +327,6 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-zinc-800/80">
             {displayedTodos.map((todo) => {
-              const categoryInfo = TODO_CATEGORY_MAP[todo.category || 'other'];
-              const IconComp = categoryInfo?.Icon || Bookmark;
-
               return (
                 <div
                   key={todo.id}
@@ -421,21 +347,12 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
                       <span className="text-sm text-slate-900 dark:text-zinc-100 font-medium block leading-snug break-words">
                         {todo.title}
                       </span>
-                      <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-zinc-400 mt-1">
-                        <span className="inline-flex items-center gap-1">
-                          <IconComp className="w-3 h-3 text-slate-400" />
-                          <span>{categoryInfo?.label || '待辦'}</span>
-                        </span>
-                        {todo.dueDate && (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span className="flex items-center gap-1 text-slate-500 dark:text-zinc-400 font-mono text-[11px]">
-                              <Calendar className="w-3 h-3" />
-                              {todo.dueDate}
-                            </span>
-                          </>
-                        )}
-                      </div>
+                      {todo.dueDate && (
+                        <div className="flex items-center gap-1.5 text-slate-500 dark:text-zinc-400 font-mono text-[11px] mt-1">
+                          <Calendar className="w-3 h-3 text-slate-400" />
+                          <span>{todo.dueDate}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -734,34 +651,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
                 />
               </div>
 
-              {/* Category Picker (No Emojis) */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 dark:text-zinc-400 mb-2">
-                  分類標籤
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(Object.keys(TODO_CATEGORY_MAP) as TodoCategory[]).map((cat) => {
-                    const meta = TODO_CATEGORY_MAP[cat];
-                    const isSelected = selectedTodoCategory === cat;
-                    const IconComponent = meta.Icon;
-                    return (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => setSelectedTodoCategory(cat)}
-                        className={`py-2 px-2.5 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 border transition cursor-pointer ${
-                          isSelected
-                            ? 'bg-teal-50 dark:bg-teal-950/60 border-teal-500 text-teal-800 dark:text-teal-200'
-                            : 'bg-slate-50 dark:bg-zinc-800/50 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-400 hover:border-slate-300'
-                        }`}
-                      >
-                        <IconComponent className="w-3.5 h-3.5" />
-                        <span>{meta.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+
 
               {/* Due Date */}
               <div>

@@ -69,6 +69,7 @@ import {
   DollarSign,
   Wallet,
   CheckCircle,
+  CheckSquare,
   FileText,
   Camera,
   Sparkles,
@@ -131,7 +132,7 @@ export default function App() {
   const [showDeleteTripModal, setShowDeleteTripModal] = useState(false);
   const [showGlobalHubModal, setShowGlobalHubModal] = useState(false);
   const [showQuickActionModal, setShowQuickActionModal] = useState(false);
-  const [quickActionTab, setQuickActionTab] = useState<'expense' | 'scratchpad' | 'calc'>('expense');
+  const [quickActionTab, setQuickActionTab] = useState<'expense' | 'todos'>('expense');
   const [showFabNote, setShowFabNote] = useState(false);
   const fabLongPressTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [sharedBannerTrip, setSharedBannerTrip] = useState<Trip | null>(null);
@@ -870,29 +871,29 @@ export default function App() {
               )}
             </div>
 
-            {/* Global Travel Memory & Footprint Hub Trigger in Header */}
+            {/* Global Travel Memory & Footprint Hub Trigger in Header (Desktop / Tablet) */}
             <button
               onClick={() => setShowGlobalHubModal(true)}
-              className="h-9 w-9 sm:w-auto flex items-center justify-center gap-1.5 sm:px-3 rounded-xl border border-teal-200/80 dark:border-teal-800/80 bg-teal-50/70 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/70 text-teal-800 dark:text-teal-200 transition shadow-2xs active:scale-95 text-xs font-bold shrink-0 cursor-pointer"
+              className="hidden sm:flex h-9 items-center justify-center gap-1.5 px-3 rounded-xl border border-teal-200/80 dark:border-teal-800/80 bg-teal-50/70 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/70 text-teal-800 dark:text-teal-200 transition shadow-2xs active:scale-95 text-xs font-bold shrink-0 cursor-pointer"
               title="搜尋所有過往旅程與月曆足跡"
               aria-label="跨旅程足跡"
             >
               <Compass className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
-              <span className="hidden sm:inline">足跡時光庫</span>
+              <span>足跡時光庫</span>
             </button>
 
-            {/* Primary Action: New Trip (Icon-only on mobile, full text on sm+) */}
+            {/* Primary Action: New Trip (Desktop / Tablet) */}
             <button
               onClick={() => {
                 setShowTripModal(true);
                 setTripModalData(null);
               }}
-              className="h-9 w-9 sm:w-auto flex items-center justify-center sm:justify-start gap-1 sm:px-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shadow-xs transition active:scale-95 shrink-0"
+              className="hidden sm:flex h-9 items-center justify-start gap-1 px-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shadow-xs transition active:scale-95 shrink-0"
               title={t.newTrip}
               aria-label={t.newTrip}
             >
               <Plus className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden sm:inline">{t.newTrip}</span>
+              <span>{t.newTrip}</span>
             </button>
 
             {/* Google Cloud Auth & Sync */}
@@ -1615,18 +1616,18 @@ export default function App() {
         style={{ position: 'fixed', transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)', zIndex: 40 }}
         className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] right-4 sm:bottom-8 sm:right-8 flex flex-col items-end gap-2 animate-in fade-in select-none"
       >
-        {/* Optional Secondary Scratchpad Pill if expanded */}
+        {/* Optional Secondary Todos Pill if expanded */}
         {showFabNote && (
           <button
             onClick={() => {
               setShowFabNote(false);
-              setQuickActionTab('scratchpad');
+              setQuickActionTab('todos');
               setShowQuickActionModal(true);
             }}
-            className="px-3.5 py-1.5 rounded-full bg-slate-900/95 dark:bg-slate-800/95 text-amber-300 font-bold text-xs shadow-lg border border-amber-500/30 flex items-center gap-1.5 transition active:scale-95 animate-in slide-in-from-bottom-2 duration-150 backdrop-blur-md"
+            className="px-3.5 py-1.5 rounded-full bg-slate-900/95 dark:bg-slate-800/95 text-teal-300 font-bold text-xs shadow-lg border border-teal-500/30 flex items-center gap-1.5 transition active:scale-95 animate-in slide-in-from-bottom-2 duration-150 backdrop-blur-md"
           >
-            <FileText className="w-3.5 h-3.5 text-amber-400" />
-            <span>隨手便簽</span>
+            <CheckSquare className="w-3.5 h-3.5 text-teal-400" />
+            <span>行程待辦</span>
           </button>
         )}
 

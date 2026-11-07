@@ -49,7 +49,7 @@ interface LiveCompanionTabProps {
   lang: Language;
   onUpdateTrip: (updatedTrip: Trip) => void;
   onNavigateToTimelineDay?: (dayNumber: number) => void;
-  onOpenQuickAction?: (tab: 'calc' | 'expense' | 'scratchpad') => void;
+  onOpenQuickAction?: (tab: 'expense' | 'todos') => void;
 }
 
 const CATEGORY_TAGS: Record<CategoryType, { label: string; Icon: React.ComponentType<{ className?: string }>; badgeClass: string }> = {
