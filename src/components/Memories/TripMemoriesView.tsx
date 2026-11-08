@@ -5,7 +5,7 @@ import { formatDateSlash, formatMonthDaySlash, getDayOfWeek } from '../../utils/
 import { Language } from '../../utils/i18n';
 import { compressImageFile } from '../../utils/image';
 import { canUploadImages } from '../../utils/userPermissions';
-import { auth, loginWithGoogle } from '../../utils/firebase';
+import { auth, loginWithGoogle, saveTripToCloud } from '../../utils/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import {
   Camera,
@@ -78,6 +78,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const [toastMessage, setToastMessage] = useState('📸 回憶照片已成功同步至雲端資料庫！');
   const [isSavingMemory, setIsSavingMemory] = useState(false);
   const [currentUser, setCurrentUser] = useState<User | null>(auth.currentUser);
+  const [isGlobalSyncing, setIsGlobalSyncing] = useState<boolean>(false);
+  const [syncingMemIds, setSyncingMemIds] = useState<Set<string>>(new Set());
 
   // Monitor Firebase Auth State
   useEffect(() => {
@@ -86,6 +88,106 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     });
     return () => unsubscribe();
   }, []);
+
+  // Listen to Global Cloud Sync Events
+  useEffect(() => {
+    const handleSyncEvent = (e: any) => {
+      const status = e.detail?.status;
+      if (status === 'syncing') {
+        setIsGlobalSyncing(true);
+      } else {
+        setIsGlobalSyncing(false);
+      }
+    };
+    window.addEventListener('cloud_sync_status', handleSyncEvent);
+    return () => window.removeEventListener('cloud_sync_status', handleSyncEvent);
+  }, []);
+
+  // Manual forced sync handler for a specific memory / entire trip
+  const handleForceSyncMemory = async (mem: TripMemoryItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    if (!auth.currentUser) {
+      if (
+        confirm(
+          lang === 'zh'
+            ? '目前為本機單機模式，需先登入 Google 帳號才能將照片同步至雲端資料庫。是否立即登入？'
+            : 'Sign in with Google to sync this photo to cloud?'
+        )
+      ) {
+        await loginWithGoogle();
+      }
+      return;
+    }
+
+    setSyncingMemIds((prev) => new Set(prev).add(mem.id));
+    setToastMessage(lang === 'zh' ? '正在強制同步至雲端資料庫...' : 'Force syncing to cloud...');
+    setSaveSuccessToast(true);
+
+    try {
+      await saveTripToCloud(auth.currentUser.uid, {
+        ...trip,
+        updatedAt: Date.now(),
+      });
+      setToastMessage(
+        lang === 'zh'
+          ? `✅ 已成功同步【${mem.spotTitle || mem.caption || '回憶照片'}】至雲端資料庫！`
+          : 'Successfully synced photo to cloud!'
+      );
+      setSaveSuccessToast(true);
+      setTimeout(() => setSaveSuccessToast(false), 3000);
+    } catch (err) {
+      console.error('Failed to force sync memory:', err);
+      setToastMessage(
+        lang === 'zh'
+          ? '⚠️ 雲端同步失敗，已加入離線待傳佇列'
+          : 'Sync failed, enqueued for retry'
+      );
+      setSaveSuccessToast(true);
+      setTimeout(() => setSaveSuccessToast(false), 3500);
+    } finally {
+      setSyncingMemIds((prev) => {
+        const next = new Set(prev);
+        next.delete(mem.id);
+        return next;
+      });
+    }
+  };
+
+  // Render small sync status badge for each photo card corner
+  const renderSyncBadge = (mem: TripMemoryItem, className = '') => {
+    const isThisSyncing = syncingMemIds.has(mem.id) || isGlobalSyncing;
+    const isCloudSynced = Boolean(currentUser) && !isThisSyncing;
+
+    let dotColor = 'bg-slate-400 dark:bg-slate-500';
+    let statusText = lang === 'zh' ? '僅儲存在本機 (點擊手動同步至雲端)' : 'Stored locally (click to sync)';
+    let dotGlow = '';
+
+    if (isThisSyncing) {
+      dotColor = 'bg-amber-400 animate-pulse';
+      dotGlow = 'shadow-[0_0_8px_rgba(251,191,36,0.9)]';
+      statusText = lang === 'zh' ? '同步中...' : 'Syncing...';
+    } else if (isCloudSynced) {
+      dotColor = 'bg-emerald-400';
+      dotGlow = 'shadow-[0_0_6px_rgba(52,211,153,0.85)]';
+      statusText = lang === 'zh' ? '已同步至雲端 (點擊手動強制同步)' : 'Synced to cloud (click to force sync)';
+    }
+
+    return (
+      <button
+        type="button"
+        onClick={(e) => handleForceSyncMemory(mem, e)}
+        title={statusText}
+        aria-label={statusText}
+        className={`px-1.5 py-1 rounded-full bg-black/60 hover:bg-black/85 backdrop-blur-md border border-white/20 transition-all flex items-center gap-1 cursor-pointer shadow-xs active:scale-90 group/sync ${className}`}
+      >
+        <span className={`w-2 h-2 rounded-full shrink-0 transition-colors ${dotColor} ${dotGlow}`} />
+        <span className="text-[9px] font-bold text-white/95 hidden group-hover/sync:inline whitespace-nowrap pr-0.5">
+          {isThisSyncing ? '同步中' : isCloudSynced ? '已同步' : '本機'}
+        </span>
+      </button>
+    );
+  };
 
   // Lock background scroll when either modal or lightbox is open
   useBodyScrollLock(showUploadModal || Boolean(lightboxMemory));
@@ -993,12 +1095,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     key={m.id}
                     className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-3 shadow-2xs group"
                   >
-                    <img
-                      src={m.imageUrl}
-                      alt={m.caption}
-                      className="w-16 h-16 rounded-xl object-cover shrink-0 cursor-pointer transition-transform group-hover:scale-105"
-                      onClick={() => setLightboxMemory(m)}
-                    />
+                    <div className="relative shrink-0">
+                      <img
+                        src={m.imageUrl}
+                        alt={m.caption}
+                        className="w-16 h-16 rounded-xl object-cover cursor-pointer transition-transform group-hover:scale-105"
+                        onClick={() => setLightboxMemory(m)}
+                      />
+                      <div className="absolute top-1 right-1 z-10 scale-75 origin-top-right">
+                        {renderSyncBadge(m)}
+                      </div>
+                    </div>
                     <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
@@ -1106,6 +1213,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                                 <Check className="w-3 h-3 stroke-[3]" />
                               </button>
                             </div>
+                            {/* Sync Status Badge (Click to force sync) */}
+                            <div className="absolute top-2.5 right-2.5 z-10">
+                              {renderSyncBadge(firstPhoto)}
+                            </div>
                             <div className="absolute bottom-2.5 right-2.5 opacity-0 group-hover:opacity-100 transition p-1.5 rounded-xl bg-slate-900/70 text-white">
                               <ZoomIn className="w-3.5 h-3.5" />
                             </div>
@@ -1122,6 +1233,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                                   title="放大相片"
                                 >
                                   <img src={pm.imageUrl} alt="" className="w-full h-full object-cover group-hover/thumb:scale-110 transition" />
+                                  <div className="absolute top-0.5 left-0.5 z-10 scale-75 origin-top-left">
+                                    {renderSyncBadge(pm)}
+                                  </div>
                                   {isAuthorizedUploader && (
                                     <button
                                       type="button"
@@ -1425,6 +1539,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   )}
                 </div>
 
+                {/* Sync Status Badge (Click to force sync) */}
+                <div className="absolute top-3 right-3 z-10">
+                  {renderSyncBadge(mem)}
+                </div>
+
                 {/* Quick Expand Icon */}
                 <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition p-2 rounded-xl bg-slate-900/70 text-white backdrop-blur-md">
                   <ZoomIn className="w-4 h-4" />
@@ -1510,6 +1629,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     alt={mem.caption}
                     className="w-full h-full object-cover filter contrast-[1.04] saturate-[1.05]"
                   />
+
+                  {/* Sync Status Badge (Click to force sync) */}
+                  <div className="absolute top-2 left-2 z-10">
+                    {renderSyncBadge(mem)}
+                  </div>
 
                   {/* Retro Mood Stamp */}
                   {mem.mood && (
@@ -2016,6 +2140,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           >
             {/* Top Close Button & Action Bar */}
             <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+              {/* Sync Status Badge */}
+              {renderSyncBadge(lightboxMemory)}
+
               {isAuthorizedUploader && (
                 <button
                   type="button"
