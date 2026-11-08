@@ -172,7 +172,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
       const compressed: string[] = [];
       const countToProcess = Math.min(files.length, remainingSlots);
       for (let i = 0; i < countToProcess; i++) {
-        const url = await compressImageFile(files[i], 960, 0.72);
+        const url = await compressImageFile(files[i]);
         compressed.push(url);
       }
       setMemoryPhotos((prev) => [...prev, ...compressed].slice(0, 3));

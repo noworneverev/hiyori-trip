@@ -465,7 +465,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
       const compressedList: string[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const compressed = await compressImageFile(file, 900, 0.75);
+        const compressed = await compressImageFile(file);
         compressedList.push(compressed);
       }
       setReceiptImages((prev) => [...prev, ...compressedList]);

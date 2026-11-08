@@ -6,8 +6,8 @@
 
 export const compressImageFile = async (
   file: File,
-  maxWidth = 960,
-  quality = 0.72
+  maxWidth = 840,
+  quality = 0.68
 ): Promise<string> => {
   // Helper to draw and get dataUrl
   const renderToJpeg = (
@@ -43,10 +43,10 @@ export const compressImageFile = async (
     ctx.drawImage(source, 0, 0, width, height);
     let dataUrl = canvas.toDataURL('image/jpeg', q);
 
-    // Safeguard: if compressed output is unusually large (> 95KB, base64 length > ~130000), fine-tune
-    if (dataUrl.length > 130000) {
-      const secondWidth = Math.round(width * 0.85);
-      const secondHeight = Math.round(height * 0.85);
+    // Safeguard: if compressed output is unusually large (> 60KB, base64 length > ~80000), fine-tune
+    if (dataUrl.length > 80000) {
+      const secondWidth = Math.round(width * 0.82);
+      const secondHeight = Math.round(height * 0.82);
       canvas.width = secondWidth;
       canvas.height = secondHeight;
       const ctx2 = canvas.getContext('2d');
@@ -54,7 +54,7 @@ export const compressImageFile = async (
         ctx2.imageSmoothingEnabled = true;
         ctx2.imageSmoothingQuality = 'high';
         ctx2.drawImage(source, 0, 0, secondWidth, secondHeight);
-        dataUrl = canvas.toDataURL('image/jpeg', Math.max(0.6, q - 0.1));
+        dataUrl = canvas.toDataURL('image/jpeg', Math.max(0.55, q - 0.12));
       }
     }
 

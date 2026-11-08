@@ -170,6 +170,14 @@ export function subscribeUserTrips(
 
 export async function saveTripToCloud(userId: string, trip: Trip): Promise<void> {
   const path = `users/${userId}/trips/${trip.id}`;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('cloud_sync_status', {
+        detail: { tripId: trip.id, status: 'syncing', timestamp: Date.now() },
+      })
+    );
+  }
+
   try {
     const docRef = doc(db, 'users', userId, 'trips', trip.id);
     const payload = sanitizeForFirestore({
@@ -200,10 +208,39 @@ export async function saveTripToCloud(userId: string, trip: Trip): Promise<void>
       collabId: trip.collabId || undefined,
       updatedAt: Date.now(),
     });
+
+    const jsonStr = JSON.stringify(payload);
+    const sizeBytes = new Blob([jsonStr]).size;
+    const sizeKb = Math.round(sizeBytes / 1024);
+
+    if (sizeBytes > 950000) {
+      console.warn(`[Firestore] Warning: Trip ${trip.id} size is ${sizeKb} KB, close to Firestore 1MB limit.`);
+    }
+
     await setDoc(docRef, payload, { merge: true });
-    console.log(`[Firestore] Trip successfully saved to cloud: ${trip.id}`);
+    console.log(`[Firestore] Trip successfully saved to cloud: ${trip.id} (${sizeKb} KB)`);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('cloud_sync_status', {
+          detail: { tripId: trip.id, status: 'synced', timestamp: Date.now(), sizeKb },
+        })
+      );
+    }
   } catch (error) {
     console.error(`[Firestore] Failed to save trip ${trip.id}:`, error);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('cloud_sync_status', {
+          detail: {
+            tripId: trip.id,
+            status: 'error',
+            timestamp: Date.now(),
+            error: error instanceof Error ? error.message : String(error),
+          },
+        })
+      );
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }

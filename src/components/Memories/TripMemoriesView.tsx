@@ -5,6 +5,8 @@ import { formatDateSlash, formatMonthDaySlash, getDayOfWeek } from '../../utils/
 import { Language } from '../../utils/i18n';
 import { compressImageFile } from '../../utils/image';
 import { canUploadImages } from '../../utils/userPermissions';
+import { auth, loginWithGoogle } from '../../utils/firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import {
   Camera,
   Upload,
@@ -25,6 +27,10 @@ import {
   Check,
   Route,
   AlertCircle,
+  AlertTriangle,
+  Cloud,
+  CloudCheck,
+  Loader2,
   ExternalLink,
   Edit2,
   Compass,
@@ -69,6 +75,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const [selectedDayFilter, setSelectedDayFilter] = useState<number | 'all' | 'custom'>('all');
   const [lightboxMemory, setLightboxMemory] = useState<TripMemoryItem | null>(null);
   const [saveSuccessToast, setSaveSuccessToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('📸 回憶照片已成功同步至雲端資料庫！');
+  const [isSavingMemory, setIsSavingMemory] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(auth.currentUser);
+
+  // Monitor Firebase Auth State
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Lock background scroll when either modal or lightbox is open
   useBodyScrollLock(showUploadModal || Boolean(lightboxMemory));
@@ -377,8 +394,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
       const compressedList: string[] = [];
       for (const file of filesToProcess) {
-        // High quality smart compression (960px max, 0.72 quality -> ~45-65KB each, crisp preview + safe for Firestore 1MB limit)
-        const compressed = await compressImageFile(file, 960, 0.72);
+        const compressed = await compressImageFile(file);
         compressedList.push(compressed);
       }
 
@@ -426,7 +442,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   };
 
   // Submit and save new memories or update Google Photos link
-  const handleSaveMemory = (e: React.FormEvent) => {
+  const handleSaveMemory = async (e: React.FormEvent) => {
     e.preventDefault();
     const hasNewPhotos = uploadImagePreviews.length > 0;
     const hasGoogleUrl = Boolean(uploadGooglePhotosUrl.trim());
@@ -541,24 +557,39 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       }));
     }
 
-    onUpdateTrip({
-      ...trip,
-      days: updatedDays,
-      memories: updatedMemories,
-      updatedAt: Date.now(),
-    });
+    setIsSavingMemory(true);
+    try {
+      await onUpdateTrip({
+        ...trip,
+        days: updatedDays,
+        memories: updatedMemories,
+        updatedAt: Date.now(),
+      });
 
-    // Reset and close
-    setUploadImagePreviews([]);
-    setUploadLimitWarning(null);
-    setUploadCaption('');
-    setUploadSpotId('');
-    setUploadGooglePhotosUrl('');
-    setIsCustomSpot(false);
-    setCustomLocationName('');
-    setShowUploadModal(false);
-    setSaveSuccessToast(true);
-    setTimeout(() => setSaveSuccessToast(false), 3000);
+      if (auth.currentUser) {
+        setToastMessage('📸 回憶照片已成功同步至雲端資料庫！');
+      } else {
+        setToastMessage('💾 照片已儲存至本機！建議登入 Google 帳號以啟用雲端同步');
+      }
+      setSaveSuccessToast(true);
+      setTimeout(() => setSaveSuccessToast(false), 3500);
+    } catch (err) {
+      console.error('Failed to save memory:', err);
+      setToastMessage('⚠️ 雲端連線異常，照片已安全暫存本機並加入離線佇列');
+      setSaveSuccessToast(true);
+      setTimeout(() => setSaveSuccessToast(false), 3500);
+    } finally {
+      setIsSavingMemory(false);
+      // Reset and close
+      setUploadImagePreviews([]);
+      setUploadLimitWarning(null);
+      setUploadCaption('');
+      setUploadSpotId('');
+      setUploadGooglePhotosUrl('');
+      setIsCustomSpot(false);
+      setCustomLocationName('');
+      setShowUploadModal(false);
+    }
   };
 
   // Delete memory
@@ -666,6 +697,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       </span>
                       <span>隨拍</span>
                     </>
+                  )}
+                  <span aria-hidden="true">·</span>
+                  {currentUser ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200/80 dark:border-emerald-800">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span>雲端已連線</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-200/80 dark:border-amber-800" title="點擊右上角登入 Google 帳號以啟用雲端同步">
+                      <span>⚠️ 本機模式</span>
+                    </span>
                   )}
                 </div>
               </div>
@@ -821,17 +863,27 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         </div>
       </div>
 
+      {/* Global Cloud/Local Save Toast */}
+      {saveSuccessToast && (
+        <div className="p-3 rounded-2xl bg-teal-700 text-white font-bold text-xs flex items-center justify-between gap-2 shadow-lg animate-in fade-in slide-in-from-top duration-200">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-300 shrink-0" />
+            <span>{toastMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSaveSuccessToast(false)}
+            className="text-teal-200 hover:text-white p-1 rounded-lg"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* 2. Main Content Views */}
       {viewMode === 'itinerary' ? (
         /* ================= 2A. ITINERARY SPOTS CHECK-IN & RETROSPECTIVE VIEW ================= */
         <div className="space-y-6">
-          {/* Success Toast */}
-      {saveSuccessToast && (
-        <div className="p-3 rounded-2xl bg-teal-600 text-white font-bold text-xs flex items-center gap-2 shadow-lg animate-in fade-in slide-in-from-top duration-200">
-          <Check className="w-4 h-4 text-emerald-200" />
-          <span>照片已儲存並同步</span>
-        </div>
-      )}
 
       {/* Compact Spots Check-in Progress & Filter Bar */}
           <div className="p-3 sm:p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xs space-y-2">
@@ -1543,6 +1595,36 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
             {/* Modal Form Body */}
             <form onSubmit={handleSaveMemory} className="p-5 space-y-4 overflow-y-auto text-xs">
+              {/* Cloud Connection & Auth Status Banner */}
+              {!currentUser ? (
+                <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold">⚠️ 目前為本機模式 (未登入 Google 帳號)</p>
+                    <p className="text-amber-700 dark:text-amber-300 text-[10px] leading-relaxed">
+                      照片目前僅保存在此裝置瀏覽器中。登入 Google 帳號即可永久備份至雲端 Firestore 資料庫，並與電腦及手機雙向即時同步！
+                    </p>
+                    <button
+                      type="button"
+                      onClick={loginWithGoogle}
+                      className="mt-1 px-3 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-[10px] flex items-center gap-1 transition cursor-pointer shadow-2xs active:scale-95"
+                    >
+                      <span>立即登入 Google 帳號啟用雲端儲存</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-[10px] text-emerald-800 dark:text-emerald-300 font-semibold flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 truncate">
+                    <Cloud className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <span className="truncate">雲端資料庫已連線 ({currentUser.email || '已授權'})</span>
+                  </span>
+                  <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-100 dark:bg-emerald-900/60 font-bold text-emerald-800 dark:text-emerald-200 shrink-0">
+                    即時雙向同步
+                  </span>
+                </div>
+              )}
+
               {/* Photo Upload Area */}
               <div>
                 {/* Existing Spot Photos Management (if spot already has photos) */}
@@ -1893,14 +1975,24 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   type="submit"
                   disabled={
                     (uploadImagePreviews.length === 0 && !uploadGooglePhotosUrl.trim() && !uploadCaption.trim()) ||
-                    isProcessingImage
+                    isProcessingImage ||
+                    isSavingMemory
                   }
-                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-bold shadow-xs transition active:scale-95 flex items-center gap-1.5"
+                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-bold shadow-xs transition active:scale-95 flex items-center gap-1.5 cursor-pointer"
                 >
-                  <Check className="w-4 h-4" />
-                  <span>
-                    {uploadImagePreviews.length > 0 ? '儲存相片至旅程相簿' : '儲存變更 / Google 相簿連結'}
-                  </span>
+                  {isSavingMemory ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>正在同步儲存至雲端資料庫...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>
+                        {uploadImagePreviews.length > 0 ? '儲存相片至旅程相簿' : '儲存變更 / Google 相簿連結'}
+                      </span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

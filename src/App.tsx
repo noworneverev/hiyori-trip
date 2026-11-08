@@ -467,6 +467,7 @@ export default function App() {
         saveTripToCloud(currentUser.uid, updatedTrip).catch((err) => {
           console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
           enqueueTripSave(currentUser.uid, updatedTrip);
+          showToast(lang === 'zh' ? '雲端同步稍有延遲，照片已安全保留於本機並排入重傳佇列' : 'Cloud save delayed, safely queued offline');
         });
       }
     }

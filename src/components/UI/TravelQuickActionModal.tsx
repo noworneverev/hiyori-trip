@@ -154,7 +154,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       const compressedList: string[] = [];
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const compressed = await compressImageFile(file, 900, 0.75);
+        const compressed = await compressImageFile(file, 840, 0.68);
         compressedList.push(compressed);
       }
       setReceiptImages((prev) => [...prev, ...compressedList]);
