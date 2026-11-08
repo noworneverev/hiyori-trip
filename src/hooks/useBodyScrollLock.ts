@@ -15,8 +15,10 @@ let originalRight = '';
 let originalWidth = '';
 let originalOverflow = '';
 let originalOverscrollBehavior = '';
+let originalTouchAction = '';
 let originalHtmlOverflow = '';
 let originalHtmlOverscrollBehavior = '';
+let originalHtmlTouchAction = '';
 let savedScrollY = 0;
 
 export function useBodyScrollLock(isLocked: boolean = true) {
@@ -42,8 +44,11 @@ export function useBodyScrollLock(isLocked: boolean = true) {
       originalWidth = document.body.style.width;
       originalOverflow = document.body.style.overflow;
       originalOverscrollBehavior = document.body.style.overscrollBehavior;
+      originalTouchAction = document.body.style.touchAction;
+
       originalHtmlOverflow = document.documentElement.style.overflow;
       originalHtmlOverscrollBehavior = document.documentElement.style.overscrollBehavior;
+      originalHtmlTouchAction = document.documentElement.style.touchAction;
 
       // 3. Compensate for desktop scrollbar jump
       const scrollBarWidth = window.innerWidth - document.documentElement.clientWidth;
@@ -51,7 +56,7 @@ export function useBodyScrollLock(isLocked: boolean = true) {
         document.body.style.paddingRight = `${scrollBarWidth}px`;
       }
 
-      // 4. Pin body in place - this is the ONLY technique that stops iOS Safari rubber-band background scrolling
+      // 4. Pin body in place - this stops iOS Safari rubber-band background scrolling
       document.body.style.position = 'fixed';
       document.body.style.top = `-${savedScrollY}px`;
       document.body.style.left = '0';
@@ -72,18 +77,31 @@ export function useBodyScrollLock(isLocked: boolean = true) {
       lockCount = Math.max(0, lockCount - 1);
 
       if (lockCount === 0) {
-        // Restore all body styles
-        document.body.style.position = originalPosition;
-        document.body.style.top = originalTop;
-        document.body.style.left = originalLeft;
-        document.body.style.right = originalRight;
-        document.body.style.width = originalWidth;
-        document.body.style.overflow = originalOverflow;
-        document.body.style.overscrollBehavior = originalOverscrollBehavior;
+        // Restore all body styles cleanly
+        document.body.style.position = originalPosition || '';
+        document.body.style.top = originalTop || '';
+        document.body.style.left = originalLeft || '';
+        document.body.style.right = originalRight || '';
+        document.body.style.width = originalWidth || '';
+        document.body.style.overflow = originalOverflow || '';
+        document.body.style.overscrollBehavior = originalOverscrollBehavior || '';
+        document.body.style.touchAction = originalTouchAction || '';
         document.body.style.paddingRight = '';
 
-        document.documentElement.style.overflow = originalHtmlOverflow;
-        document.documentElement.style.overscrollBehavior = originalHtmlOverscrollBehavior;
+        document.documentElement.style.overflow = originalHtmlOverflow || '';
+        document.documentElement.style.overscrollBehavior = originalHtmlOverscrollBehavior || '';
+        document.documentElement.style.touchAction = originalHtmlTouchAction || '';
+
+        // Extra safety resets to ensure no stale locks trap user scrolling
+        if (document.body.style.overflow === 'hidden') {
+          document.body.style.overflow = '';
+        }
+        if (document.documentElement.style.overflow === 'hidden') {
+          document.documentElement.style.overflow = '';
+        }
+        if (document.body.style.touchAction === 'none') {
+          document.body.style.touchAction = '';
+        }
 
         document.body.removeAttribute('data-scroll-locked');
 

@@ -361,26 +361,18 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
 
-    // Lock body scrolling and touch movement to prevent mobile background bounce and drift
-    const originalOverflow = document.body.style.overflow;
-    const originalTouchAction = document.body.style.touchAction;
-    document.body.style.overflow = 'hidden';
-    document.body.style.touchAction = 'none';
-
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = originalOverflow;
-      document.body.style.touchAction = originalTouchAction;
     };
   }, [onClose]);
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150 overscroll-none"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150 overflow-hidden touch-none"
       onClick={onClose}
     >
       <div
-        className="relative w-full sm:max-w-lg bg-white dark:bg-[#1c1c1e] rounded-t-[28px] sm:rounded-3xl shadow-2xl border-t sm:border border-slate-200/80 dark:border-white/10 overflow-hidden flex flex-col max-h-[90dvh] sm:max-h-[88vh] overscroll-contain touch-pan-y animate-in slide-in-from-bottom duration-200"
+        className="relative w-full max-w-full sm:max-w-lg bg-white dark:bg-[#1c1c1e] rounded-t-[28px] sm:rounded-3xl shadow-2xl border-t sm:border border-slate-200/80 dark:border-white/10 overflow-hidden flex flex-col max-h-[90dvh] sm:max-h-[88vh] overscroll-contain touch-pan-y animate-in slide-in-from-bottom duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Mobile Drag Indicator Handle (visual affordance, locked to sheet) */}
@@ -448,80 +440,80 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
 
         {/* ================= TAB 1: FAST EXPENSE (DEFAULT) ================= */}
         {activeTab === 'expense' && (
-          <form onSubmit={handleSaveQuickExpense} className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+          <form onSubmit={handleSaveQuickExpense} className="flex-1 flex flex-col min-h-0 overflow-hidden max-w-full">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5 space-y-3.5 touch-pan-y max-w-full">
               {/* Currency Quick Bar & Amount Input */}
-              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  記帳幣別：
-                </span>
-                {/* Currency selector chips & dropdown */}
-                <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
-                  {['EUR', 'JPY', 'USD', 'KRW', 'GBP', 'THB', 'TWD'].map((code) => {
-                    const meta = CURRENCY_MAP[code];
-                    return (
-                      <button
-                        key={code}
-                        type="button"
-                        onClick={() => setExpenseCur(code)}
-                        className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition ${
-                          expenseCur === code
-                            ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
-                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
-                        }`}
-                      >
-                        {meta?.flag} {code}
-                      </button>
-                    );
-                  })}
-                  <select
-                    value={expenseCur}
-                    onChange={(e) => setExpenseCur(e.target.value)}
-                    className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-0.5 text-[11px] font-bold text-slate-700 dark:text-slate-200"
-                  >
-                    {SUPPORTED_CURRENCIES.map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {c.flag} {c.code} ({c.name})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Amount input */}
-              <div className="flex items-stretch rounded-2xl bg-white dark:bg-slate-900 border-2 border-teal-600/80 focus-within:border-teal-500 overflow-hidden shadow-xs">
-                <span className="inline-flex items-center px-3.5 bg-teal-50 dark:bg-teal-950/60 border-r border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-300 font-black font-mono text-base select-none shrink-0">
-                  {CURRENCY_MAP[expenseCur]?.symbol || expenseCur}
-                </span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  step="any"
-                  required
-                  value={expenseAmount}
-                  onChange={(e) => setExpenseAmount(e.target.value)}
-                  placeholder="輸入消費金額..."
-                  className="flex-1 px-3 py-2.5 bg-transparent text-2xl font-black font-mono text-slate-900 dark:text-white outline-none"
-                  autoFocus
-                />
-                <span className="inline-flex items-center pr-3.5 text-xs font-bold text-slate-400 font-mono shrink-0">
-                  {expenseCur}
-                </span>
-              </div>
-
-              {/* Live Home Currency Conversion line */}
-              {parsedAmount > 0 && expenseCur !== 'TWD' && (
-                <div className="text-[11px] font-mono text-teal-800 dark:text-teal-300 font-bold flex items-center justify-between pt-0.5 px-1">
-                  <span>
-                    折合台幣約 ≈ NT$ {Math.round(convertedToTwd).toLocaleString()}
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-2 max-w-full overflow-hidden">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300 shrink-0">
+                    記帳幣別：
                   </span>
-                  <span className="text-slate-400 font-normal">
-                    (1 {expenseCur} ≈ {(convertAmount(1000, expenseCur, 'TWD', trip.customExchangeRates) / 1000).toFixed(2)} TWD)
+                  {/* Currency selector chips & dropdown */}
+                  <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar scroll-smooth max-w-full">
+                    {['EUR', 'JPY', 'USD', 'KRW', 'GBP', 'THB', 'TWD'].map((code) => {
+                      const meta = CURRENCY_MAP[code];
+                      return (
+                        <button
+                          key={code}
+                          type="button"
+                          onClick={() => setExpenseCur(code)}
+                          className={`px-2 py-0.5 rounded-lg text-[11px] font-bold border transition shrink-0 ${
+                            expenseCur === code
+                              ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                              : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          {meta?.flag} {code}
+                        </button>
+                      );
+                    })}
+                    <select
+                      value={expenseCur}
+                      onChange={(e) => setExpenseCur(e.target.value)}
+                      className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-0.5 text-[11px] font-bold text-slate-700 dark:text-slate-200 shrink-0"
+                    >
+                      {SUPPORTED_CURRENCIES.map((c) => (
+                        <option key={c.code} value={c.code}>
+                          {c.flag} {c.code} ({c.name})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Amount input: refined, ergonomic size (text-lg font-mono font-bold) */}
+                <div className="flex items-stretch rounded-xl bg-white dark:bg-slate-900 border-2 border-teal-600/80 focus-within:border-teal-500 overflow-hidden shadow-xs h-12">
+                  <span className="inline-flex items-center px-3 bg-teal-50 dark:bg-teal-950/60 border-r border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-300 font-bold font-mono text-sm select-none shrink-0">
+                    {CURRENCY_MAP[expenseCur]?.symbol || expenseCur}
+                  </span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    step="any"
+                    required
+                    value={expenseAmount}
+                    onChange={(e) => setExpenseAmount(e.target.value)}
+                    placeholder="請輸入消費金額..."
+                    className="flex-1 px-3 py-2 bg-transparent text-lg font-bold font-mono text-slate-900 dark:text-white placeholder:text-slate-400 placeholder:text-sm placeholder:font-normal outline-none min-w-0"
+                    autoFocus
+                  />
+                  <span className="inline-flex items-center pr-3 text-xs font-bold text-slate-400 font-mono shrink-0 select-none">
+                    {expenseCur}
                   </span>
                 </div>
-              )}
-            </div>
+
+                {/* Live Home Currency Conversion line */}
+                {parsedAmount > 0 && expenseCur !== 'TWD' && (
+                  <div className="text-[11px] font-mono text-teal-800 dark:text-teal-300 font-bold flex items-center justify-between pt-0.5 px-1">
+                    <span>
+                      折合台幣約 ≈ NT$ {Math.round(convertedToTwd).toLocaleString()}
+                    </span>
+                    <span className="text-slate-400 font-normal">
+                      (1 {expenseCur} ≈ {(convertAmount(1000, expenseCur, 'TWD', trip.customExchangeRates) / 1000).toFixed(2)} TWD)
+                    </span>
+                  </div>
+                )}
+              </div>
 
             {/* 2. 付款方式 (Method) */}
             <div className="space-y-1.5">
@@ -1000,7 +992,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
 
         {/* ================= TAB 2: TRIP TODOS (SYNCED DIRECTLY WITH TRIP.TODOS) ================= */}
         {activeTab === 'todos' && (
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden max-w-full">
             {/* Inline Quick Add Form */}
             <form
               onSubmit={handleAddTodo}
@@ -1065,7 +1057,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
             </form>
 
             {/* Todos List Container */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5 space-y-3 touch-pan-y max-w-full">
               {pendingTodos.length === 0 ? (
                 <div className="py-12 text-center px-4">
                   <div className="w-12 h-12 rounded-full bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center mx-auto mb-3">
