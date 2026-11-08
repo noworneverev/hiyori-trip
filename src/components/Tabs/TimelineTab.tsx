@@ -410,9 +410,65 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     return '12:00';
   };
 
-  const handleSelectDay = (dayNum: number) => {
+  const [slideDirection, setSlideDirection] = useState<'left' | 'right' | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+
+  const handleSelectDay = (dayNum: number, dir?: 'left' | 'right') => {
+    if (dayNum === selectedDayNumber) return;
+    if (dir) {
+      setSlideDirection(dir);
+    } else {
+      setSlideDirection(dayNum > selectedDayNumber ? 'left' : 'right');
+    }
     setSelectedDayNumber(dayNum);
     setSelectedItemId(null);
+  };
+
+  const handlePrevDay = () => {
+    if (selectedDayNumber > 1) {
+      triggerHaptic(12);
+      handleSelectDay(selectedDayNumber - 1, 'right');
+    }
+  };
+
+  const handleNextDay = () => {
+    if (selectedDayNumber < trip.days.length) {
+      triggerHaptic(12);
+      handleSelectDay(selectedDayNumber + 1, 'left');
+    }
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    touchStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY,
+      time: Date.now(),
+    };
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const touch = e.changedTouches[0];
+    const deltaX = touch.clientX - touchStartRef.current.x;
+    const deltaY = touch.clientY - touchStartRef.current.y;
+    const deltaTime = Date.now() - touchStartRef.current.time;
+    touchStartRef.current = null;
+
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
+
+    // Intent check: horizontal distance must be >= 45px and dominant over vertical scrolling
+    if (absX >= 45 && absX > absY * 1.35 && (deltaTime < 750 || absX > 80)) {
+      if (deltaX < 0) {
+        // Swiped left (finger moved right to left) -> Next Day
+        handleNextDay();
+      } else {
+        // Swiped right (finger moved left to right) -> Previous Day
+        handlePrevDay();
+      }
+    }
   };
 
   const handleToggleComplete = (itemId: string, e?: React.MouseEvent) => {
@@ -1036,62 +1092,111 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             />
           )}
 
-          {/* Day Memories Banner (if any exist) */}
-          {(() => {
-            const dayMems = (trip.memories || []).filter((m) => m.dayNumber === activeDay.dayNumber);
-            if (dayMems.length === 0) return null;
-            return (
-              <div
-                onClick={() => onOpenMemories?.()}
-                className="rounded-2xl p-3 bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200/80 dark:border-rose-900/40 flex items-center justify-between cursor-pointer hover:bg-rose-50 transition shadow-2xs group"
-              >
-                <div className="flex items-center gap-2 text-xs">
-                  <Camera className="w-4 h-4 text-rose-500" />
-                  <span className="font-bold text-rose-900 dark:text-rose-200">
-                    Day {activeDay.dayNumber} 相片 ({dayMems.length})
-                  </span>
-                </div>
-                <span className="text-xs font-semibold text-rose-600 dark:text-rose-400 group-hover:translate-x-0.5 transition flex items-center gap-1">
-                  <span>相簿</span>
-                  <span>→</span>
-                </span>
-              </div>
-            );
-          })()}
-
-      {/* Active Day Header Bar */}
-      <div id="day-schedule-section" className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/90 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 scroll-mt-20">
-        <div>
-          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span className="font-bold text-teal-700 dark:text-teal-300">
-              {t.day.replace('{n}', String(activeDay.dayNumber))}
-            </span>
-            <span>·</span>
-            <span className="flex items-center gap-1 font-mono">
-              <Calendar className="w-3.5 h-3.5" />
-              {formatDateSlash(activeDay.date)}
-            </span>
-          </div>
-          <h3 className="font-bold text-slate-900 dark:text-white text-base mt-1">
-            {activeDay.theme || t.day.replace('{n}', String(activeDay.dayNumber))}
-          </h3>
-          {activeDay.notes && (
-            <p className="text-slate-600 dark:text-slate-400 text-xs mt-1">
-              {activeDay.notes}
-            </p>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
-            className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0"
+          {/* Swipeable Daily Content Area with Touch Gesture Support */}
+          <div
+            className="space-y-4 touch-pan-y"
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
           >
-            <Plus className="w-4 h-4" />
-            <span>{t.addSpot}</span>
-          </button>
-        </div>
-      </div>
+            <motion.div
+              key={activeDay.dayNumber}
+              initial={{
+                opacity: 0.88,
+                x: slideDirection === 'left' ? 24 : slideDirection === 'right' ? -24 : 0,
+              }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              className="space-y-4"
+            >
+              {/* Day Memories Banner (if any exist) */}
+              {(() => {
+                const dayMems = (trip.memories || []).filter((m) => m.dayNumber === activeDay.dayNumber);
+                if (dayMems.length === 0) return null;
+                return (
+                  <div
+                    onClick={() => onOpenMemories?.()}
+                    className="rounded-2xl p-3 bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200/80 dark:border-rose-900/40 flex items-center justify-between cursor-pointer hover:bg-rose-50 transition shadow-2xs group"
+                  >
+                    <div className="flex items-center gap-2 text-xs">
+                      <Camera className="w-4 h-4 text-rose-500" />
+                      <span className="font-bold text-rose-900 dark:text-rose-200">
+                        Day {activeDay.dayNumber} 相片 ({dayMems.length})
+                      </span>
+                    </div>
+                    <span className="text-xs font-semibold text-rose-600 dark:text-rose-400 group-hover:translate-x-0.5 transition flex items-center gap-1">
+                      <span>相簿</span>
+                      <span>→</span>
+                    </span>
+                  </div>
+                );
+              })()}
+
+              {/* Active Day Header Bar */}
+              <div id="day-schedule-section" className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/90 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 scroll-mt-20">
+                <div>
+                  <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                    <span className="font-bold text-teal-700 dark:text-teal-300">
+                      {t.day.replace('{n}', String(activeDay.dayNumber))}
+                    </span>
+                    <span>·</span>
+                    <span className="flex items-center gap-1 font-mono">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {formatDateSlash(activeDay.date)}
+                    </span>
+                    {trip.days.length > 1 && (
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 font-normal sm:hidden">
+                        · 左右滑動切換天數
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="font-bold text-slate-900 dark:text-white text-base mt-1">
+                    {activeDay.theme || t.day.replace('{n}', String(activeDay.dayNumber))}
+                  </h3>
+                  {activeDay.notes && (
+                    <p className="text-slate-600 dark:text-slate-400 text-xs mt-1">
+                      {activeDay.notes}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {trip.days.length > 1 && (
+                    <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl p-1 border border-slate-200/80 dark:border-slate-700/80">
+                      <button
+                        type="button"
+                        disabled={selectedDayNumber <= 1}
+                        onClick={handlePrevDay}
+                        aria-label="前一天"
+                        title="前一天"
+                        className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      <span className="text-xs font-semibold px-1 text-slate-600 dark:text-slate-400 select-none">
+                        {activeDay.dayNumber} / {trip.days.length}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={selectedDayNumber >= trip.days.length}
+                        onClick={handleNextDay}
+                        aria-label="後一天"
+                        title="後一天"
+                        className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
+                    className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>{t.addSpot}</span>
+                  </button>
+                </div>
+              </div>
 
       {/* Timeline Items List */}
       {activeDay.items.length === 0 ? (
@@ -1447,6 +1552,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           </div>
         </div>
       )}
+            </motion.div>
+          </div>
     </>
   )}
 
