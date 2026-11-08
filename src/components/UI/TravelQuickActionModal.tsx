@@ -125,7 +125,6 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   const [isCompressingReceipts, setIsCompressingReceipts] = useState<boolean>(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const receiptInputRef = useRef<HTMLInputElement | null>(null);
-  const cameraInputRef = useRef<HTMLInputElement | null>(null);
 
   // Friend split states in Quick Modal
   const splitMembersList = React.useMemo(() => {
@@ -773,15 +772,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                   )}
                 </div>
 
-                {/* Hidden file inputs */}
-                <input
-                  ref={cameraInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handleReceiptFiles}
-                  className="hidden"
-                />
+                {/* Hidden file input (triggers OS-native photo library or camera picker) */}
                 <input
                   ref={receiptInputRef}
                   type="file"
@@ -791,28 +782,16 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                   className="hidden"
                 />
 
-                {/* Action Buttons */}
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => cameraInputRef.current?.click()}
-                    disabled={isCompressingReceipts}
-                    className="flex-1 py-2 px-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 text-teal-900 dark:text-teal-200 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 transition"
-                  >
-                    <Camera className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                    <span>即時拍照</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => receiptInputRef.current?.click()}
-                    disabled={isCompressingReceipts}
-                    className="flex-1 py-2 px-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 text-teal-900 dark:text-teal-200 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 transition"
-                  >
-                    <ImageIcon className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                    <span>相簿選取發票</span>
-                  </button>
-                </div>
+                {/* Single unified Action Button */}
+                <button
+                  type="button"
+                  onClick={() => receiptInputRef.current?.click()}
+                  disabled={isCompressingReceipts}
+                  className="w-full py-2.5 px-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 text-teal-900 dark:text-teal-200 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 transition cursor-pointer"
+                >
+                  <Camera className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                  <span>上傳發票收據 (拍照或相簿)</span>
+                </button>
 
                 {/* Compressing indicator */}
                 {isCompressingReceipts && (
