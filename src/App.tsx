@@ -29,6 +29,7 @@ import { ShareTripModal } from './components/Modals/ShareTripModal';
 import { CollaborateModal } from './components/Modals/CollaborateModal';
 import { DeleteConfirmModal } from './components/Modals/DeleteConfirmModal';
 import { ConflictResolutionModal } from './components/Modals/ConflictResolutionModal';
+import { AuthPromptModal } from './components/Modals/AuthPromptModal';
 import { TravelQuickActionModal } from './components/UI/TravelQuickActionModal';
 import { AuthButton } from './components/Auth/AuthButton';
 import { AppMenu } from './components/Navigation/AppMenu';
@@ -333,17 +334,46 @@ export default function App() {
     return () => unsubscribe();
   }, [activeCollabId, activeId]);
 
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authModalReason, setAuthModalReason] = useState<string>('');
+  const pendingActionRef = useRef<(() => void) | null>(null);
+
+  const requireAuth = (action: () => void, reason?: string): boolean => {
+    if (currentUserRef.current) {
+      action();
+      return true;
+    }
+    pendingActionRef.current = action;
+    setAuthModalReason(reason || (lang === 'zh' ? '編輯與儲存行程' : 'Edit and save trip'));
+    setShowAuthModal(true);
+    return false;
+  };
+
   // Listen to Auth State and subscribe to cloud trips
   useEffect(() => {
     let unsubscribeFirestore: (() => void) | null = null;
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
+      currentUserRef.current = user;
 
       // Clean up previous Firestore listener if user switched or logged out
       if (unsubscribeFirestore) {
         unsubscribeFirestore();
         unsubscribeFirestore = null;
+      }
+
+      // Automatically execute pending action upon successful sign in
+      if (user && pendingActionRef.current) {
+        const action = pendingActionRef.current;
+        pendingActionRef.current = null;
+        setTimeout(() => {
+          try {
+            action();
+          } catch (e) {
+            console.warn('Pending auth action failed:', e);
+          }
+        }, 150);
       }
 
       if (user) {
@@ -383,6 +413,7 @@ export default function App() {
                   });
                 }
               }
+              showToast(lang === 'zh' ? '✨ 登入成功！已為您將本機既有行程與相片備份至雲端。' : '✨ Signed in! Local trips & photos synced to cloud.');
             }
 
             const activeId = getCurrentTripId();
@@ -398,6 +429,7 @@ export default function App() {
               for (const tr of currentLocal) {
                 await saveTripToCloud(user.uid, tr);
               }
+              showToast(lang === 'zh' ? '✨ 登入成功！已將本機既有行程自動建立至雲端資料庫。' : '✨ Signed in! Local trips created in cloud.');
             }
           }
         });
@@ -435,7 +467,7 @@ export default function App() {
     setStoredLanguage(nextLang);
   };
 
-  const handleUpdateTrip = (updatedTrip: Trip) => {
+  const applyUpdateTrip = (updatedTrip: Trip) => {
     // 1. Immediately update React state & localStorage (works 100% offline)
     setTrips((prevTrips) => {
       const idx = prevTrips.findIndex((t) => t.id === updatedTrip.id);
@@ -473,6 +505,16 @@ export default function App() {
     }
   };
 
+  const handleUpdateTrip = (updatedTrip: Trip) => {
+    if (!currentUser) {
+      requireAuth(() => {
+        applyUpdateTrip(updatedTrip);
+      }, lang === 'zh' ? '編輯行程並同步至雲端' : 'Edit trip and sync to cloud');
+      return;
+    }
+    applyUpdateTrip(updatedTrip);
+  };
+
   const handleSelectTrip = (id: string) => {
     setCurrentTripIdState(id);
     setCurrentTripId(id);
@@ -492,6 +534,10 @@ export default function App() {
   }, [currentTrip?.title, t.appName, t.appSubtitle]);
 
   const handleSaveTripModal = (data: Partial<Trip> | Trip) => {
+    if (!currentUser) {
+      requireAuth(() => handleSaveTripModal(data), lang === 'zh' ? '建立與儲存旅程' : 'Save trip');
+      return;
+    }
     if (tripModalData) {
       const updated: Trip = {
         ...tripModalData,
@@ -565,6 +611,10 @@ export default function App() {
 
   const handleConfirmDeleteTrip = () => {
     if (trips.length <= 1) return;
+    if (!currentUser) {
+      requireAuth(() => handleConfirmDeleteTrip(), lang === 'zh' ? '刪除旅程' : 'Delete trip');
+      return;
+    }
 
     const tripToDeleteId = currentTrip.id;
     recordDeletedTripId(tripToDeleteId);
@@ -596,6 +646,10 @@ export default function App() {
 
   const handleSaveItem = (itemData: Omit<ItineraryItem, 'id'>, existingId?: string) => {
     if (!currentTrip || !editingItemData) return;
+    if (!currentUser) {
+      requireAuth(() => handleSaveItem(itemData, existingId), lang === 'zh' ? '儲存景點資訊' : 'Save spot');
+      return;
+    }
     const { dayNumber } = editingItemData;
 
     // Enforce 3 photos max per spot
@@ -832,8 +886,10 @@ export default function App() {
                       <button
                         onClick={() => {
                           setShowTripSwitcher(false);
-                          setShowTripModal(true);
-                          setTripModalData(null);
+                          requireAuth(() => {
+                            setShowTripModal(true);
+                            setTripModalData(null);
+                          }, lang === 'zh' ? '建立新旅程' : 'Create new trip');
                         }}
                         className="text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-0.5"
                       >
@@ -897,8 +953,10 @@ export default function App() {
             {/* Primary Action: New Trip (Desktop / Tablet) */}
             <button
               onClick={() => {
-                setShowTripModal(true);
-                setTripModalData(null);
+                requireAuth(() => {
+                  setShowTripModal(true);
+                  setTripModalData(null);
+                }, lang === 'zh' ? '建立新旅程' : 'Create new trip');
               }}
               className="hidden sm:flex h-9 items-center justify-start gap-1 px-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shadow-xs transition active:scale-95 shrink-0"
               title={t.newTrip}
@@ -1062,8 +1120,10 @@ export default function App() {
               {permission.canEdit && (
                 <button
                   onClick={() => {
-                    setTripModalData(currentTrip);
-                    setShowTripModal(true);
+                    requireAuth(() => {
+                      setTripModalData(currentTrip);
+                      setShowTripModal(true);
+                    }, lang === 'zh' ? '編輯行程資訊' : 'Edit trip details');
                   }}
                   className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs transition"
                   title="編輯行程"
@@ -1169,8 +1229,10 @@ export default function App() {
                 {permission.canEdit && (
                   <button
                     onClick={() => {
-                      setTripModalData(currentTrip);
-                      setShowTripModal(true);
+                      requireAuth(() => {
+                        setTripModalData(currentTrip);
+                        setShowTripModal(true);
+                      }, lang === 'zh' ? '編輯行程資訊' : 'Edit trip details');
                     }}
                     className="px-3 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-md text-white font-semibold text-xs flex items-center gap-1.5 border border-white/20 transition active:scale-95 shadow-xs"
                   >
@@ -1182,7 +1244,9 @@ export default function App() {
                 {/* Delete Trip (Only owner has permission to delete) */}
                 {permission.isOwner && (
                   <button
-                    onClick={handleDeleteCurrentTrip}
+                    onClick={() => {
+                      requireAuth(handleDeleteCurrentTrip, lang === 'zh' ? '刪除旅程' : 'Delete trip');
+                    }}
                     className="p-1.5 rounded-xl bg-white/15 hover:bg-rose-500/80 backdrop-blur-md text-white text-xs border border-white/20 transition shadow-xs"
                     title={t.deleteTrip}
                   >
@@ -1201,6 +1265,42 @@ export default function App() {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Unauthenticated Read-Only Preview Notice Banner */}
+        {!currentUser && (
+          <div className="bg-gradient-to-r from-teal-900/95 via-slate-900/95 to-cyan-900/95 text-white px-4 py-3 rounded-2xl border border-teal-500/30 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg animate-in fade-in duration-200">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-teal-500/20 text-teal-300 flex items-center justify-center shrink-0 border border-teal-400/20">
+                <Eye className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="font-bold text-slate-100 flex items-center gap-1.5 flex-wrap">
+                  <span>{lang === 'zh' ? '目前為唯讀瀏覽模式' : 'Read-Only Preview Mode'}</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 font-semibold border border-teal-400/20">
+                    {lang === 'zh' ? '點擊編輯將引導登入' : 'Sign in required to edit'}
+                  </span>
+                </p>
+                <p className="text-slate-300 text-[11px] mt-0.5 leading-relaxed">
+                  {lang === 'zh'
+                    ? '登入 Google 帳號即可開始自由編輯、記錄支出並即時備份至專屬雲端資料庫，確保資料永不遺失。'
+                    : 'Sign in with Google to edit, log expenses, and auto-sync your itinerary safely.'}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => requireAuth(() => {}, lang === 'zh' ? '啟用完整編輯' : 'Enable editing')}
+              className="px-4 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs shrink-0 self-end sm:self-auto transition flex items-center gap-2 shadow-md active:scale-95 cursor-pointer"
+            >
+              <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+              </svg>
+              <span>{lang === 'zh' ? '登入 Google 帳號' : 'Sign in with Google'}</span>
+            </button>
           </div>
         )}
 
@@ -1295,12 +1395,16 @@ export default function App() {
               lang={lang}
               onUpdateTrip={handleUpdateTrip}
               onOpenAddItem={(dayNumber, suggestedStartTime) => {
-                setEditingItemData({ dayNumber, initialStartTime: suggestedStartTime });
-                setShowItemModal(true);
+                requireAuth(() => {
+                  setEditingItemData({ dayNumber, initialStartTime: suggestedStartTime });
+                  setShowItemModal(true);
+                }, lang === 'zh' ? '新增行程景點' : 'Add itinerary spot');
               }}
               onOpenEditItem={(item, dayNumber) => {
-                setEditingItemData({ item, dayNumber });
-                setShowItemModal(true);
+                requireAuth(() => {
+                  setEditingItemData({ item, dayNumber });
+                  setShowItemModal(true);
+                }, lang === 'zh' ? '編輯景點資訊' : 'Edit spot details');
               }}
               isPickMode={isPickMode}
               onStartMapPick={handleStartMapPick}
@@ -1310,6 +1414,7 @@ export default function App() {
                 setMemoriesSpotId(spotId);
                 setActiveTab('memories');
               }}
+              requireAuth={requireAuth}
             />
           )}
 
@@ -1320,18 +1425,30 @@ export default function App() {
               onUpdateTrip={handleUpdateTrip}
               onNavigateToTimelineDay={() => setActiveTab('timeline')}
               onOpenQuickAction={(tab) => {
-                setQuickActionTab(tab);
-                setShowQuickActionModal(true);
+                requireAuth(() => {
+                  setQuickActionTab(tab);
+                  setShowQuickActionModal(true);
+                }, lang === 'zh' ? '快速記帳與筆記' : 'Quick action');
               }}
             />
           )}
 
           {activeTab === 'expenses' && (
-            <ExpensesTab trip={currentTrip} lang={lang} onUpdateTrip={handleUpdateTrip} />
+            <ExpensesTab
+              trip={currentTrip}
+              lang={lang}
+              onUpdateTrip={handleUpdateTrip}
+              requireAuth={requireAuth}
+            />
           )}
 
           {activeTab === 'prep' && (
-            <NotesAndPrepTab trip={currentTrip} lang={lang} onUpdateTrip={handleUpdateTrip} />
+            <NotesAndPrepTab
+              trip={currentTrip}
+              lang={lang}
+              onUpdateTrip={handleUpdateTrip}
+              requireAuth={requireAuth}
+            />
           )}
 
           {activeTab === 'memories' && (
@@ -1343,6 +1460,7 @@ export default function App() {
               onSelectTrip={handleSelectTrip}
               onOpenGlobalHub={() => setShowGlobalHubModal(true)}
               initialSpotId={memoriesSpotId}
+              requireAuth={requireAuth}
             />
           )}
         </div>
@@ -1625,6 +1743,30 @@ export default function App() {
         />
       )}
 
+      {/* Auth Prompt Modal for unauthenticated edit interception */}
+      <AuthPromptModal
+        isOpen={showAuthModal}
+        onClose={() => {
+          setShowAuthModal(false);
+          pendingActionRef.current = null;
+        }}
+        reason={authModalReason}
+        onLoginSuccess={() => {
+          if (pendingActionRef.current) {
+            const action = pendingActionRef.current;
+            pendingActionRef.current = null;
+            setTimeout(() => {
+              try {
+                action();
+              } catch (e) {
+                console.warn('Pending auth action failed:', e);
+              }
+            }, 150);
+          }
+        }}
+        lang={lang}
+      />
+
       {/* Floating Travel Quick Action Button (Single Clean FAB) */}
       <div
         style={{ position: 'fixed', zIndex: 40 }}
@@ -1638,9 +1780,11 @@ export default function App() {
         {showFabNote && (
           <button
             onClick={() => {
-              setShowFabNote(false);
-              setQuickActionTab('todos');
-              setShowQuickActionModal(true);
+              requireAuth(() => {
+                setShowFabNote(false);
+                setQuickActionTab('todos');
+                setShowQuickActionModal(true);
+              }, lang === 'zh' ? '行程待辦事項' : 'Trip todos');
             }}
             className="px-3.5 py-1.5 rounded-full bg-slate-900/95 dark:bg-slate-800/95 text-teal-300 font-bold text-xs shadow-lg border border-teal-500/30 flex items-center gap-1.5 transition active:scale-95 animate-in slide-in-from-bottom-2 duration-150 backdrop-blur-md"
           >
@@ -1652,8 +1796,10 @@ export default function App() {
         {/* Primary Circular Expense FAB */}
         <button
           onClick={() => {
-            setQuickActionTab('expense');
-            setShowQuickActionModal(true);
+            requireAuth(() => {
+              setQuickActionTab('expense');
+              setShowQuickActionModal(true);
+            }, lang === 'zh' ? '快速記帳' : 'Quick expense');
           }}
           onContextMenu={(e) => {
             e.preventDefault();

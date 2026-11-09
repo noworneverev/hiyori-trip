@@ -78,6 +78,7 @@ interface ExpensesTabProps {
   trip: Trip;
   lang: Language;
   onUpdateTrip: (updatedTrip: Trip) => void;
+  requireAuth?: (action: () => void, reason?: string) => boolean;
 }
 
 // Built-in categories
@@ -98,7 +99,7 @@ const PAYMENT_LABELS: Record<PaymentMethod, Record<Language, string> & { Icon: R
   mobile: { zh: '行動支付', en: 'Mobile Pay', ja: 'スマホ決済', ko: '간편결제', 'zh-CN': '移动支付', Icon: Smartphone },
 };
 
-export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTrip }) => {
+export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTrip, requireAuth }) => {
   const t = TRANSLATIONS[lang];
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -564,6 +565,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
 
   // Open Modal to Add New Expense
   const handleOpenAddExpense = () => {
+    if (requireAuth && !requireAuth(handleOpenAddExpense, lang === 'zh' ? '新增支出記帳' : 'Add expense')) {
+      return;
+    }
     setEditingExpenseId(null);
     setTitle('');
     setAmount('');
@@ -584,6 +588,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
 
   // Open Modal to Edit Existing Expense
   const handleOpenEditExpense = (item: ExpenseItem) => {
+    if (requireAuth && !requireAuth(() => handleOpenEditExpense(item), lang === 'zh' ? '編輯支出紀錄' : 'Edit expense')) {
+      return;
+    }
     setEditingExpenseId(item.id);
     setTitle(item.title);
     setAmount(item.amount.toString());
@@ -688,6 +695,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, onUpdateTr
 
 
   const handleDeleteExpense = (id: string) => {
+    if (requireAuth && !requireAuth(() => handleDeleteExpense(id), lang === 'zh' ? '刪除支出紀錄' : 'Delete expense')) {
+      return;
+    }
     onUpdateTrip({
       ...trip,
       expenses: trip.expenses.filter((e) => e.id !== id),

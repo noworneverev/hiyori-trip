@@ -61,6 +61,7 @@ interface TimelineTabProps {
   pickedCoords: { lat: number; lng: number } | null;
   onPickLocation: (lat: number, lng: number) => void;
   onOpenMemories?: (spotId?: string) => void;
+  requireAuth?: (action: () => void, reason?: string) => boolean;
 }
 
 const CATEGORY_MAP: Record<string, { labelKey: string; icon: React.ComponentType<{ className?: string }>; text: string }> = {
@@ -105,6 +106,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   pickedCoords,
   onPickLocation,
   onOpenMemories,
+  requireAuth,
 }) => {
   const t = TRANSLATIONS[lang];
   const [timelineViewMode, setTimelineViewMode] = useState<'daily' | 'overview'>('daily');
@@ -476,6 +478,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       e.preventDefault();
       e.stopPropagation();
     }
+    if (requireAuth && !requireAuth(() => handleToggleComplete(itemId, e), lang === 'zh' ? '標記景點完成狀態' : 'Mark spot completed')) {
+      return;
+    }
     const updatedDays = trip.days.map((day) => ({
       ...day,
       items: day.items.map((it) => (it.id === itemId ? { ...it, completed: !it.completed } : it)),
@@ -484,6 +489,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   };
 
   const handleDeleteItem = (itemId: string) => {
+    if (requireAuth && !requireAuth(() => handleDeleteItem(itemId), lang === 'zh' ? '刪除景點活動' : 'Delete spot')) {
+      return;
+    }
     const updatedDays = trip.days.map((day) => {
       if (day.dayNumber !== selectedDayNumber) return day;
       return {
@@ -496,6 +504,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   };
 
   const handleMoveItem = (index: number, direction: 'up' | 'down') => {
+    if (requireAuth && !requireAuth(() => handleMoveItem(index, direction), lang === 'zh' ? '調整景點順序' : 'Reorder spots')) {
+      return;
+    }
     const items = [...activeDay.items];
     const targetIdx = direction === 'up' ? index - 1 : index + 1;
     if (targetIdx < 0 || targetIdx >= items.length) return;
@@ -526,6 +537,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   };
 
   const handleAddDay = () => {
+    if (requireAuth && !requireAuth(handleAddDay, lang === 'zh' ? '增加行程天數' : 'Add day')) {
+      return;
+    }
     const newDayNum = trip.days.length + 1;
     const lastDay = trip.days[trip.days.length - 1];
     let nextDate = trip.endDate;

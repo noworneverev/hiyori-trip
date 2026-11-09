@@ -23,6 +23,7 @@ interface PackingTabProps {
   trip: Trip;
   lang: Language;
   onUpdateTrip: (updatedTrip: Trip) => void;
+  requireAuth?: (action: () => void, reason?: string) => boolean;
 }
 
 const PACKING_CATEGORY_MAP: Record<
@@ -82,7 +83,7 @@ const DEFAULT_TODOS: TodoItem[] = [
   },
 ];
 
-export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip }) => {
+export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip, requireAuth }) => {
   const [showCompleted, setShowCompleted] = useState(false);
 
   // Luggage Packing Modal State (Quiet on-demand tool, separate from main to-dos)
@@ -127,11 +128,17 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
 
   // Handlers for Todos
   const handleToggleTodo = (id: string) => {
+    if (requireAuth && !requireAuth(() => handleToggleTodo(id), lang === 'zh' ? '勾選待辦事項' : 'Toggle todo')) {
+      return;
+    }
     const updated = todos.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t));
     onUpdateTrip({ ...trip, todos: updated, updatedAt: Date.now() });
   };
 
   const handleDeleteTodo = (id: string) => {
+    if (requireAuth && !requireAuth(() => handleDeleteTodo(id), lang === 'zh' ? '刪除待辦事項' : 'Delete todo')) {
+      return;
+    }
     const updated = todos.filter((t) => t.id !== id);
     onUpdateTrip({ ...trip, todos: updated, updatedAt: Date.now() });
   };
@@ -140,6 +147,9 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
     e.preventDefault();
     const text = inlineTitle.trim();
     if (!text) return;
+    if (requireAuth && !requireAuth(() => handleInlineAdd(e), lang === 'zh' ? '新增待辦事項' : 'Add todo')) {
+      return;
+    }
 
     const newTodo: TodoItem = {
       id: `todo-${Date.now()}`,
@@ -155,6 +165,9 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
     e.preventDefault();
     const text = inputTitle.trim();
     if (!text) return;
+    if (requireAuth && !requireAuth(() => handleDetailedAdd(e), lang === 'zh' ? '新增待辦事項' : 'Add todo')) {
+      return;
+    }
 
     const newTodo: TodoItem = {
       id: `todo-${Date.now()}`,
@@ -170,6 +183,9 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
   };
 
   const handleLoadRecommendedTodos = () => {
+    if (requireAuth && !requireAuth(handleLoadRecommendedTodos, lang === 'zh' ? '載入建議清單' : 'Load default checklist')) {
+      return;
+    }
     const existing = new Set(todos.map((t) => t.title));
     const additions = DEFAULT_TODOS.filter((t) => !existing.has(t.title));
     onUpdateTrip({ ...trip, todos: [...todos, ...additions], updatedAt: Date.now() });
@@ -177,11 +193,17 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
 
   // Handlers for Packing Items (Inside Modal)
   const handleTogglePacking = (id: string) => {
+    if (requireAuth && !requireAuth(() => handleTogglePacking(id), lang === 'zh' ? '勾選行李清單' : 'Toggle packing')) {
+      return;
+    }
     const updated = packingList.map((p) => (p.id === id ? { ...p, packed: !p.packed } : p));
     onUpdateTrip({ ...trip, packingList: updated, updatedAt: Date.now() });
   };
 
   const handleDeletePacking = (id: string) => {
+    if (requireAuth && !requireAuth(() => handleDeletePacking(id), lang === 'zh' ? '刪除行李物品' : 'Delete packing item')) {
+      return;
+    }
     const updated = packingList.filter((p) => p.id !== id);
     onUpdateTrip({ ...trip, packingList: updated, updatedAt: Date.now() });
   };
@@ -190,6 +212,9 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
     e.preventDefault();
     const text = inlinePackingTitle.trim();
     if (!text) return;
+    if (requireAuth && !requireAuth(() => handleInlineAddPacking(e), lang === 'zh' ? '新增行李物品' : 'Add packing item')) {
+      return;
+    }
 
     const newPack: PackingItem = {
       id: `pack-${Date.now()}`,
@@ -202,6 +227,9 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
   };
 
   const handleLoadRecommendedPacking = () => {
+    if (requireAuth && !requireAuth(handleLoadRecommendedPacking, lang === 'zh' ? '載入必備行李' : 'Load default packing')) {
+      return;
+    }
     const existing = new Set(packingList.map((p) => p.name));
     const additions = DEFAULT_ESSENTIALS.filter((e) => !existing.has(e.name)).map((e, idx) => ({
       id: `pack-add-${Date.now()}-${idx}`,

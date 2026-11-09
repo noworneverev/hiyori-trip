@@ -7,12 +7,14 @@ interface NotesAndPrepTabProps {
   trip: Trip;
   lang: Language;
   onUpdateTrip: (updatedTrip: Trip) => void;
+  requireAuth?: (action: () => void, reason?: string) => boolean;
 }
 
 export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
   trip,
   lang,
   onUpdateTrip,
+  requireAuth,
 }) => {
-  return <PackingTab trip={trip} lang={lang} onUpdateTrip={onUpdateTrip} />;
+  return <PackingTab trip={trip} lang={lang} onUpdateTrip={onUpdateTrip} requireAuth={requireAuth} />;
 };

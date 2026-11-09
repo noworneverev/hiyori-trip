@@ -48,6 +48,7 @@ interface TripMemoriesViewProps {
   onSelectTrip?: (tripId: string) => void;
   onOpenGlobalHub?: () => void;
   initialSpotId?: string;
+  requireAuth?: (action: () => void, reason?: string) => boolean;
 }
 
 const PRESET_MOODS = [
@@ -71,6 +72,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   onSelectTrip,
   onOpenGlobalHub,
   initialSpotId,
+  requireAuth,
 }) => {
   const [viewMode, setViewMode] = useState<'itinerary' | 'gallery' | 'polaroid'>('itinerary');
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -110,13 +112,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     e.stopPropagation();
 
     if (!auth.currentUser) {
-      if (
-        confirm(
-          lang === 'zh'
-            ? '目前為本機單機模式，需先登入 Google 帳號才能將照片同步至雲端資料庫。是否立即登入？'
-            : 'Sign in with Google to sync this photo to cloud?'
-        )
-      ) {
+      if (requireAuth) {
+        requireAuth(() => handleForceSyncMemory(mem, e), lang === 'zh' ? '同步照片至雲端資料庫' : 'Sync photo to cloud');
+      } else {
         await loginWithGoogle();
       }
       return;
@@ -322,6 +320,21 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     window.addEventListener('auth_state_change', handleAuth);
     return () => window.removeEventListener('auth_state_change', handleAuth);
   }, []);
+
+  const canShowUploadAction = isAuthorizedUploader || !currentUser;
+
+  const handleTriggerUpload = (spotId?: string, isCustom = false) => {
+    if (requireAuth && !requireAuth(() => {
+      setUploadSpotId(spotId || '');
+      setIsCustomSpot(isCustom);
+      setShowUploadModal(true);
+    }, lang === 'zh' ? '上傳打卡相片' : 'Upload photo')) {
+      return;
+    }
+    setUploadSpotId(spotId || '');
+    setIsCustomSpot(isCustom);
+    setShowUploadModal(true);
+  };
 
   // Visited-only filter state for itinerary retrospection
   const [filterVisitedOnly, setFilterVisitedOnly] = useState(true);
@@ -705,6 +718,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
   // Delete memory
   const handleDeleteMemory = (memId: string) => {
+    if (requireAuth && !requireAuth(() => handleDeleteMemory(memId), lang === 'zh' ? '刪除回憶相片' : 'Delete photo')) {
+      return;
+    }
     if (!confirm(lang === 'zh' ? '確定要刪除這張回憶照片嗎？' : 'Delete this memory photo?')) {
       return;
     }
@@ -867,15 +883,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               </button>
             )}
 
-            {/* Upload Memory Photo Button (Only authorized) */}
-            {isAuthorizedUploader && (
+            {/* Upload Memory Photo Button */}
+            {canShowUploadAction && (
               <button
                 type="button"
-                onClick={() => {
-                  setUploadSpotId('');
-                  setIsCustomSpot(true);
-                  setShowUploadModal(true);
-                }}
+                onClick={() => handleTriggerUpload('', true)}
                 className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -1044,14 +1056,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 </button>
               </div>
 
-              {isAuthorizedUploader && (
+              {canShowUploadAction && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setUploadSpotId('');
-                    setIsCustomSpot(true);
-                    setShowUploadModal(true);
-                  }}
+                  onClick={() => handleTriggerUpload('', true)}
                   className="text-teal-600 dark:text-teal-400 font-bold hover:underline text-xs flex items-center gap-1 cursor-pointer"
                 >
                   <Plus className="w-3 h-3" />
@@ -1081,14 +1089,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     </p>
                   </div>
                 </div>
-                {isAuthorizedUploader && (
+                {canShowUploadAction && (
                   <button
                     type="button"
                     onClick={() => {
-                      setUploadSpotId('');
-                      setIsCustomSpot(true);
                       setCustomDayNumber('all');
-                      setShowUploadModal(true);
+                      handleTriggerUpload('', true);
                     }}
                     className="text-xs font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 flex items-center gap-1"
                   >
@@ -1693,7 +1699,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       )}
 
       {/* ================= 3. UPLOAD MEMORY PHOTO MODAL ================= */}
-      {showUploadModal && isAuthorizedUploader && (
+      {showUploadModal && canShowUploadAction && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150"
           onClick={() => setShowUploadModal(false)}
