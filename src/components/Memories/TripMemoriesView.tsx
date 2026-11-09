@@ -30,6 +30,8 @@ import {
   AlertTriangle,
   Cloud,
   CloudCheck,
+  CloudUpload,
+  RefreshCw,
   Loader2,
   ExternalLink,
   Edit2,
@@ -154,36 +156,43 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     }
   };
 
-  // Render small sync status badge for each photo card corner
+  // Render Google Photos style sync status badge for each photo card corner (Color-Blind Friendly)
   const renderSyncBadge = (mem: TripMemoryItem, className = '') => {
     const isThisSyncing = syncingMemIds.has(mem.id) || isGlobalSyncing;
     const isCloudSynced = Boolean(currentUser) && !isThisSyncing;
 
-    let dotColor = 'bg-slate-400 dark:bg-slate-500';
-    let statusText = lang === 'zh' ? '僅儲存在本機 (點擊手動同步至雲端)' : 'Stored locally (click to sync)';
-    let dotGlow = '';
+    // Status attributes designed for color-blind accessibility (Shape + Icon + Motion + Label)
+    let IconComponent = CloudUpload;
+    let iconClass = 'text-white/95 stroke-[2.2]';
+    let label = lang === 'zh' ? '上傳備份' : 'Backup';
+    let statusTitle = lang === 'zh' ? '僅存於本機 (點擊立即備份至雲端資料庫)' : 'Stored locally (tap to backup)';
+    let badgeBorder = 'border-white/30 bg-slate-900/80 hover:bg-slate-900 text-white';
 
     if (isThisSyncing) {
-      dotColor = 'bg-amber-400 animate-pulse';
-      dotGlow = 'shadow-[0_0_8px_rgba(251,191,36,0.9)]';
-      statusText = lang === 'zh' ? '同步中...' : 'Syncing...';
+      IconComponent = RefreshCw;
+      iconClass = 'text-amber-300 animate-spin stroke-[2.2]';
+      label = lang === 'zh' ? '備份中...' : 'Syncing...';
+      statusTitle = lang === 'zh' ? '正在備份同步至雲端資料庫...' : 'Syncing to cloud...';
+      badgeBorder = 'border-amber-400/50 bg-slate-900/90 text-amber-200';
     } else if (isCloudSynced) {
-      dotColor = 'bg-emerald-400';
-      dotGlow = 'shadow-[0_0_6px_rgba(52,211,153,0.85)]';
-      statusText = lang === 'zh' ? '已同步至雲端 (點擊手動強制同步)' : 'Synced to cloud (click to force sync)';
+      IconComponent = CloudCheck;
+      iconClass = 'text-emerald-300 stroke-[2.2]';
+      label = lang === 'zh' ? '已備份' : 'Backed up';
+      statusTitle = lang === 'zh' ? '已備份至雲端 (點擊手動重新整理)' : 'Backed up to cloud (tap to re-sync)';
+      badgeBorder = 'border-emerald-500/40 bg-slate-900/80 hover:bg-slate-900 text-emerald-200';
     }
 
     return (
       <button
         type="button"
         onClick={(e) => handleForceSyncMemory(mem, e)}
-        title={statusText}
-        aria-label={statusText}
-        className={`px-1.5 py-1 rounded-full bg-black/60 hover:bg-black/85 backdrop-blur-md border border-white/20 transition-all flex items-center gap-1 cursor-pointer shadow-xs active:scale-90 group/sync ${className}`}
+        title={statusTitle}
+        aria-label={statusTitle}
+        className={`px-2 py-1 rounded-full backdrop-blur-md border shadow-xs transition-all flex items-center gap-1 cursor-pointer active:scale-95 group/sync ${badgeBorder} ${className}`}
       >
-        <span className={`w-2 h-2 rounded-full shrink-0 transition-colors ${dotColor} ${dotGlow}`} />
-        <span className="text-[9px] font-bold text-white/95 hidden group-hover/sync:inline whitespace-nowrap pr-0.5">
-          {isThisSyncing ? '同步中' : isCloudSynced ? '已同步' : '本機'}
+        <IconComponent className={`w-3.5 h-3.5 shrink-0 ${iconClass}`} />
+        <span className="text-[10px] font-bold tracking-tight whitespace-nowrap">
+          {label}
         </span>
       </button>
     );
