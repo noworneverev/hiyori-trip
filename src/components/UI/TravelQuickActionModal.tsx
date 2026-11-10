@@ -107,6 +107,62 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   const [expenseCat, setExpenseCat] = useState<string>('food');
   const [expensePayment, setExpensePayment] = useState<PaymentMethod>('cash');
   const [expenseDate, setExpenseDate] = useState<string>(() => getLocalTodayDate());
+  const amountInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Smooth focus on mount / tab change without aggressive scroll jumps
+  useEffect(() => {
+    if (activeTab === 'expense') {
+      const timer = setTimeout(() => {
+        amountInputRef.current?.focus({ preventScroll: true });
+      }, 180);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab]);
+
+  // Adaptive font sizing based on length of input value
+  const getAmountFontSize = (val: string) => {
+    const raw = val.replace(/[^0-9]/g, '');
+    const len = raw.length;
+    if (len >= 10) return 'text-base sm:text-lg';
+    if (len >= 7) return 'text-lg sm:text-xl';
+    if (len >= 5) return 'text-xl sm:text-2xl';
+    return 'text-2xl sm:text-3xl';
+  };
+
+  // Quick preset increments based on currency denomination
+  const quickPresets = React.useMemo(() => {
+    if (['JPY', 'KRW', 'VND', 'IDR'].includes(expenseCur)) {
+      return [500, 1000, 5000, 10000];
+    }
+    if (['TWD', 'THB', 'PHP', 'INR'].includes(expenseCur)) {
+      return [50, 100, 500, 1000];
+    }
+    return [5, 10, 20, 50];
+  }, [expenseCur]);
+
+  const handleAmountChange = (val: string) => {
+    let cleaned = val.replace(/,/g, '.');
+    cleaned = cleaned.replace(/[^0-9.]/g, '');
+    const parts = cleaned.split('.');
+    if (parts.length > 2) {
+      cleaned = parts[0] + '.' + parts.slice(1).join('');
+    }
+    if (['JPY', 'KRW', 'VND'].includes(expenseCur) && cleaned.includes('.')) {
+      cleaned = cleaned.split('.')[0];
+    }
+    setExpenseAmount(cleaned);
+  };
+
+  const handleQuickIncrement = (delta: number) => {
+    const current = parseFloat(expenseAmount) || 0;
+    const next = Math.round((current + delta) * 100) / 100;
+    setExpenseAmount(String(next));
+  };
+
+  const handleClearAmount = () => {
+    setExpenseAmount('');
+    amountInputRef.current?.focus({ preventScroll: true });
+  };
 
   // Custom Category & Editing States in Quick Modal
   const [showQuickNewCat, setShowQuickNewCat] = useState<boolean>(false);
@@ -440,7 +496,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
         {/* ================= TAB 1: FAST EXPENSE (DEFAULT) ================= */}
         {activeTab === 'expense' && (
           <form onSubmit={handleSaveQuickExpense} className="flex-1 flex flex-col min-h-0 overflow-hidden max-w-full">
-            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5 space-y-3.5 touch-pan-y max-w-full">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5 space-y-3.5 touch-pan-y max-w-full overscroll-contain">
               {/* Currency Quick Bar & Amount Input */}
               <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-2 max-w-full overflow-hidden">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
@@ -448,7 +504,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                     記帳幣別：
                   </span>
                   {/* Currency selector chips & dropdown */}
-                  <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar scroll-smooth max-w-full">
+                  <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar scroll-smooth max-w-full overscroll-x-contain touch-pan-x">
                     {['EUR', 'JPY', 'USD', 'KRW', 'GBP', 'THB', 'TWD'].map((code) => {
                       const meta = CURRENCY_MAP[code];
                       return (
@@ -480,25 +536,53 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                   </div>
                 </div>
 
-                {/* Amount input: refined, ergonomic size (text-lg font-mono font-bold) */}
-                <div className="flex items-stretch rounded-xl bg-white dark:bg-slate-900 border-2 border-teal-600/80 focus-within:border-teal-500 overflow-hidden shadow-xs h-12">
-                  <span className="inline-flex items-center px-3 bg-teal-50 dark:bg-teal-950/60 border-r border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-300 font-bold font-mono text-sm select-none shrink-0">
+                {/* Amount input: dynamic adaptive font size with smooth mobile keyboard interaction */}
+                <div className="flex items-center rounded-2xl bg-white dark:bg-slate-900 border-2 border-teal-600/80 focus-within:border-teal-500 focus-within:ring-2 focus-within:ring-teal-500/20 overflow-hidden shadow-xs min-h-[52px] sm:min-h-[56px] transition-all">
+                  <span className="inline-flex items-center justify-center px-3.5 self-stretch bg-teal-50 dark:bg-teal-950/60 border-r border-teal-200 dark:border-teal-800 text-teal-800 dark:text-teal-300 font-bold font-mono text-base select-none shrink-0">
                     {CURRENCY_MAP[expenseCur]?.symbol || expenseCur}
                   </span>
                   <input
-                    type="number"
+                    ref={amountInputRef}
+                    type="text"
                     inputMode="decimal"
-                    step="any"
+                    pattern="[0-9]*[.,]?[0-9]*"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
                     required
                     value={expenseAmount}
-                    onChange={(e) => setExpenseAmount(e.target.value)}
-                    placeholder="請輸入消費金額..."
-                    className="flex-1 px-3 py-2 bg-transparent text-lg font-bold font-mono text-slate-900 dark:text-white placeholder:text-slate-400 placeholder:text-sm placeholder:font-normal outline-none min-w-0"
-                    autoFocus
+                    onChange={(e) => handleAmountChange(e.target.value)}
+                    placeholder="0.00"
+                    className={`flex-1 px-3.5 py-2 bg-transparent font-bold font-mono tabular-nums text-slate-900 dark:text-white placeholder:text-slate-400 placeholder:text-sm sm:placeholder:text-base placeholder:font-normal outline-none min-w-0 transition-all ${getAmountFontSize(expenseAmount)}`}
                   />
-                  <span className="inline-flex items-center pr-3 text-xs font-bold text-slate-400 font-mono shrink-0 select-none">
+                  {expenseAmount && (
+                    <button
+                      type="button"
+                      onClick={handleClearAmount}
+                      className="p-1.5 mr-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition active:scale-95 shrink-0 cursor-pointer"
+                      aria-label="清除金額"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                  <span className="inline-flex items-center pr-3.5 text-xs font-bold text-slate-400 font-mono shrink-0 select-none">
                     {expenseCur}
                   </span>
+                </div>
+
+                {/* Quick Amount Increment Chips */}
+                <div className="flex items-center gap-1.5 pt-0.5 overflow-x-auto no-scrollbar overscroll-x-contain touch-pan-x">
+                  <span className="text-[11px] text-slate-400 dark:text-slate-500 font-medium shrink-0">快速累加:</span>
+                  {quickPresets.map((delta) => (
+                    <button
+                      key={delta}
+                      type="button"
+                      onClick={() => handleQuickIncrement(delta)}
+                      className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800/90 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-slate-700 dark:text-slate-200 hover:text-teal-700 dark:hover:text-teal-300 border border-slate-200 dark:border-slate-700 text-xs font-mono font-semibold transition active:scale-95 shadow-2xs shrink-0 cursor-pointer"
+                    >
+                      +{delta >= 1000 ? `${(delta / 1000).toLocaleString()}k` : delta}
+                    </button>
+                  ))}
                 </div>
 
                 {/* Live Home Currency Conversion line */}
