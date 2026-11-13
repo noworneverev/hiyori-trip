@@ -42,13 +42,18 @@ export class ErrorBoundary extends Component<Props, State> {
     }
   };
 
-  private handleReset = () => {
+  private handleReset = async () => {
     try {
-      localStorage.clear();
-      window.location.reload();
-    } catch (e) {
-      window.location.reload();
+      const { resetAllLocalData } = await import('../utils/storage');
+      await resetAllLocalData();
+    } catch {
+      try {
+        localStorage.clear();
+      } catch {
+        // ignore
+      }
     }
+    window.location.reload();
   };
 
   public render() {

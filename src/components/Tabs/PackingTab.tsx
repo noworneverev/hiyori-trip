@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { Trip, PackingItem, PackingCategory, TodoItem, TodoCategory } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
@@ -22,6 +22,7 @@ import {
 interface PackingTabProps {
   trip: Trip;
   lang: Language;
+  canEdit?: boolean;
   onUpdateTrip: (updatedTrip: Trip) => void;
   requireAuth?: (action: () => void, reason?: string) => boolean;
 }
@@ -83,7 +84,7 @@ const DEFAULT_TODOS: TodoItem[] = [
   },
 ];
 
-export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip, requireAuth }) => {
+export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = true, onUpdateTrip, requireAuth }) => {
   const [showCompleted, setShowCompleted] = useState(false);
 
   // Luggage Packing Modal State (Quiet on-demand tool, separate from main to-dos)
@@ -97,6 +98,18 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
   useBodyScrollLock(isAddSheetOpen);
   const [inputTitle, setInputTitle] = useState('');
   const [inputDueDate, setInputDueDate] = useState('');
+
+  useEffect(() => {
+    if (!isPackingModalOpen && !isAddSheetOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isAddSheetOpen) setIsAddSheetOpen(false);
+        else if (isPackingModalOpen) setIsPackingModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isPackingModalOpen, isAddSheetOpen]);
 
   // Inline Quick Add input
   const [inlineTitle, setInlineTitle] = useState('');
@@ -128,6 +141,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
 
   // Handlers for Todos
   const handleToggleTodo = (id: string) => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleToggleTodo(id), lang === 'zh' ? '勾選待辦事項' : 'Toggle todo')) {
       return;
     }
@@ -136,15 +150,22 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
   };
 
   const handleDeleteTodo = (id: string) => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleDeleteTodo(id), lang === 'zh' ? '刪除待辦事項' : 'Delete todo')) {
       return;
     }
     const updated = todos.filter((t) => t.id !== id);
-    onUpdateTrip({ ...trip, todos: updated, updatedAt: Date.now() });
+    onUpdateTrip({
+      ...trip,
+      todos: updated,
+      deletedItemIds: { ...(trip.deletedItemIds || {}), [id]: Date.now() },
+      updatedAt: Date.now(),
+    });
   };
 
   const handleInlineAdd = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     const text = inlineTitle.trim();
     if (!text) return;
     if (requireAuth && !requireAuth(() => handleInlineAdd(e), lang === 'zh' ? '新增待辦事項' : 'Add todo')) {
@@ -163,6 +184,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
 
   const handleDetailedAdd = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     const text = inputTitle.trim();
     if (!text) return;
     if (requireAuth && !requireAuth(() => handleDetailedAdd(e), lang === 'zh' ? '新增待辦事項' : 'Add todo')) {
@@ -183,6 +205,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
   };
 
   const handleLoadRecommendedTodos = () => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(handleLoadRecommendedTodos, lang === 'zh' ? '載入建議清單' : 'Load default checklist')) {
       return;
     }
@@ -193,6 +216,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
 
   // Handlers for Packing Items (Inside Modal)
   const handleTogglePacking = (id: string) => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleTogglePacking(id), lang === 'zh' ? '勾選行李清單' : 'Toggle packing')) {
       return;
     }
@@ -201,15 +225,22 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
   };
 
   const handleDeletePacking = (id: string) => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleDeletePacking(id), lang === 'zh' ? '刪除行李物品' : 'Delete packing item')) {
       return;
     }
     const updated = packingList.filter((p) => p.id !== id);
-    onUpdateTrip({ ...trip, packingList: updated, updatedAt: Date.now() });
+    onUpdateTrip({
+      ...trip,
+      packingList: updated,
+      deletedItemIds: { ...(trip.deletedItemIds || {}), [id]: Date.now() },
+      updatedAt: Date.now(),
+    });
   };
 
   const handleInlineAddPacking = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     const text = inlinePackingTitle.trim();
     if (!text) return;
     if (requireAuth && !requireAuth(() => handleInlineAddPacking(e), lang === 'zh' ? '新增行李物品' : 'Add packing item')) {
@@ -227,6 +258,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
   };
 
   const handleLoadRecommendedPacking = () => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(handleLoadRecommendedPacking, lang === 'zh' ? '載入必備行李' : 'Load default packing')) {
       return;
     }
@@ -264,15 +296,17 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
 
           {/* Quick Actions (Quiet Luggage Button & Recommended Templates) */}
           <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
-            <button
-              type="button"
-              onClick={handleLoadRecommendedTodos}
-              className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/60 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-2xs active:scale-95"
-              title="載入常用行前待辦範本"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-              <span>載入推薦</span>
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={handleLoadRecommendedTodos}
+                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/60 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-2xs active:scale-95"
+                title="載入常用行前待辦範本"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                <span>載入推薦</span>
+              </button>
+            )}
 
             {/* Quiet Luggage Button: opens packing modal without cluttering the main screen */}
             <button
@@ -305,39 +339,46 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
       {/* Main Checklist Card Container */}
       <div className="rounded-3xl bg-white dark:bg-[#1C1C1E] border border-slate-200/90 dark:border-zinc-800 shadow-sm overflow-hidden">
         {/* Apple Reminders-style Inline Quick Add Input */}
-        <form
-          onSubmit={handleInlineAdd}
-          className="p-3 sm:p-3.5 border-b border-slate-100 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/40 flex items-center gap-2.5 transition"
-        >
-          <div className="w-5 h-5 rounded-full border border-dashed border-slate-300 dark:border-zinc-600 flex items-center justify-center shrink-0">
-            <Plus className="w-3 h-3 text-slate-400 dark:text-zinc-500" />
-          </div>
-          <input
-            type="text"
-            value={inlineTitle}
-            onChange={(e) => setInlineTitle(e.target.value)}
-            placeholder="新增待辦事項... (例如：購買環球影城快通票、開通漫遊)"
-            className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-hidden"
-          />
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={() => setIsAddSheetOpen(true)}
-              className="px-2.5 py-1 rounded-lg text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition cursor-pointer text-xs font-medium"
-              title="展開詳細到期日設定"
-            >
-              詳細
-            </button>
-            {inlineTitle.trim() && (
+        {canEdit && (
+          <form
+            onSubmit={handleInlineAdd}
+            className="p-3 sm:p-3.5 border-b border-slate-100 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/40 flex items-center gap-2.5 transition"
+          >
+            <div className="w-5 h-5 rounded-full border border-dashed border-slate-300 dark:border-zinc-600 flex items-center justify-center shrink-0">
+              <Plus className="w-3 h-3 text-slate-400 dark:text-zinc-500" />
+            </div>
+            <input
+              type="text"
+              value={inlineTitle}
+              onChange={(e) => setInlineTitle(e.target.value)}
+              placeholder="新增待辦事項..."
+              className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-hidden"
+            />
+            <div className="flex items-center gap-1.5 shrink-0">
               <button
-                type="submit"
-                className="px-3 py-1 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold cursor-pointer transition shadow-xs"
+                type="button"
+                onClick={() => {
+                  if (requireAuth && !requireAuth(() => setIsAddSheetOpen(true), lang === 'zh' ? '新增待辦事項' : 'Add todo')) {
+                    return;
+                  }
+                  setIsAddSheetOpen(true);
+                }}
+                className="px-2.5 py-1.5 rounded-lg text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition cursor-pointer text-xs font-medium"
+                title="設定日期與詳細項目"
               >
-                新增
+                詳細
               </button>
-            )}
-          </div>
-        </form>
+              {inlineTitle.trim() && (
+                <button
+                  type="submit"
+                  className="px-3 py-1 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold cursor-pointer transition shadow-xs"
+                >
+                  新增
+                </button>
+              )}
+            </div>
+          </form>
+        )}
 
         {/* Active Todos List */}
         {displayedTodos.length === 0 ? (
@@ -346,10 +387,10 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
               <Check className="w-6 h-6 stroke-[2.5]" />
             </div>
             <p className="text-sm font-medium text-slate-700 dark:text-zinc-300">
-              目前沒有未完成的待辦事項！
+              尚無待辦事項
             </p>
             <p className="text-xs text-slate-400 dark:text-zinc-500 mt-1">
-              可於上方輸入框鍵入項目，或點擊「載入推薦」取得常用待辦
+              可從上方新增，或「載入推薦」常用清單
             </p>
           </div>
         ) : (
@@ -360,15 +401,18 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
                   key={todo.id}
                   className="flex items-center justify-between p-3.5 sm:p-4 hover:bg-slate-50/70 dark:hover:bg-white/5 transition group"
                 >
-                  <div className="flex items-start gap-3 min-w-0 flex-1">
-                    {/* Apple Round Checkbox */}
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    {/* Apple Round Checkbox with 36px touch wrapper */}
                     <button
                       type="button"
                       onClick={() => handleToggleTodo(todo.id)}
-                      className="mt-0.5 w-5 h-5 rounded-full border-2 border-slate-300 dark:border-zinc-600 hover:border-teal-500 dark:hover:border-teal-400 flex items-center justify-center transition cursor-pointer shrink-0"
+                      className="w-9 h-9 -ml-1.5 flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 group/chk"
                       title="標記完成"
+                      aria-label="標記完成"
                     >
-                      {todo.completed && <Check className="w-3 h-3 text-teal-600" />}
+                      <span className="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-zinc-600 group-hover/chk:border-teal-500 dark:group-hover/chk:border-teal-400 flex items-center justify-center transition">
+                        {todo.completed && <Check className="w-3 h-3 text-teal-600" />}
+                      </span>
                     </button>
 
                     <div className="min-w-0 flex-1">
@@ -384,14 +428,17 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteTodo(todo.id)}
-                    className="p-1.5 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 sm:opacity-0 group-hover:opacity-100 ml-2"
-                    title="刪除"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTodo(todo.id)}
+                      className="w-9 h-9 flex items-center justify-center rounded-xl text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer opacity-80 sm:opacity-0 group-hover:opacity-100 ml-1 shrink-0"
+                      title="刪除"
+                      aria-label="刪除"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -433,14 +480,16 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
                         {todo.title}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteTodo(todo.id)}
-                      className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
-                      title="刪除"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTodo(todo.id)}
+                        className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
+                        title="刪除"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -475,15 +524,17 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleLoadRecommendedPacking}
-                  className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 text-xs text-slate-600 dark:text-zinc-300 font-semibold flex items-center gap-1 transition cursor-pointer"
-                  title="載入行李打包範本"
-                >
-                  <Sparkles className="w-3 h-3 text-teal-600 dark:text-teal-400" />
-                  <span>載入範本</span>
-                </button>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={handleLoadRecommendedPacking}
+                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 text-xs text-slate-600 dark:text-zinc-300 font-semibold flex items-center gap-1 transition cursor-pointer"
+                    title="載入行李打包範本"
+                  >
+                    <Sparkles className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                    <span>載入範本</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setIsPackingModalOpen(false)}
@@ -495,27 +546,29 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
             </div>
 
             {/* Quick Add Form in Modal */}
-            <form
-              onSubmit={handleInlineAddPacking}
-              className="p-3 border-b border-slate-100 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/40 flex items-center gap-2 shrink-0"
-            >
-              <Plus className="w-4 h-4 text-slate-400 shrink-0" />
-              <input
-                type="text"
-                value={inlinePackingTitle}
-                onChange={(e) => setInlinePackingTitle(e.target.value)}
-                placeholder="新增隨身或託運行李物品..."
-                className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-hidden"
-              />
-              {inlinePackingTitle.trim() && (
-                <button
-                  type="submit"
-                  className="px-3 py-1 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold cursor-pointer transition shadow-xs"
-                >
-                  新增
-                </button>
-              )}
-            </form>
+            {canEdit && (
+              <form
+                onSubmit={handleInlineAddPacking}
+                className="p-3 border-b border-slate-100 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/40 flex items-center gap-2 shrink-0"
+              >
+                <Plus className="w-4 h-4 text-slate-400 shrink-0" />
+                <input
+                  type="text"
+                  value={inlinePackingTitle}
+                  onChange={(e) => setInlinePackingTitle(e.target.value)}
+                  placeholder="新增隨身或託運行李物品..."
+                  className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-hidden"
+                />
+                {inlinePackingTitle.trim() && (
+                  <button
+                    type="submit"
+                    className="px-3 py-1 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold cursor-pointer transition shadow-xs"
+                  >
+                    新增
+                  </button>
+                )}
+              </form>
+            )}
 
             {/* Category Pills in Modal (Clean text and icons, NO EMOJIS) */}
             <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none px-4 py-2.5 border-b border-slate-100 dark:border-zinc-800 shrink-0">
@@ -575,13 +628,16 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
                       key={item.id}
                       className="flex items-center justify-between p-2.5 hover:bg-slate-50/70 dark:hover:bg-white/5 transition rounded-xl"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
                         <button
                           type="button"
                           onClick={() => handleTogglePacking(item.id)}
-                          className="w-4 h-4 rounded-full border-2 border-slate-300 dark:border-zinc-600 hover:border-teal-500 flex items-center justify-center transition cursor-pointer shrink-0"
+                          className="w-9 h-9 -ml-1 flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 group/pchk"
+                          aria-label="標記打包"
                         >
-                          {item.packed && <Check className="w-2.5 h-2.5 text-teal-600" />}
+                          <span className="w-4 h-4 rounded-full border-2 border-slate-300 dark:border-zinc-600 group-hover/pchk:border-teal-500 flex items-center justify-center transition">
+                            {item.packed && <Check className="w-2.5 h-2.5 text-teal-600" />}
+                          </span>
                         </button>
                         <span className="text-xs sm:text-sm text-slate-900 dark:text-zinc-100 font-medium truncate">
                           {item.name}
@@ -592,13 +648,16 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
                         </span>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleDeletePacking(item.id)}
-                        className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer ml-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePacking(item.id)}
+                          className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer ml-1 shrink-0"
+                          aria-label="刪除物品"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   );
                 })
@@ -627,13 +686,15 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
                           {item.name}
                         </span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeletePacking(item.id)}
-                        className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer ml-1"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeletePacking(item.id)}
+                          className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer ml-1"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -670,9 +731,8 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, onUpdateTrip
               <div>
                 <input
                   type="text"
-                  autoFocus
                   required
-                  placeholder="輸入待辦名稱（例如：購買環球影城快通門票）"
+                  placeholder="輸入待辦名稱..."
                   value={inputTitle}
                   onChange={(e) => setInputTitle(e.target.value)}
                   className="w-full px-3.5 py-3 rounded-2xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-sm focus:outline-hidden focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400 dark:placeholder:text-zinc-500"

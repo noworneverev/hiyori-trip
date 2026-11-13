@@ -3,10 +3,11 @@ import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { Trip, TripMemoryItem, ItineraryItem } from '../../types/itinerary';
 import { formatDateSlash, formatMonthDaySlash, getDayOfWeek } from '../../utils/date';
 import { Language } from '../../utils/i18n';
-import { compressImageFile } from '../../utils/image';
+import { compressImageFile, storeImageAsMediaRef } from '../../utils/image';
 import { canUploadImages } from '../../utils/userPermissions';
 import { auth, loginWithGoogle, saveTripToCloud } from '../../utils/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { MediaImage } from '../UI/MediaImage';
 import {
   Camera,
   Upload,
@@ -44,6 +45,7 @@ interface TripMemoriesViewProps {
   trip: Trip;
   allTrips?: Trip[];
   lang: Language;
+  canEdit?: boolean;
   onUpdateTrip: (updatedTrip: Trip) => void;
   onSelectTrip?: (tripId: string) => void;
   onOpenGlobalHub?: () => void;
@@ -68,6 +70,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   trip,
   allTrips,
   lang,
+  canEdit = true,
   onUpdateTrip,
   onSelectTrip,
   onOpenGlobalHub,
@@ -84,6 +87,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const [currentUser, setCurrentUser] = useState<User | null>(auth.currentUser);
   const [isGlobalSyncing, setIsGlobalSyncing] = useState<boolean>(false);
   const [syncingMemIds, setSyncingMemIds] = useState<Set<string>>(new Set());
+  const [confirmDeleteMemId, setConfirmDeleteMemId] = useState<string | null>(null);
+  const [confirmDeleteSpotPhoto, setConfirmDeleteSpotPhoto] = useState<{ spotId: string; photoUrl: string } | null>(null);
 
   // Monitor Firebase Auth State
   useEffect(() => {
@@ -199,6 +204,24 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   // Lock background scroll when either modal or lightbox is open
   useBodyScrollLock(showUploadModal || Boolean(lightboxMemory));
 
+  // Escape key handler for Lightbox and Upload Modal
+  useEffect(() => {
+    if (!showUploadModal && !lightboxMemory) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (lightboxMemory) {
+          setLightboxMemory(null);
+          setConfirmDeleteMemId(null);
+        } else if (showUploadModal) {
+          setShowUploadModal(false);
+          setConfirmDeleteSpotPhoto(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showUploadModal, lightboxMemory]);
+
   // Form State for uploading new memory photo
   const [uploadSpotId, setUploadSpotId] = useState<string>(initialSpotId || '');
   const [isCustomSpot, setIsCustomSpot] = useState<boolean>(!initialSpotId);
@@ -311,19 +334,21 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     });
   }, [trip.memories, trip.days, trip.createdAt]);
 
-  const [isAuthorizedUploader, setIsAuthorizedUploader] = useState(() => canUploadImages());
+  const [isAuthorizedUploader, setIsAuthorizedUploader] = useState(() => canUploadImages({ canEdit }));
 
   useEffect(() => {
     const handleAuth = () => {
-      setIsAuthorizedUploader(canUploadImages());
+      setIsAuthorizedUploader(canUploadImages({ canEdit }));
     };
+    handleAuth();
     window.addEventListener('auth_state_change', handleAuth);
     return () => window.removeEventListener('auth_state_change', handleAuth);
-  }, []);
+  }, [canEdit]);
 
-  const canShowUploadAction = isAuthorizedUploader || !currentUser;
+  const canShowUploadAction = isAuthorizedUploader && canEdit;
 
   const handleTriggerUpload = (spotId?: string, isCustom = false) => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(() => {
       setUploadSpotId(spotId || '');
       setIsCustomSpot(isCustom);
@@ -354,8 +379,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   }, [allMemories, trip.days]);
 
   // Direct check-in toggle from photo memory view
-  const handleToggleSpotCompleted = (spotId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+  const performToggleSpotCompleted = (spotId: string) => {
     const updatedDays = trip.days.map((d) => ({
       ...d,
       items: d.items.map((it) => (it.id === spotId ? { ...it, completed: !it.completed } : it)),
@@ -365,6 +389,21 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       days: updatedDays,
       updatedAt: Date.now(),
     });
+  };
+
+  const handleToggleSpotCompleted = (spotId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!canEdit) return;
+    if (
+      requireAuth &&
+      !requireAuth(
+        () => performToggleSpotCompleted(spotId),
+        lang === 'zh' ? '標記景點造訪狀態' : 'Update visited status'
+      )
+    ) {
+      return;
+    }
+    performToggleSpotCompleted(spotId);
   };
 
   // Unassigned / general trip snapshots (not bound to a specific day spot or with custom dayNumber not matching days)
@@ -424,7 +463,16 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   }, [lightboxMemory?.id]);
 
   const handleSaveLightboxGoogleUrl = () => {
-    if (!lightboxMemory) return;
+    if (!canEdit || !lightboxMemory) return;
+    if (
+      requireAuth &&
+      !requireAuth(
+        () => handleSaveLightboxGoogleUrl(),
+        lang === 'zh' ? '修改原圖連結' : 'Edit original photo link'
+      )
+    ) {
+      return;
+    }
     const finalUrl = lightboxEditUrl.trim();
 
     // 1. Update current lightboxMemory in-memory
@@ -519,12 +567,14 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       const compressedList: string[] = [];
       for (const file of filesToProcess) {
         const compressed = await compressImageFile(file);
-        compressedList.push(compressed);
+        const ref = await storeImageAsMediaRef(trip.id, compressed);
+        compressedList.push(ref);
       }
 
       setUploadImagePreviews((prev) => [...prev, ...compressedList].slice(0, maxAllowed));
     } catch (err) {
       console.error('Failed to compress photo:', err);
+      setUploadLimitWarning(err instanceof Error ? err.message : '照片處理失敗，請確認格式或檔案大小（25MB 以內）後重試');
     } finally {
       setIsProcessingImage(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -536,11 +586,25 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     setUploadLimitWarning(null);
   };
 
-  // Delete an existing photo from a spot directly
+  // Delete an existing photo from a spot directly (after inline confirm)
   const handleDeleteExistingSpotPhoto = (spotId: string, photoUrl: string) => {
-    if (!confirm(lang === 'zh' ? '確定要移除此景點的這張照片嗎？' : 'Remove this photo from spot?')) {
+    if (!canEdit) return;
+    if (
+      requireAuth &&
+      !requireAuth(
+        () => handleDeleteExistingSpotPhoto(spotId, photoUrl),
+        lang === 'zh' ? '移除景點照片' : 'Remove spot photo'
+      )
+    ) {
       return;
     }
+
+    const now = Date.now();
+    const removedMemIds = (trip.memories || []).filter((m) => m.imageUrl === photoUrl).map((m) => m.id);
+    const deletedItemIds: Record<string, number> = { ...(trip.deletedItemIds || {}) };
+    removedMemIds.forEach((id) => {
+      deletedItemIds[id] = now;
+    });
 
     const updatedDays = trip.days.map((d) => ({
       ...d,
@@ -557,17 +621,20 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
     const updatedMemories = (trip.memories || []).filter((m) => m.imageUrl !== photoUrl);
 
+    setConfirmDeleteSpotPhoto(null);
     onUpdateTrip({
       ...trip,
       days: updatedDays,
       memories: updatedMemories,
-      updatedAt: Date.now(),
+      deletedItemIds,
+      updatedAt: now,
     });
   };
 
   // Submit and save new memories or update Google Photos link
   const handleSaveMemory = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) return;
     const hasNewPhotos = uploadImagePreviews.length > 0;
     const hasGoogleUrl = Boolean(uploadGooglePhotosUrl.trim());
     if (!hasNewPhotos && !hasGoogleUrl && !uploadCaption.trim()) return;
@@ -716,17 +783,20 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     }
   };
 
-  // Delete memory
+  // Delete memory (after inline confirm)
   const handleDeleteMemory = (memId: string) => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleDeleteMemory(memId), lang === 'zh' ? '刪除回憶相片' : 'Delete photo')) {
       return;
     }
-    if (!confirm(lang === 'zh' ? '確定要刪除這張回憶照片嗎？' : 'Delete this memory photo?')) {
-      return;
-    }
 
+    const now = Date.now();
     const targetMem = allMemories.find((m) => m.id === memId);
     const updatedMemories = (trip.memories || []).filter((m) => m.id !== memId);
+    const deletedItemIds: Record<string, number> = {
+      ...(trip.deletedItemIds || {}),
+      [memId]: now,
+    };
 
     // Also cleanup spot reference if present
     let updatedDays = trip.days;
@@ -745,11 +815,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       }));
     }
 
+    setConfirmDeleteMemId(null);
+    if (lightboxMemory?.id === memId) {
+      setLightboxMemory(null);
+    }
+
     onUpdateTrip({
       ...trip,
       days: updatedDays,
       memories: updatedMemories,
-      updatedAt: Date.now(),
+      deletedItemIds,
+      updatedAt: now,
     });
   };
 
@@ -828,12 +904,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   <span aria-hidden="true">·</span>
                   {currentUser ? (
                     <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200/80 dark:border-emerald-800">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                       <span>雲端已連線</span>
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-200/80 dark:border-amber-800" title="點擊右上角登入 Google 帳號以啟用雲端同步">
-                      <span>⚠️ 本機模式</span>
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-200/80 dark:border-amber-800" title="登入後同步至雲端">
+                      <span>本機模式</span>
                     </span>
                   )}
                 </div>
@@ -1111,7 +1187,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 flex items-center gap-3 shadow-2xs group"
                   >
                     <div className="relative shrink-0">
-                      <img
+                      <MediaImage
+                        tripId={trip.id}
+                        ownerId={trip.ownerId}
+                        collabId={trip.collabId}
                         src={m.imageUrl}
                         alt={m.caption}
                         className="w-16 h-16 rounded-xl object-cover cursor-pointer transition-transform group-hover:scale-105"
@@ -1133,13 +1212,32 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       </p>
                       <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
                         <span>漫遊隨拍</span>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteMemory(m.id)}
-                          className="text-slate-400 hover:text-rose-600 transition"
-                        >
-                          刪除
-                        </button>
+                        {canShowUploadAction && (confirmDeleteMemId === m.id ? (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteMemory(m.id)}
+                              className="px-2 py-1 rounded-lg bg-rose-600 text-white font-bold text-[10px] cursor-pointer"
+                            >
+                              確認刪除
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteMemId(null)}
+                              className="px-2 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] cursor-pointer"
+                            >
+                              取消
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteMemId(m.id)}
+                            className="px-2 py-1 rounded-lg text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                          >
+                            刪除
+                          </button>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -1166,7 +1264,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       {formatDateSlash(day.date)} ({getDayOfWeek(day.date, lang)})
                     </span>
                   </div>
-                  {isAuthorizedUploader && (
+                  {canShowUploadAction && (
                     <button
                       type="button"
                       onClick={() => {
@@ -1206,27 +1304,32 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                             className="relative aspect-16/10 bg-slate-100 dark:bg-slate-800 overflow-hidden cursor-pointer"
                             onClick={() => setLightboxMemory(firstPhoto)}
                           >
-                            <img
+                            <MediaImage
+                              tripId={trip.id}
+                              ownerId={trip.ownerId}
+                              collabId={trip.collabId}
                               src={firstPhoto.imageUrl}
                               alt={spot.title}
                               className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                             />
                             <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleToggleSpotCompleted(spot.id, e);
-                                }}
-                                className={`p-1.5 rounded-full backdrop-blur-md transition cursor-pointer ${
-                                  spot.completed
-                                    ? 'bg-emerald-600/90 text-white'
-                                    : 'bg-black/50 text-white/80 hover:bg-black/70'
-                                }`}
-                                title={spot.completed ? '已造訪' : '標記造訪'}
-                              >
-                                <Check className="w-3 h-3 stroke-[3]" />
-                              </button>
+                              {canEdit && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleSpotCompleted(spot.id, e);
+                                  }}
+                                  className={`p-1.5 rounded-full backdrop-blur-md transition cursor-pointer ${
+                                    spot.completed
+                                      ? 'bg-emerald-600/90 text-white'
+                                      : 'bg-black/50 text-white/80 hover:bg-black/70'
+                                  }`}
+                                  title={spot.completed ? '已造訪' : '標記造訪'}
+                                >
+                                  <Check className="w-3 h-3 stroke-[3]" />
+                                </button>
+                              )}
                             </div>
                             {/* Sync Status Badge (Click to force sync) */}
                             <div className="absolute top-2.5 right-2.5 z-10">
@@ -1239,33 +1342,63 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
                           {/* Multiple photos thumbnail strip */}
                           {spotMems.length > 1 && (
-                            <div className="px-3.5 pt-2.5 flex items-center gap-2">
-                              {spotMems.slice(0, 3).map((pm, pIdx) => (
-                                <div
-                                  key={pm.id}
-                                  className="relative w-12 h-12 rounded-xl overflow-hidden border-2 border-slate-200 dark:border-slate-700 hover:border-teal-500 cursor-pointer group/thumb shrink-0 transition"
-                                  onClick={() => setLightboxMemory(pm)}
-                                  title="放大相片"
-                                >
-                                  <img src={pm.imageUrl} alt="" className="w-full h-full object-cover group-hover/thumb:scale-110 transition" />
-                                  <div className="absolute top-0.5 left-0.5 z-10 scale-75 origin-top-left">
-                                    {renderSyncBadge(pm)}
+                            <div className="px-3.5 pt-2.5 space-y-2">
+                              <div className="flex items-center gap-2">
+                                {spotMems.slice(0, 3).map((pm) => (
+                                  <div
+                                    key={pm.id}
+                                    className="relative w-12 h-12 rounded-xl overflow-hidden border-2 border-slate-200 dark:border-slate-700 hover:border-teal-500 cursor-pointer group/thumb shrink-0 transition"
+                                    onClick={() => setLightboxMemory(pm)}
+                                    title="放大相片"
+                                  >
+                                    <MediaImage
+                                      tripId={trip.id}
+                                      ownerId={trip.ownerId}
+                                      collabId={trip.collabId}
+                                      src={pm.imageUrl}
+                                      alt=""
+                                      className="w-full h-full object-cover group-hover/thumb:scale-110 transition"
+                                    />
+                                    <div className="absolute top-0.5 left-0.5 z-10 scale-75 origin-top-left">
+                                      {renderSyncBadge(pm)}
+                                    </div>
+                                    {canShowUploadAction && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setConfirmDeleteMemId(pm.id);
+                                        }}
+                                        className="absolute top-0.5 right-0.5 w-6 h-6 rounded bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center transition opacity-90 sm:opacity-0 sm:group-hover/thumb:opacity-100 z-10 cursor-pointer"
+                                        title="刪除"
+                                      >
+                                        <Trash2 className="w-3 h-3 text-rose-300 hover:text-white" />
+                                      </button>
+                                    )}
                                   </div>
-                                  {isAuthorizedUploader && (
+                                ))}
+                              </div>
+                              {spotMems.some((pm) => pm.id === confirmDeleteMemId) && (
+                                <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-[11px]">
+                                  <span className="font-semibold text-rose-700 dark:text-rose-300">刪除此相片？</span>
+                                  <div className="flex items-center gap-1.5">
                                     <button
                                       type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDeleteMemory(pm.id);
-                                      }}
-                                      className="absolute top-0.5 right-0.5 w-5 h-5 rounded bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center transition opacity-0 group-hover/thumb:opacity-100 z-10"
-                                      title="刪除"
+                                      onClick={() => confirmDeleteMemId && handleDeleteMemory(confirmDeleteMemId)}
+                                      className="px-2.5 py-1 rounded-lg bg-rose-600 text-white font-bold cursor-pointer"
                                     >
-                                      <Trash2 className="w-3 h-3 text-rose-300 hover:text-white" />
+                                      確認刪除
                                     </button>
-                                  )}
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteMemId(null)}
+                                      className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 cursor-pointer"
+                                    >
+                                      取消
+                                    </button>
+                                  </div>
                                 </div>
-                              ))}
+                              )}
                             </div>
                           )}
 
@@ -1281,7 +1414,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                             </div>
                             <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px]">
                               <div className="flex items-center gap-2">
-                                {isAuthorizedUploader ? (
+                                {canShowUploadAction ? (
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -1312,15 +1445,34 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                                   </a>
                                 )}
                               </div>
-                              {isAuthorizedUploader && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteMemory(firstPhoto.id)}
-                                  className="text-slate-400 hover:text-rose-600 transition"
-                                  title="刪除主照"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
+                              {canShowUploadAction && (
+                                confirmDeleteMemId === firstPhoto.id ? (
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteMemory(firstPhoto.id)}
+                                      className="px-2 py-1 rounded-lg bg-rose-600 text-white font-bold text-[10px] cursor-pointer"
+                                    >
+                                      確認刪除
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteMemId(null)}
+                                      className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] cursor-pointer"
+                                    >
+                                      取消
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteMemId(firstPhoto.id)}
+                                    className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                                    title="刪除主照"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )
                               )}
                             </div>
                           </div>
@@ -1335,7 +1487,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                         <div
                           key={spot.id}
                           onClick={() => {
-                            if (isAuthorizedUploader) {
+                            if (canShowUploadAction) {
                               setUploadSpotId(spot.id);
                               setIsCustomSpot(false);
                               setUploadGooglePhotosUrl(spot.googlePhotosUrl || '');
@@ -1343,20 +1495,24 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                             }
                           }}
                           className={`rounded-3xl border border-emerald-300/80 dark:border-emerald-800/70 p-4 transition flex flex-col justify-between min-h-[130px] group bg-emerald-50/25 dark:bg-emerald-950/20 shadow-2xs ${
-                            isAuthorizedUploader ? 'hover:border-emerald-500 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/30 cursor-pointer' : ''
+                            canShowUploadAction ? 'hover:border-emerald-500 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/30 cursor-pointer' : ''
                           }`}
                         >
                           <div className="space-y-1.5">
                             <div className="flex items-center justify-between text-xs">
                               <span className="font-mono text-[10px] text-emerald-700 dark:text-emerald-400 font-semibold">{spot.startTime || '行程安排'}</span>
-                              <button
-                                type="button"
-                                onClick={(e) => handleToggleSpotCompleted(spot.id, e)}
-                                className="p-1 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition cursor-pointer"
-                                title="已造訪（點擊切換）"
-                              >
-                                <CheckCircle2 className="w-4 h-4" />
-                              </button>
+                              {canEdit ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleToggleSpotCompleted(spot.id, e)}
+                                  className="p-1 rounded-lg text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition cursor-pointer"
+                                  title="已造訪（點擊切換）"
+                                >
+                                  <CheckCircle2 className="w-4 h-4" />
+                                </button>
+                              ) : (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                              )}
                             </div>
                             <h5 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition">
                               {spot.title}
@@ -1367,7 +1523,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                               </p>
                             )}
                           </div>
-                          {isAuthorizedUploader && (
+                          {canShowUploadAction && (
                             <div className="pt-3 border-t border-emerald-100 dark:border-emerald-900/60 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-400 font-bold">
                               <span className="flex items-center gap-1 text-[11px]">
                                 <Camera className="w-3.5 h-3.5" />
@@ -1389,14 +1545,16 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between text-xs text-slate-400">
                             <span className="font-mono text-[10px]">{spot.startTime || '行程安排'}</span>
-                            <button
-                              type="button"
-                              onClick={(e) => handleToggleSpotCompleted(spot.id, e)}
-                              className="p-1 rounded-lg text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                              title="標記造訪"
-                            >
-                              <Circle className="w-4 h-4 stroke-[1.5]" />
-                            </button>
+                            {canEdit && (
+                              <button
+                                type="button"
+                                onClick={(e) => handleToggleSpotCompleted(spot.id, e)}
+                                className="p-1 rounded-lg text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                                title="標記造訪"
+                              >
+                                <Circle className="w-4 h-4 stroke-[1.5]" />
+                              </button>
+                            )}
                           </div>
                           <h5 className="font-bold text-xs sm:text-sm text-slate-700 dark:text-slate-300">
                             {spot.title}
@@ -1408,15 +1566,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                           )}
                         </div>
                         <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
-                          <button
-                            type="button"
-                            onClick={(e) => handleToggleSpotCompleted(spot.id, e)}
-                            className="text-xs font-semibold text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 flex items-center gap-1 transition"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>造訪</span>
-                          </button>
-                          {isAuthorizedUploader && (
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleToggleSpotCompleted(spot.id, e)}
+                              className="text-xs font-semibold text-slate-500 hover:text-emerald-600 dark:hover:text-emerald-400 flex items-center gap-1 transition"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>造訪</span>
+                            </button>
+                          )}
+                          {canShowUploadAction && (
                             <button
                               type="button"
                               onClick={() => {
@@ -1459,7 +1619,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                           key={m.id}
                           className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 flex items-center gap-3 shadow-2xs group"
                         >
-                          <img
+                          <MediaImage
+                            tripId={trip.id}
+                            ownerId={trip.ownerId}
+                            collabId={trip.collabId}
                             src={m.imageUrl}
                             alt={m.caption}
                             className="w-16 h-16 rounded-xl object-cover shrink-0 cursor-pointer"
@@ -1477,13 +1640,32 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                             </p>
                             <div className="flex items-center justify-between text-[10px] text-slate-400">
                               <span>自由隨拍</span>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteMemory(m.id)}
-                                className="text-slate-400 hover:text-rose-600"
-                              >
-                                刪除
-                              </button>
+                              {canShowUploadAction && (confirmDeleteMemId === m.id ? (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteMemory(m.id)}
+                                    className="px-2 py-1 rounded-lg bg-rose-600 text-white font-bold text-[10px] cursor-pointer"
+                                  >
+                                    確認刪除
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteMemId(null)}
+                                    className="px-2 py-1 rounded-lg bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-[10px] cursor-pointer"
+                                  >
+                                    取消
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteMemId(m.id)}
+                                  className="px-2 py-1 rounded-lg text-slate-400 hover:text-rose-600 cursor-pointer"
+                                >
+                                  刪除
+                                </button>
+                              ))}
                             </div>
                           </div>
                         </div>
@@ -1510,7 +1692,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 : 'Upload travel photos and captions to create a beautiful memory album and printable Polaroid cards.'}
             </p>
           </div>
-          {isAuthorizedUploader && (
+          {canShowUploadAction && (
             <button
               type="button"
               onClick={() => setShowUploadModal(true)}
@@ -1533,7 +1715,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 className="relative aspect-4/3 bg-slate-100 dark:bg-slate-800 overflow-hidden cursor-pointer"
                 onClick={() => setLightboxMemory(mem)}
               >
-                <img
+                <MediaImage
+                  tripId={trip.id}
+                  ownerId={trip.ownerId}
+                  collabId={trip.collabId}
                   src={mem.imageUrl}
                   alt={mem.caption}
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
@@ -1588,14 +1773,33 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 {/* Card Action footer */}
                 <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
                   <span className="text-[10px]">回憶相簿</span>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteMemory(mem.id)}
-                    className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
-                    title="刪除此照片"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {canShowUploadAction && (confirmDeleteMemId === mem.id ? (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteMemory(mem.id)}
+                        className="px-2.5 py-1 rounded-lg bg-rose-600 text-white font-bold text-[11px] cursor-pointer"
+                      >
+                        確認刪除
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteMemId(null)}
+                        className="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] cursor-pointer"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteMemId(mem.id)}
+                      className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                      title="刪除此照片"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -1639,7 +1843,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
                 {/* Photo Window (Square with film border effect) */}
                 <div className="relative aspect-square w-full bg-slate-900 overflow-hidden rounded-xs border border-slate-300/40 dark:border-slate-800 shadow-inner">
-                  <img
+                  <MediaImage
+                    tripId={trip.id}
+                    ownerId={trip.ownerId}
+                    collabId={trip.collabId}
                     src={mem.imageUrl}
                     alt={mem.caption}
                     className="w-full h-full object-cover filter contrast-[1.04] saturate-[1.05]"
@@ -1683,15 +1890,35 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   </div>
                 </div>
 
-                {/* Floating delete button (screen only) */}
-                <button
-                  type="button"
-                  onClick={() => handleDeleteMemory(mem.id)}
-                  className="no-print absolute top-2 right-2 opacity-0 group-hover:opacity-100 p-1.5 rounded-full bg-slate-900/70 text-white hover:bg-rose-600 transition shadow-md"
-                  title="刪除"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {/* Floating delete button / inline confirm (screen only) */}
+                {canShowUploadAction && (confirmDeleteMemId === mem.id ? (
+                  <div className="no-print absolute inset-x-3 bottom-2 z-20 flex items-center justify-center gap-2 p-2 rounded-xl bg-slate-900/95 text-white shadow-lg">
+                    <span className="text-[11px] font-bold">刪除此拍立得？</span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteMemory(mem.id)}
+                      className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-[11px] cursor-pointer"
+                    >
+                      刪除
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteMemId(null)}
+                      className="px-2 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-[11px] cursor-pointer"
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteMemId(mem.id)}
+                    className="no-print absolute top-2 right-2 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full bg-slate-900/70 text-white hover:bg-rose-600 transition shadow-md cursor-pointer"
+                    title="刪除"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                ))}
               </div>
             ))}
           </div>
@@ -1726,7 +1953,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowUploadModal(false)}
-                className="p-1.5 rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition"
+                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1736,30 +1963,24 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             <form onSubmit={handleSaveMemory} className="p-5 space-y-4 overflow-y-auto text-xs">
               {/* Cloud Connection & Auth Status Banner */}
               {!currentUser ? (
-                <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <p className="font-bold">⚠️ 目前為本機模式 (未登入 Google 帳號)</p>
-                    <p className="text-amber-700 dark:text-amber-300 text-[10px] leading-relaxed">
-                      照片目前僅保存在此裝置瀏覽器中。登入 Google 帳號即可永久備份至雲端 Firestore 資料庫，並與電腦及手機雙向即時同步！
-                    </p>
-                    <button
-                      type="button"
-                      onClick={loginWithGoogle}
-                      className="mt-1 px-3 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-[10px] flex items-center gap-1 transition cursor-pointer shadow-2xs active:scale-95"
-                    >
-                      <span>立即登入 Google 帳號啟用雲端儲存</span>
-                    </button>
-                  </div>
+                <div className="px-3 py-2.5 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-200 flex items-center justify-between gap-2">
+                  <span className="font-semibold flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span>本機模式 · 登入以啟用雲端備份</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={loginWithGoogle}
+                    className="px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-[10px] shrink-0 transition cursor-pointer active:scale-95"
+                  >
+                    登入 Google
+                  </button>
                 </div>
               ) : (
                 <div className="px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-[10px] text-emerald-800 dark:text-emerald-300 font-semibold flex items-center justify-between">
                   <span className="flex items-center gap-1.5 truncate">
                     <Cloud className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                    <span className="truncate">雲端資料庫已連線 ({currentUser.email || '已授權'})</span>
-                  </span>
-                  <span className="px-1.5 py-0.5 rounded text-[9px] bg-emerald-100 dark:bg-emerald-900/60 font-bold text-emerald-800 dark:text-emerald-200 shrink-0">
-                    即時雙向同步
+                    <span className="truncate">已連線雲端同步 ({currentUser.email || '已登入'})</span>
                   </span>
                 </div>
               )}
@@ -1775,29 +1996,50 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     <div className="mb-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
                       <div className="flex items-center justify-between text-[11px]">
                         <span className="font-bold text-slate-700 dark:text-slate-300">
-                          此景點已儲存照片
-                        </span>
-                        <span className="text-[10px] text-slate-400">
-                          點擊垃圾桶可移除
+                          已儲存照片 ({existingPhotos.length})
                         </span>
                       </div>
                       <div className="grid grid-cols-3 gap-2">
-                        {existingPhotos.map((photoUrl, pIdx) => (
-                          <div key={pIdx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 group">
-                            <img src={photoUrl} alt="" className="w-full h-full object-cover" />
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteExistingSpotPhoto(uploadSpotId, photoUrl)}
-                              className="absolute top-1 right-1 w-6 h-6 rounded-lg bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center transition z-10"
-                              title="移除此照片"
-                            >
-                              <Trash2 className="w-3.5 h-3.5 text-rose-300 hover:text-white" />
-                            </button>
-                            <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-md bg-black/70 text-[9px] text-white font-mono">
-                              #{pIdx + 1}
-                            </span>
-                          </div>
-                        ))}
+                        {existingPhotos.map((photoUrl, pIdx) => {
+                          const isConfirming =
+                            confirmDeleteSpotPhoto?.spotId === uploadSpotId &&
+                            confirmDeleteSpotPhoto?.photoUrl === photoUrl;
+                          return (
+                            <div key={pIdx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 group">
+                              <MediaImage tripId={trip.id} ownerId={trip.ownerId} collabId={trip.collabId} src={photoUrl} alt="" className="w-full h-full object-cover" />
+                              {isConfirming ? (
+                                <div className="absolute inset-0 bg-slate-900/85 flex flex-col items-center justify-center gap-1.5 p-1.5 z-20">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteExistingSpotPhoto(uploadSpotId, photoUrl)}
+                                    className="w-full py-1 rounded-lg bg-rose-600 text-white font-bold text-[10px] cursor-pointer"
+                                  >
+                                    確認移除
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteSpotPhoto(null)}
+                                    className="w-full py-1 rounded-lg bg-slate-700 text-slate-200 text-[10px] cursor-pointer"
+                                  >
+                                    取消
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmDeleteSpotPhoto({ spotId: uploadSpotId, photoUrl })}
+                                  className="absolute top-1 right-1 w-8 h-8 rounded-lg bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center transition z-10 cursor-pointer"
+                                  title="移除此照片"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-300 hover:text-white" />
+                                </button>
+                              )}
+                              <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-md bg-black/70 text-[9px] text-white font-mono">
+                                #{pIdx + 1}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -1832,7 +2074,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     <div className="grid grid-cols-3 gap-2">
                       {uploadImagePreviews.map((previewUrl, idx) => (
                         <div key={idx} className="relative aspect-square rounded-2xl overflow-hidden border-2 border-teal-500 shadow-xs group">
-                          <img
+                          <MediaImage
+                            tripId={trip.id}
+                            ownerId={trip.ownerId}
+                            collabId={trip.collabId}
                             src={previewUrl}
                             alt={`預覽 ${idx + 1}`}
                             className="w-full h-full object-cover"
@@ -2060,13 +2305,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               {/* Caption / Note */}
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  回憶隨筆與打卡心得 (將印製於拍立得下方)
+                  心得隨筆
                 </label>
                 <textarea
                   rows={2}
                   value={uploadCaption}
                   onChange={(e) => setUploadCaption(e.target.value)}
-                  placeholder="寫下當時的悸動、趣事或美味回憶..."
+                  placeholder="寫下當時心情或紀錄..."
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-teal-500 resize-none"
                 />
               </div>
@@ -2075,7 +2320,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block font-bold text-slate-700 dark:text-slate-300">
-                    Google 相簿連結 (可選，供日後檢視 4K / 原始照片)
+                    Google 相簿連結（選填）
                   </label>
                   {uploadGooglePhotosUrl && (
                     <a
@@ -2093,12 +2338,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   type="url"
                   value={uploadGooglePhotosUrl}
                   onChange={(e) => setUploadGooglePhotosUrl(e.target.value)}
-                  placeholder="貼上 Google 相簿分享連結 (如 https://photos.app.goo.gl/...)"
+                  placeholder="https://photos.app.goo.gl/..."
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400"
                 />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  綁定後可在大圖燈箱中一鍵直達 Google 相簿檢視原檔
-                </p>
               </div>
 
               {/* Submit Button */}
@@ -2106,7 +2348,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowUploadModal(false)}
-                  className="px-4 py-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold"
+                  className="px-4 py-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold cursor-pointer"
                 >
                   取消
                 </button>
@@ -2122,13 +2364,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   {isSavingMemory ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>正在同步儲存至雲端資料庫...</span>
+                      <span>儲存中...</span>
                     </>
                   ) : (
                     <>
                       <Check className="w-4 h-4" />
                       <span>
-                        {uploadImagePreviews.length > 0 ? '儲存相片至旅程相簿' : '儲存變更 / Google 相簿連結'}
+                        {uploadImagePreviews.length > 0 ? '儲存相片' : '儲存連結'}
                       </span>
                     </>
                   )}
@@ -2158,7 +2400,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               {/* Sync Status Badge */}
               {renderSyncBadge(lightboxMemory)}
 
-              {isAuthorizedUploader && (
+              {canShowUploadAction && (
                 <button
                   type="button"
                   onClick={() => setIsEditingLightboxUrl(!isEditingLightboxUrl)}
@@ -2182,23 +2424,42 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   <span className="sm:hidden">原圖</span>
                 </a>
               )}
-              {isAuthorizedUploader && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleDeleteMemory(lightboxMemory.id);
-                    setLightboxMemory(null);
-                  }}
-                  className="p-2 rounded-full bg-black/60 text-rose-300 hover:bg-rose-600 hover:text-white transition shadow-sm"
-                  title="刪除此相片"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+              {canShowUploadAction && (
+                confirmDeleteMemId === lightboxMemory.id ? (
+                  <div className="flex items-center gap-1.5 bg-black/80 px-2 py-1 rounded-full border border-rose-500/40">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteMemory(lightboxMemory.id)}
+                      className="px-2.5 py-1 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer"
+                    >
+                      確認刪除
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteMemId(null)}
+                      className="px-2 py-1 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs cursor-pointer"
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDeleteMemId(lightboxMemory.id)}
+                    className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full bg-black/60 text-rose-300 hover:bg-rose-600 hover:text-white transition shadow-sm cursor-pointer"
+                    title="刪除此相片"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )
               )}
               <button
                 type="button"
-                onClick={() => setLightboxMemory(null)}
-                className="p-2 rounded-full bg-black/60 text-white hover:bg-black/90 transition shadow-sm"
+                onClick={() => {
+                  setLightboxMemory(null);
+                  setConfirmDeleteMemId(null);
+                }}
+                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/90 transition shadow-sm cursor-pointer"
                 title="關閉"
               >
                 <X className="w-5 h-5" />
@@ -2255,20 +2516,26 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               {/* Display original high-resolution photo from googlePhotosUrl if available and not failed */}
               {lightboxMemory.googlePhotosUrl && !lightboxHighResFailed ? (
                 <div className="relative flex items-center justify-center max-h-[65vh]">
-                  <img
+                  <MediaImage
+                    tripId={trip.id}
+                    ownerId={trip.ownerId}
+                    collabId={trip.collabId}
                     src={lightboxMemory.googlePhotosUrl}
                     alt={lightboxMemory.caption}
                     onError={() => setLightboxHighResFailed(true)}
                     className="max-h-[65vh] w-auto max-w-full object-contain pointer-events-none"
                   />
                   <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-bold text-teal-300 border border-teal-500/30 flex items-center gap-1.5 shadow-sm">
-                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
-                    <span>Google 相簿高解析度原圖</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
+                    <span>Google 相簿高畫質原圖</span>
                   </div>
                 </div>
               ) : (
                 <div className="relative flex items-center justify-center max-h-[65vh]">
-                  <img
+                  <MediaImage
+                    tripId={trip.id}
+                    ownerId={trip.ownerId}
+                    collabId={trip.collabId}
                     src={lightboxMemory.imageUrl}
                     alt={lightboxMemory.caption}
                     className="max-h-[65vh] w-auto max-w-full object-contain pointer-events-none"
@@ -2315,7 +2582,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                         : 'border-transparent opacity-60 hover:opacity-100'
                     }`}
                   >
-                    <img src={m.imageUrl} alt="" className="w-full h-full object-cover" />
+                    <MediaImage tripId={trip.id} ownerId={trip.ownerId} collabId={trip.collabId} src={m.imageUrl} alt="" className="w-full h-full object-cover" />
                   </button>
                 ))}
               </div>

@@ -1,7 +1,7 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
+
     // Default Deny Catch-all
     match /{document=**} {
       allow read, write: if false;
@@ -9,7 +9,7 @@ service cloud.firestore {
 
     // Security Helpers
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
@@ -24,65 +24,241 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
     }
 
-    function isValidTrip(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.ownerId is string && data.ownerId == request.auth.uid &&
+    function isVerifiedOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function isValidOptionalString(data, field, maxLen) {
+      return !(field in data) || data[field] == null || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isValidOptionalList(data, field, maxLen) {
+      return !(field in data) || (data[field] is list && data[field].size() <= maxLen);
+    }
+
+    function isValidTripPayload(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'title', 'destination', 'startDate', 'endDate', 'currency', 'days']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.ownerId is string && data.ownerId.size() > 0 && data.ownerId.size() <= 128 &&
              data.title is string && data.title.size() <= 200 &&
              data.destination is string && data.destination.size() <= 200 &&
              data.startDate is string && data.startDate.size() <= 30 &&
              data.endDate is string && data.endDate.size() <= 30 &&
              data.currency is string && data.currency.size() <= 10 &&
-             data.days is list && data.days.size() <= 30;
+             data.days is list && data.days.size() <= 60 &&
+             isValidOptionalString(data, 'ownerEmail', 320) &&
+             isValidOptionalString(data, 'ownerName', 128) &&
+             isValidOptionalString(data, 'coverGradient', 120) &&
+             isValidOptionalString(data, 'notes', 20000) &&
+             isValidOptionalString(data, 'googlePhotosAlbumUrl', 1000) &&
+             isValidOptionalString(data, 'collabId', 128) &&
+             isValidOptionalString(data, 'lastUpdatedBy', 128) &&
+             isValidOptionalString(data, 'generalAccess', 30) &&
+             isValidOptionalList(data, 'packingList', 300) &&
+             isValidOptionalList(data, 'todos', 300) &&
+             isValidOptionalList(data, 'expenses', 500) &&
+             isValidOptionalList(data, 'emergencyContacts', 100) &&
+             isValidOptionalList(data, 'memories', 500) &&
+             isValidOptionalList(data, 'collaborators', 30) &&
+             isValidOptionalList(data, 'editorEmails', 30) &&
+             isValidOptionalList(data, 'viewerEmails', 30);
+    }
+
+    function isValidUserTrip(data, userId) {
+      return isValidTripPayload(data) &&
+             data.ownerId == userId &&
+             data.keys().hasOnly([
+               'id', 'ownerId', 'ownerEmail', 'title', 'destination', 'startDate', 'endDate',
+               'currency', 'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
+               'todos', 'expenses', 'customExpenseCategories', 'customCategoryLabels',
+               'customExchangeRates', 'emergencyContacts', 'memories', 'deletedItemIds',
+               'isSplitEnabled', 'splitMembers', 'initialCashAmount', 'initialCashCurrency',
+               'isSoloTrip', 'googlePhotosAlbumUrl', 'isCollaborative', 'collabId',
+               'collaborators', 'editorEmails', 'viewerEmails', 'generalAccess', 'lastUpdatedBy',
+               'lastSyncedAt', 'createdAt', 'updatedAt'
+             ]);
+    }
+
+    function isValidMediaAsset(data) {
+      return data.keys().hasAll(['id', 'tripId', 'ownerId', 'dataUrl', 'mimeType', 'byteSize', 'createdAt']) &&
+             data.keys().hasOnly(['id', 'tripId', 'ownerId', 'dataUrl', 'mimeType', 'byteSize', 'createdAt']) &&
+             data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
+             data.tripId is string && data.tripId.size() > 0 && data.tripId.size() <= 128 &&
+             data.ownerId is string && data.ownerId.size() > 0 && data.ownerId.size() <= 128 &&
+             data.dataUrl is string && data.dataUrl.size() > 0 && data.dataUrl.size() <= 900000 &&
+             data.mimeType is string && data.mimeType.size() <= 64 &&
+             data.byteSize is number && data.byteSize > 0 && data.byteSize <= 900000 &&
+             data.createdAt is number;
+    }
+
+    function isValidTombstoneMeta(data, userId) {
+      return data.keys().hasAll(['ownerId', 'deletedTrips', 'updatedAt']) &&
+             data.keys().hasOnly(['ownerId', 'deletedTrips', 'updatedAt']) &&
+             data.ownerId is string && data.ownerId == userId &&
+             data.deletedTrips is map &&
+             data.updatedAt is number;
     }
 
     function isValidSharedTrip(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.title is string && data.title.size() <= 200 &&
-             data.destination is string && data.destination.size() <= 200 &&
-             data.startDate is string && data.startDate.size() <= 30 &&
-             data.endDate is string && data.endDate.size() <= 30 &&
-             data.currency is string && data.currency.size() <= 10 &&
-             data.days is list && data.days.size() <= 30;
+      return isValidTripPayload(data) &&
+             data.keys().hasOnly([
+               'id', 'originalTripId', 'ownerId', 'title', 'destination', 'startDate', 'endDate',
+               'currency', 'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
+               'todos', 'expenses', 'customExpenseCategories', 'customCategoryLabels',
+               'customExchangeRates', 'emergencyContacts', 'memories', 'isSplitEnabled',
+               'splitMembers', 'isSoloTrip', 'googlePhotosAlbumUrl', 'publishedAt', 'updatedAt'
+             ]);
     }
 
-    // User Private Trips Collection
+    function isValidCollabTrip(data) {
+      return isValidTripPayload(data) &&
+             data.keys().hasOnly([
+               'id', 'collabId', 'isCollaborative', 'originalTripId', 'ownerId', 'ownerEmail',
+               'ownerName', 'generalAccess', 'collaborators', 'editorEmails', 'viewerEmails',
+               'title', 'destination', 'startDate', 'endDate', 'currency', 'budgetTotal',
+               'coverGradient', 'notes', 'days', 'packingList', 'todos', 'expenses',
+               'customExpenseCategories', 'customCategoryLabels', 'customExchangeRates',
+               'emergencyContacts', 'memories', 'deletedItemIds', 'isSplitEnabled',
+               'splitMembers', 'initialCashAmount', 'initialCashCurrency', 'isSoloTrip',
+               'googlePhotosAlbumUrl', 'createdAt', 'updatedAt', 'lastUpdatedBy'
+             ]);
+    }
+
+    function isCollabMemberData(parentData) {
+      return isVerifiedUser() && (
+        parentData.ownerId == request.auth.uid ||
+        (
+          request.auth.token.email is string && (
+            ('editorEmails' in parentData && parentData.editorEmails is list && request.auth.token.email.lower() in parentData.editorEmails) ||
+            ('viewerEmails' in parentData && parentData.viewerEmails is list && request.auth.token.email.lower() in parentData.viewerEmails)
+          )
+        )
+      );
+    }
+
+    function isCollabEditorData(parentData) {
+      return isVerifiedUser() && (
+        parentData.ownerId == request.auth.uid ||
+        parentData.generalAccess == 'link_editor' ||
+        (
+          'editorEmails' in parentData &&
+          parentData.editorEmails is list &&
+          request.auth.token.email is string &&
+          request.auth.token.email.lower() in parentData.editorEmails
+        )
+      );
+    }
+
+    // 1. User Private Trips Collection
     match /users/{userId}/trips/{tripId} {
-      allow get: if isOwner(userId) && isValidId(userId) && isValidId(tripId);
-      allow list: if isOwner(userId) && isValidId(userId);
-      allow create: if isOwner(userId) && isValidId(userId) && isValidId(tripId) &&
-                       incoming().ownerId == request.auth.uid &&
-                       isValidTrip(incoming());
-      allow update: if isOwner(userId) && isValidId(userId) && isValidId(tripId) &&
-                       incoming().ownerId == request.auth.uid &&
-                       (existing().ownerId == request.auth.uid || !('ownerId' in existing()) || existing().ownerId == 'guest') &&
-                       isValidTrip(incoming());
-      allow delete: if isOwner(userId) && isValidId(userId) && isValidId(tripId) &&
+      allow get: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(tripId);
+      allow list: if isVerifiedOwner(userId) && isValidId(userId) && resource.data.ownerId == request.auth.uid;
+      allow create: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(tripId) &&
+                       isValidUserTrip(incoming(), userId);
+      allow update: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(tripId) &&
+                       isValidUserTrip(incoming(), userId) &&
+                       incoming().ownerId == existing().ownerId;
+      allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(tripId) &&
                        existing().ownerId == request.auth.uid;
+
+      // Media Subcollection for Private User Trips
+      match /media/{mediaId} {
+        allow get: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(tripId) && isValidId(mediaId) &&
+                      get(/databases/$(database)/documents/users/$(userId)/trips/$(tripId)).data.ownerId == request.auth.uid;
+        allow list: if false;
+        allow create, update: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(tripId) && isValidId(mediaId) &&
+                               incoming().ownerId == request.auth.uid &&
+                               isValidMediaAsset(incoming());
+        allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(tripId) && isValidId(mediaId);
+      }
     }
 
-    // Public Shared Trips Collection (Anyone with link can read, no listing to prevent harvesting)
+    // 2. User Metadata & Deletion Tombstones
+    match /users/{userId}/meta/{metaId} {
+      allow get: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(metaId);
+      allow list: if false;
+      allow create, update: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(metaId) &&
+                             isValidTombstoneMeta(incoming(), userId);
+      allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(metaId);
+    }
+
+    // 3. Public Shared Trips Collection (Anyone with link can read; only verified owner can write/delete)
     match /shared_trips/{shareId} {
       allow get: if isValidId(shareId);
       allow list: if false;
-      allow create: if isValidId(shareId) && isValidSharedTrip(incoming());
-      allow update: if isValidId(shareId) && (
-                      (isSignedIn() && existing().ownerId == request.auth.uid) ||
-                      (!isSignedIn() && existing().ownerId == 'guest')
-                    ) && isValidSharedTrip(incoming());
-      allow delete: if isValidId(shareId) && isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerifiedUser() && isValidId(shareId) &&
+                       incoming().ownerId == request.auth.uid &&
+                       isValidSharedTrip(incoming());
+      allow update: if isVerifiedUser() && isValidId(shareId) &&
+                       existing().ownerId == request.auth.uid &&
+                       incoming().ownerId == existing().ownerId &&
+                       isValidSharedTrip(incoming());
+      allow delete: if isVerifiedUser() && isValidId(shareId) &&
+                       existing().ownerId == request.auth.uid;
+
+      match /media/{mediaId} {
+        allow get: if isValidId(shareId) && isValidId(mediaId) &&
+                      exists(/databases/$(database)/documents/shared_trips/$(shareId));
+        allow list: if false;
+        allow create, update: if isVerifiedUser() && isValidId(shareId) && isValidId(mediaId) &&
+                               incoming().ownerId == request.auth.uid &&
+                               isValidMediaAsset(incoming()) &&
+                               get(/databases/$(database)/documents/shared_trips/$(shareId)).data.ownerId == request.auth.uid;
+        allow delete: if isVerifiedUser() && isValidId(shareId) && isValidId(mediaId) &&
+                         get(/databases/$(database)/documents/shared_trips/$(shareId)).data.ownerId == request.auth.uid;
+      }
     }
 
-    // Collaborative Trips Collection (Multiplayer real-time co-editing)
+    // 4. Collaborative Trips Collection (No login required to view non-restricted link; verified auth required to edit)
     match /collab_trips/{collabId} {
-      allow get: if isValidId(collabId);
+      allow get: if isValidId(collabId) && (
+                      resource == null ||
+                      existing().generalAccess != 'restricted' ||
+                      isCollabMemberData(existing())
+                    );
       allow list: if false;
-      allow create: if isValidId(collabId) && isValidSharedTrip(incoming());
-      allow update: if isValidId(collabId) && isValidSharedTrip(incoming());
-      allow delete: if isValidId(collabId) && isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isVerifiedUser() && isValidId(collabId) &&
+                       incoming().ownerId == request.auth.uid &&
+                       isValidCollabTrip(incoming());
+      allow update: if isVerifiedUser() && isValidId(collabId) &&
+                       isValidCollabTrip(incoming()) &&
+                       incoming().ownerId == existing().ownerId &&
+                       (
+                         existing().ownerId == request.auth.uid ||
+                         (
+                           isCollabEditorData(existing()) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly([
+                             'title', 'destination', 'startDate', 'endDate', 'currency',
+                             'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
+                             'todos', 'expenses', 'customExpenseCategories', 'customCategoryLabels',
+                             'customExchangeRates', 'emergencyContacts', 'memories', 'deletedItemIds',
+                             'isSplitEnabled', 'splitMembers', 'initialCashAmount',
+                             'initialCashCurrency', 'isSoloTrip', 'googlePhotosAlbumUrl',
+                             'updatedAt', 'lastUpdatedBy'
+                           ])
+                         )
+                       );
+      allow delete: if isVerifiedUser() && isValidId(collabId) &&
+                       existing().ownerId == request.auth.uid;
+
+      match /media/{mediaId} {
+        allow get: if isValidId(collabId) && isValidId(mediaId) &&
+                      (
+                        get(/databases/$(database)/documents/collab_trips/$(collabId)).data.generalAccess != 'restricted' ||
+                        isCollabMemberData(get(/databases/$(database)/documents/collab_trips/$(collabId)).data)
+                      );
+        allow list: if false;
+        allow create, update: if isVerifiedUser() && isValidId(collabId) && isValidId(mediaId) &&
+                               incoming().ownerId == request.auth.uid &&
+                               isValidMediaAsset(incoming()) &&
+                               isCollabEditorData(get(/databases/$(database)/documents/collab_trips/$(collabId)).data);
+        allow delete: if isVerifiedUser() && isValidId(collabId) && isValidId(mediaId) &&
+                         isCollabEditorData(get(/databases/$(database)/documents/collab_trips/$(collabId)).data);
+      }
     }
   }
 }

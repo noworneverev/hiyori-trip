@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { TripConflict, resolveTripConflict } from '../../utils/syncManager';
 import { Trip } from '../../types/itinerary';
@@ -42,6 +42,15 @@ export const ConflictResolutionModal: React.FC<ConflictResolutionModalProps> = (
   const [showDetailedDiff, setShowDetailedDiff] = useState(false);
   const [isResolving, setIsResolving] = useState(false);
   const [selectedStrategy, setSelectedStrategy] = useState<'keep_local' | 'keep_cloud' | 'smart_merge' | null>(null);
+
+  useEffect(() => {
+    if (!conflicts || conflicts.length === 0) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [conflicts, onClose]);
 
   if (!conflicts || conflicts.length === 0) return null;
   const currentConflict = conflicts[currentIndex] || conflicts[0];
@@ -107,7 +116,7 @@ export const ConflictResolutionModal: React.FC<ConflictResolutionModalProps> = (
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 hover:bg-slate-200/50 dark:hover:bg-zinc-800 transition cursor-pointer"
+            className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 hover:bg-slate-200/50 dark:hover:bg-zinc-800 transition cursor-pointer shrink-0"
             title="稍後處理"
           >
             <X className="w-5 h-5" />
@@ -317,8 +326,8 @@ export const ConflictResolutionModal: React.FC<ConflictResolutionModalProps> = (
               </div>
               <p className="text-[11px] text-slate-600 dark:text-zinc-300 leading-relaxed">
                 {isZh
-                  ? '雙方變更都不遺失！系統將依項目 ID 智慧合併兩端新增的每日景點、行李清單與記帳記錄。'
-                  : 'Keep additions from both sides by smart ID-level union merge.'}
+                  ? '依項目合併雙方新增的景點、行李與記帳，互不覆蓋。'
+                  : 'Merge additions from both sides without overwriting.'}
               </p>
             </div>
 
@@ -412,7 +421,7 @@ export const ConflictResolutionModal: React.FC<ConflictResolutionModalProps> = (
         {/* Footer */}
         <div className="px-5 py-3.5 border-t border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 flex items-center justify-between text-xs">
           <p className="text-[11px] text-slate-400 dark:text-zinc-400">
-            {isZh ? '提示：選擇後立即更新本地快取並背景同步' : 'Selected strategy updates local cache instantly'}
+            {isZh ? '選擇後立即更新本機與雲端' : 'Updates local cache and cloud immediately'}
           </p>
 
           <button

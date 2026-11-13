@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Trip, ItineraryItem, CategoryType } from '../../types/itinerary';
 import { getGoogleMapsNavigationUrl, calculateDistanceKm, formatDistance } from '../../utils/geo';
-import { formatDateSlash, formatMonthDaySlash } from '../../utils/date';
+import { formatDateSlash, formatMonthDaySlash, getTodayLocal } from '../../utils/date';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
 import {
   WeatherData,
@@ -10,7 +10,7 @@ import {
   geocodeCity,
   getWeatherDescription,
 } from '../../utils/weather';
-import { detectTripCurrency } from '../../utils/currency';
+import { detectTripCurrency, convertAmount } from '../../utils/currency';
 import {
   Navigation,
   Clock,
@@ -43,10 +43,12 @@ import {
   ShoppingBag,
   Ticket,
 } from 'lucide-react';
+import { MediaImage } from '../UI/MediaImage';
 
 interface LiveCompanionTabProps {
   trip: Trip;
   lang: Language;
+  canEdit?: boolean;
   onUpdateTrip: (updatedTrip: Trip) => void;
   onNavigateToTimelineDay?: (dayNumber: number) => void;
   onOpenQuickAction?: (tab: 'expense' | 'todos') => void;
@@ -65,27 +67,18 @@ const CATEGORY_TAGS: Record<CategoryType, { label: string; Icon: React.Component
 export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   trip,
   lang,
+  canEdit = true,
   onUpdateTrip,
   onOpenQuickAction,
 }) => {
   const t = TRANSLATIONS[lang];
 
-  // Helper: get local today date
-  const getTodayDateStr = () => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
   const getInitialDayNumber = () => {
-    const today = getTodayDateStr();
-    const todayUtc = new Date().toISOString().slice(0, 10);
+    const today = getTodayLocal();
     // 1. Check if today matches any day in trip (with slash/dash normalization)
     const match = (trip.days || []).find((d) => {
       const dayDate = (d.date || '').slice(0, 10).replace(/\//g, '-');
-      return dayDate === today || dayDate === todayUtc;
+      return dayDate === today;
     });
     if (match) return match.dayNumber;
 
@@ -133,10 +126,14 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   const totalCount = activeDay.items.length;
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
-  // Today's Expense calculations
-  const todayDateStr = activeDay.date || new Date().toISOString().slice(0, 10);
+  // Today's Expense calculations (with mixed-currency conversion)
+  const tripCurrency = trip.currency || detectTripCurrency(trip);
+  const todayDateStr = activeDay.date || getTodayLocal();
   const todayExpenses = trip.expenses.filter((e) => e.date === todayDateStr);
-  const todayTotalSpent = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const todayTotalSpent = todayExpenses.reduce(
+    (sum, e) => sum + convertAmount(e.amount, e.currency || tripCurrency, tripCurrency, trip.customExchangeRates),
+    0
+  );
 
   // Toggle item expanded note state
   const toggleItemExpanded = (id: string) => {
@@ -224,6 +221,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
       e.preventDefault();
       e.stopPropagation();
     }
+    if (!canEdit) return;
     const updatedDays = trip.days.map((day) => ({
       ...day,
       items: day.items.map((it) => (it.id === itemId ? { ...it, completed: !it.completed } : it)),
@@ -268,12 +266,12 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
               今日支出 ({todayExpenses.length})
             </div>
             <div className="text-base sm:text-lg font-black font-mono text-amber-700 dark:text-amber-300">
-              {trip.currency || detectTripCurrency(trip)} {todayTotalSpent.toLocaleString()}
+              {tripCurrency} {todayTotalSpent.toLocaleString()}
             </div>
           </div>
         </div>
 
-        {onOpenQuickAction && (
+        {onOpenQuickAction && canEdit && (
           <button
             type="button"
             onClick={() => onOpenQuickAction('expense')}
@@ -549,7 +547,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
           </div>
 
           {/* Action Buttons */}
-          <div className="mt-5 grid grid-cols-2 gap-2.5">
+          <div className={`mt-5 grid gap-2.5 ${canEdit ? 'grid-cols-2' : 'grid-cols-1'}`}>
             <a
               href={getGoogleMapsNavigationUrl(nextItem)}
               target="_blank"
@@ -560,14 +558,16 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
               <span>{t.navGoogle}</span>
             </a>
 
-            <button
-              type="button"
-              onClick={(e) => handleToggleComplete(nextItem.id, e)}
-              className="py-2.5 px-3 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-md text-white font-bold text-xs flex items-center justify-center gap-1.5 border border-white/20 transition active:scale-95"
-            >
-              <CheckCircle2 className="w-4 h-4 text-teal-300" />
-              <span>{t.checked}</span>
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={(e) => handleToggleComplete(nextItem.id, e)}
+                className="py-2.5 px-3 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-md text-white font-bold text-xs flex items-center justify-center gap-1.5 border border-white/20 transition active:scale-95"
+              >
+                <CheckCircle2 className="w-4 h-4 text-teal-300" />
+                <span>{t.checked}</span>
+              </button>
+            )}
           </div>
         </div>
       ) : (
@@ -620,8 +620,9 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                   <div className="flex items-start gap-3 flex-1 min-w-0">
                     <button
                       type="button"
+                      disabled={!canEdit}
                       onClick={(e) => handleToggleComplete(item.id, e)}
-                      className="mt-0.5 shrink-0 text-slate-400 hover:text-emerald-600 transition"
+                      className={`mt-0.5 shrink-0 text-slate-400 transition ${canEdit ? 'hover:text-emerald-600 cursor-pointer' : 'cursor-default opacity-80'}`}
                       title={item.completed ? '標記為未完成' : '標記為已造訪'}
                     >
                       {item.completed ? (
@@ -674,18 +675,19 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                       href={getGoogleMapsNavigationUrl(item)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-900 transition active:scale-95"
+                      className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-900 transition active:scale-95"
                       title={t.navGoogle}
                     >
-                      <Navigation className="w-3.5 h-3.5" />
+                      <Navigation className="w-4 h-4" />
                     </a>
                     {(item.notes || item.transportNote) && (
                       <button
+                        type="button"
                         onClick={() => toggleItemExpanded(item.id)}
-                        className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition"
+                        className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition cursor-pointer"
                         title={isExpanded ? '收合說明' : '展開說明'}
                       >
-                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                       </button>
                     )}
                   </div>
@@ -737,8 +739,11 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                         </div>
                         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
                           {item.memoryPhotos.map((photo, pIdx) => (
-                            <img
+                            <MediaImage
                               key={pIdx}
+                              tripId={trip.id}
+                              ownerId={trip.ownerId}
+                              collabId={trip.collabId}
                               src={photo}
                               alt="Memory photo"
                               className="w-14 h-14 rounded-xl object-cover border border-rose-200 dark:border-rose-900 shadow-2xs shrink-0"

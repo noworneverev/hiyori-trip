@@ -1,6 +1,7 @@
 import { Trip } from '../types/itinerary';
 import { saveTripToCloud, deleteTripFromCloud, syncCollaborativeTrip, mergeSingleTrip } from './firebase';
 import { getStoredTrips, saveTrips, getDeletedTripIds } from './storage';
+import { idbGetSyncQueue, idbSaveSyncQueue } from './indexedDb';
 
 const QUEUE_STORAGE_KEY = 'hiyori_offline_sync_queue_v1';
 
@@ -16,8 +17,20 @@ export interface QueuedSyncItem {
 }
 
 /**
- * Retrieve current pending sync queue from localStorage
+ * Retrieve current pending sync queue (IndexedDB primary, localStorage fallback)
  */
+export async function getPendingQueueAsync(): Promise<QueuedSyncItem[]> {
+  try {
+    const idbQueue = await idbGetSyncQueue<QueuedSyncItem>();
+    if (idbQueue && idbQueue.length > 0) {
+      return idbQueue;
+    }
+  } catch {
+    // Fallback to localStorage
+  }
+  return getPendingQueue();
+}
+
 export function getPendingQueue(): QueuedSyncItem[] {
   try {
     const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
@@ -31,28 +44,28 @@ export function getPendingQueue(): QueuedSyncItem[] {
 }
 
 /**
- * Save pending sync queue to localStorage
+ * Save pending sync queue to both IndexedDB and localStorage fallback
  */
 function setPendingQueue(queue: QueuedSyncItem[]): void {
+  const capped = queue.slice(-30);
+  idbSaveSyncQueue(capped).catch(() => {});
   try {
-    const capped = queue.slice(-20);
     localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(capped));
   } catch (e) {
-    console.error('Error saving offline sync queue:', e);
+    console.warn('localStorage queue mirror skipped:', e);
   }
 }
 
 /**
- * Enqueue or update a pending trip save operation
+ * Enqueue or update a pending trip save operation (scoped to userId)
  */
 export function enqueueTripSave(userId: string, trip: Trip): void {
   const queue = getPendingQueue();
-  // If there is already a pending save for this trip, replace with newest version
   const filtered = queue.filter(
     (item) => !(item.type === 'save_trip' && item.userId === userId && item.trip?.id === trip.id)
   );
   filtered.push({
-    id: `save-${trip.id}-${Date.now()}`,
+    id: `save-${userId}-${trip.id}-${Date.now()}`,
     type: 'save_trip',
     userId,
     trip,
@@ -62,16 +75,15 @@ export function enqueueTripSave(userId: string, trip: Trip): void {
 }
 
 /**
- * Enqueue a pending trip delete operation
+ * Enqueue a pending trip delete operation (scoped to userId)
  */
 export function enqueueTripDelete(userId: string, tripId: string): void {
   const queue = getPendingQueue();
-  // Remove any pending saves for this trip, add delete
   const filtered = queue.filter(
     (item) => !(item.type === 'save_trip' && item.userId === userId && item.trip?.id === tripId)
   );
   filtered.push({
-    id: `delete-${tripId}-${Date.now()}`,
+    id: `delete-${userId}-${tripId}-${Date.now()}`,
     type: 'delete_trip',
     userId,
     tripId,
@@ -100,14 +112,16 @@ export function enqueueCollabSync(collabId: string, trip: Trip, editorName?: str
 }
 
 /**
- * Flush all pending offline sync tasks when network is available
+ * Flush pending offline sync tasks scoped to activeUserId when online
  */
-export async function flushPendingSyncQueue(): Promise<{ successCount: number; failedCount: number }> {
+export async function flushPendingSyncQueue(
+  activeUserId?: string | null
+): Promise<{ successCount: number; failedCount: number }> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     return { successCount: 0, failedCount: 0 };
   }
 
-  const queue = getPendingQueue();
+  const queue = await getPendingQueueAsync();
   if (queue.length === 0) return { successCount: 0, failedCount: 0 };
 
   const remaining: QueuedSyncItem[] = [];
@@ -115,6 +129,17 @@ export async function flushPendingSyncQueue(): Promise<{ successCount: number; f
   let failedCount = 0;
 
   for (const item of queue) {
+    // Keep another user's queued operations untouched until that account signs in
+    if ((item.type === 'save_trip' || item.type === 'delete_trip') && item.userId !== activeUserId) {
+      remaining.push(item);
+      continue;
+    }
+
+    if (item.type === 'sync_collab' && !activeUserId) {
+      remaining.push(item);
+      continue;
+    }
+
     try {
       if (item.type === 'save_trip' && item.userId && item.trip) {
         await saveTripToCloud(item.userId, item.trip);
@@ -137,9 +162,6 @@ export async function flushPendingSyncQueue(): Promise<{ successCount: number; f
   return { successCount, failedCount };
 }
 
-/**
- * Summary metrics of a trip for comparison in conflict resolution UI
- */
 export interface TripConflictSummary {
   spotCount: number;
   todoCount: number;
@@ -150,9 +172,6 @@ export interface TripConflictSummary {
   formattedDate: string;
 }
 
-/**
- * Conflict object representing divergent versions between Local and Cloud
- */
 export interface TripConflict {
   tripId: string;
   tripTitle: string;
@@ -166,9 +185,6 @@ export interface TripConflict {
   timeDiffMinutes: number;
 }
 
-/**
- * Format timestamp into readable localized date and time string
- */
 export function formatConflictTimestamp(ts?: number): string {
   if (!ts) return '未知時間';
   const d = new Date(ts);
@@ -183,9 +199,6 @@ export function formatConflictTimestamp(ts?: number): string {
   return `${year}/${month}/${day} ${hours}:${mins}:${secs}`;
 }
 
-/**
- * Generate quick summary comparison metrics for a trip
- */
 export function summarizeTripForConflict(trip: Trip): TripConflictSummary {
   const spotCount = (trip.days || []).reduce((acc, d) => acc + (d.items || []).length, 0);
   const todoCount = (trip.todos || []).length;
@@ -207,17 +220,13 @@ export function summarizeTripForConflict(trip: Trip): TripConflictSummary {
 }
 
 /**
- * Check if two trips have substantive content differences (not just noise).
- * Accurately tracks photos, Google Photos URLs, memories, notes, and timestamps
- * ensuring multi-device real-time consistency.
+ * Deeply compares two trips for substantive differences across schedule, checklists, expenses, permissions & photos.
  */
 export function hasTripContentDifference(a: Trip, b: Trip): boolean {
-  // 1. If timestamps differ, versions are distinct
   if ((a.updatedAt || 0) !== (b.updatedAt || 0)) {
     return true;
   }
 
-  // 2. High-level metric summary check
   const aSummary = summarizeTripForConflict(a);
   const bSummary = summarizeTripForConflict(b);
 
@@ -228,6 +237,7 @@ export function hasTripContentDifference(a: Trip, b: Trip): boolean {
     aSummary.expenseCount !== bSummary.expenseCount ||
     Math.round(aSummary.expenseTotal) !== Math.round(bSummary.expenseTotal) ||
     a.title !== b.title ||
+    a.destination !== b.destination ||
     a.startDate !== b.startDate ||
     a.endDate !== b.endDate ||
     (a.notes || '') !== (b.notes || '') ||
@@ -235,18 +245,21 @@ export function hasTripContentDifference(a: Trip, b: Trip): boolean {
     a.isSoloTrip !== b.isSoloTrip ||
     a.isSplitEnabled !== b.isSplitEnabled ||
     a.coverGradient !== b.coverGradient ||
-    (a.memories || []).length !== (b.memories || []).length
+    a.generalAccess !== b.generalAccess ||
+    (a.collaborators || []).length !== (b.collaborators || []).length ||
+    (a.memories || []).length !== (b.memories || []).length ||
+    Object.keys(a.deletedItemIds || {}).length !== Object.keys(b.deletedItemIds || {}).length
   ) {
     return true;
   }
 
-  // 3. Deep check memories content (photos, links, captions)
   const aMems = a.memories || [];
   const bMems = b.memories || [];
   for (let m = 0; m < aMems.length; m++) {
     const ma = aMems[m];
     const mb = bMems[m];
     if (
+      !mb ||
       ma.id !== mb.id ||
       ma.imageUrl !== mb.imageUrl ||
       ma.googlePhotosUrl !== mb.googlePhotosUrl ||
@@ -258,7 +271,6 @@ export function hasTripContentDifference(a: Trip, b: Trip): boolean {
     }
   }
 
-  // 4. Deep check day-by-day items & their photos/URLs
   const daysA = a.days || [];
   const daysB = b.days || [];
   if (daysA.length !== daysB.length) return true;
@@ -280,13 +292,13 @@ export function hasTripContentDifference(a: Trip, b: Trip): boolean {
         itA.startTime !== itB.startTime ||
         itA.endTime !== itB.endTime ||
         itA.notes !== itB.notes ||
+        itA.completed !== itB.completed ||
         itA.googlePhotosUrl !== itB.googlePhotosUrl ||
         itA.memoryNotes !== itB.memoryNotes
       ) {
         return true;
       }
 
-      // Check photos attached to spot
       const photosA = itA.memoryPhotos || [];
       const photosB = itB.memoryPhotos || [];
       if (photosA.length !== photosB.length) return true;
@@ -296,13 +308,25 @@ export function hasTripContentDifference(a: Trip, b: Trip): boolean {
     }
   }
 
+  const expA = a.expenses || [];
+  const expB = b.expenses || [];
+  for (let i = 0; i < expA.length; i++) {
+    const ea = expA[i];
+    const eb = expB[i];
+    if (
+      !eb ||
+      ea.id !== eb.id ||
+      ea.amount !== eb.amount ||
+      ea.title !== eb.title ||
+      (ea.receiptImages || []).length !== (eb.receiptImages || []).length
+    ) {
+      return true;
+    }
+  }
+
   return false;
 }
 
-/**
- * Detect conflicts between local trips and incoming cloud trips.
- * Triggered on offline-to-online transition, login, or initial sync.
- */
 export function detectTripConflicts(
   localTrips: Trip[],
   cloudTrips: Trip[]
@@ -317,7 +341,6 @@ export function detectTripConflicts(
     const cloudUpdated = cTrip.updatedAt || 0;
     const timeDiffMs = Math.abs(localUpdated - cloudUpdated);
 
-    // If modified more than 2 seconds apart AND content is different
     if (timeDiffMs > 2000 && hasTripContentDifference(lTrip, cTrip)) {
       const localSummary = summarizeTripForConflict(lTrip);
       const cloudSummary = summarizeTripForConflict(cTrip);
@@ -343,12 +366,6 @@ export function detectTripConflicts(
   return conflicts;
 }
 
-/**
- * Resolve a detected conflict by user choice:
- * - 'keep_local': Local version wins and is immediately pushed to cloud.
- * - 'keep_cloud': Cloud version wins and replaces local cache.
- * - 'smart_merge': Merges both versions preserving added items from both sides.
- */
 export async function resolveTripConflict(
   conflict: TripConflict,
   strategy: 'keep_local' | 'keep_cloud' | 'smart_merge',
@@ -366,7 +383,6 @@ export async function resolveTripConflict(
       ...conflict.cloudTrip,
     };
   } else {
-    // 'smart_merge'
     const merged = mergeSingleTrip(conflict.localTrip, conflict.cloudTrip);
     resolvedTrip = {
       ...merged,
@@ -374,18 +390,16 @@ export async function resolveTripConflict(
     };
   }
 
-  // 1. Immediately update local storage so user has zero wait time
   const currentTrips = getStoredTrips();
   const updatedTrips = currentTrips.map((t) => (t.id === resolvedTrip.id ? resolvedTrip : t));
   saveTrips(updatedTrips);
 
-  // 2. Background non-blocking sync with timeout protection
   if (strategy !== 'keep_cloud') {
     const runBackgroundSync = async () => {
       if (userId) {
         try {
           const timeout = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Cloud save timeout')), 3000)
+            setTimeout(() => reject(new Error('Cloud save timeout')), 4000)
           );
           await Promise.race([saveTripToCloud(userId, resolvedTrip), timeout]);
         } catch (err) {
@@ -397,7 +411,7 @@ export async function resolveTripConflict(
       if (resolvedTrip.collabId && resolvedTrip.isCollaborative) {
         try {
           const timeout = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Collab sync timeout')), 3000)
+            setTimeout(() => reject(new Error('Collab sync timeout')), 4000)
           );
           await Promise.race([
             syncCollaborativeTrip(resolvedTrip.collabId, resolvedTrip),
@@ -410,7 +424,6 @@ export async function resolveTripConflict(
       }
     };
 
-    // Non-blocking invocation
     runBackgroundSync().catch((err) => {
       console.warn('Trip conflict background sync encountered error:', err);
     });
@@ -420,35 +433,49 @@ export async function resolveTripConflict(
 }
 
 /**
- * Conflict-aware bi-directional merge between local trips and cloud trips.
- * Flags any divergence as a TripConflict for user resolution,
-/**
- * Conflict-aware bi-directional merge between local trips and cloud trips (Notion style).
- * Automatically resolves differences via non-destructive ID-level smart merge
- * in the background without blocking the user with recurring modals.
+ * Tombstone-aware bi-directional merge between local trips and cloud trips.
+ * Prevents deleted trips from resurrecting when another device deletes them.
  */
 export function mergeTrips(
   localTrips: Trip[],
-  cloudTrips: Trip[]
-): { merged: Trip[]; tripsToUpload: Trip[]; conflicts: TripConflict[] } {
+  cloudTrips: Trip[],
+  cloudTombstones: Record<string, number> = {},
+  isServerAuthoritative = true
+): { merged: Trip[]; tripsToUpload: Trip[]; deletedLocalTripIds: string[]; conflicts: TripConflict[] } {
   const tripsToUpload: Trip[] = [];
+  const deletedLocalTripIds: string[] = [];
   const mergedMap = new Map<string, Trip>();
-  const deletedIds = new Set(getDeletedTripIds());
+  const localDeletedIds = new Set(getDeletedTripIds());
 
-  // Filter out any trips marked as deleted locally
-  const validCloudTrips = (cloudTrips || []).filter((c) => !deletedIds.has(c.id));
-  const validLocalTrips = (localTrips || []).filter((l) => !deletedIds.has(l.id));
+  const isTombstoned = (tripId: string, updatedAt = 0) => {
+    if (localDeletedIds.has(tripId)) return true;
+    const cloudDeletedAt = cloudTombstones[tripId];
+    return typeof cloudDeletedAt === 'number' && cloudDeletedAt >= updatedAt;
+  };
 
-  // Process valid cloud trips first
+  const validCloudTrips = (cloudTrips || []).filter((c) => !isTombstoned(c.id, c.updatedAt || 0));
+  const validLocalTrips = (localTrips || []).filter((l) => !isTombstoned(l.id, l.updatedAt || 0));
+
+  for (const lTrip of localTrips || []) {
+    if (isTombstoned(lTrip.id, lTrip.updatedAt || 0)) {
+      deletedLocalTripIds.push(lTrip.id);
+    }
+  }
+
   for (const cTrip of validCloudTrips) {
     mergedMap.set(cTrip.id, cTrip);
   }
 
-  // Compare with local trips and perform non-destructive ID-level smart merge
   for (const lTrip of validLocalTrips) {
     const existing = mergedMap.get(lTrip.id);
     if (!existing) {
-      // Exists locally but not in cloud -> Keep local and mark for cloud upload
+      // If trip was previously synced to cloud and is now missing from authoritative server list,
+      // it was deleted on another device — do NOT resurrect it!
+      if (isServerAuthoritative && lTrip.lastSyncedAt && !lTrip.id.startsWith('preset-')) {
+        deletedLocalTripIds.push(lTrip.id);
+        continue;
+      }
+      // Newly created local/offline trip never synced yet -> keep & upload
       mergedMap.set(lTrip.id, lTrip);
       tripsToUpload.push(lTrip);
     } else {
@@ -456,42 +483,30 @@ export function mergeTrips(
       const cloudUpdated = existing.updatedAt || 0;
 
       if (cloudUpdated > localUpdated) {
-        // Cloud is strictly newer (e.g. edited on another device): adopt cloud version!
         mergedMap.set(lTrip.id, existing);
       } else if (localUpdated > cloudUpdated) {
-        // Local has newer un-synced edits made on this device: smart merge and push to cloud
+        const mergedTrip = mergeSingleTrip(lTrip, existing);
+        mergedMap.set(lTrip.id, mergedTrip);
+        tripsToUpload.push(mergedTrip);
+      } else if (hasTripContentDifference(lTrip, existing)) {
         const mergedTrip = mergeSingleTrip(lTrip, existing);
         mergedMap.set(lTrip.id, mergedTrip);
         tripsToUpload.push(mergedTrip);
       } else {
-        // Equal timestamps: check if content differs (e.g. photos added locally or concurrent sync)
-        if (hasTripContentDifference(lTrip, existing)) {
-          const mergedTrip = mergeSingleTrip(lTrip, existing);
-          mergedMap.set(lTrip.id, mergedTrip);
-          tripsToUpload.push(mergedTrip);
-        } else {
-          mergedMap.set(lTrip.id, existing);
-        }
+        mergedMap.set(lTrip.id, existing);
       }
     }
   }
 
   const merged = Array.from(mergedMap.values());
-  return { merged, tripsToUpload, conflicts: [] };
+  return { merged, tripsToUpload, deletedLocalTripIds, conflicts: [] };
 }
 
-/**
- * Execute a safe trip update:
- * 1. Immediately updates localStorage (works 100% offline).
- * 2. If online and logged in, sends to cloud.
- * 3. If offline or cloud save fails, safely enqueues in offline sync queue.
- */
 export async function executeSafeTripUpdate(
   updatedTrip: Trip,
   userId?: string | null,
   userName?: string
 ): Promise<void> {
-  // 1. Local update first
   const current = getStoredTrips();
   const idx = current.findIndex((t) => t.id === updatedTrip.id);
   const nextTrips = idx >= 0
@@ -499,7 +514,6 @@ export async function executeSafeTripUpdate(
     : [updatedTrip, ...current];
   saveTrips(nextTrips);
 
-  // 2. Collab sync
   if (updatedTrip.collabId && updatedTrip.isCollaborative) {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       enqueueCollabSync(updatedTrip.collabId, updatedTrip, userName);
@@ -513,7 +527,6 @@ export async function executeSafeTripUpdate(
     }
   }
 
-  // 3. User Cloud sync
   if (userId) {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       enqueueTripSave(userId, updatedTrip);

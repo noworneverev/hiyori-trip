@@ -9,8 +9,11 @@ import {
   getDeletedTripIds,
   recordDeletedTripId,
   clearDeletedTripId,
+  hydrateStorageFromIndexedDB,
+  resetAllLocalData,
 } from './utils/storage';
-import { formatDateSlash, sortItineraryItemsByTime, findInsertionPosition } from './utils/date';
+import { extractInlineImagesToMediaRefs } from './utils/image';
+import { formatDateSlash, getTodayLocal, sortItineraryItemsByTime, findInsertionPosition } from './utils/date';
 import { Language, TRANSLATIONS, getStoredLanguage, setStoredLanguage } from './utils/i18n';
 import { useDarkMode } from './hooks/useDarkMode';
 import { useScrollDirection } from './hooks/useScrollDirection';
@@ -44,6 +47,8 @@ import {
   fetchCollaborativeTrip,
   checkUserTripPermission,
   mergeSingleTrip,
+  fetchUserTombstones,
+  SnapshotMeta,
 } from './utils/firebase';
 import {
   mergeTrips,
@@ -199,7 +204,23 @@ export default function App() {
   // Global unmount timer cleanup & accessibility initialization
   useEffect(() => {
     initAccessibilityScale();
+    const handleSyncWarning = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.sizeKb) {
+        showToast(lang === 'zh' ? `行程容量 (${detail.sizeKb} KB) 接近雲端上限 1MB，建議照片改用相簿連結` : `Trip size (${detail.sizeKb} KB) is close to 1MB cloud limit`);
+      }
+    };
+    const handleSyncStatus = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.status === 'error' && detail?.error) {
+        showToast(detail.error);
+      }
+    };
+    window.addEventListener('cloud_sync_warning', handleSyncWarning);
+    window.addEventListener('cloud_sync_status', handleSyncStatus);
     return () => {
+      window.removeEventListener('cloud_sync_warning', handleSyncWarning);
+      window.removeEventListener('cloud_sync_status', handleSyncStatus);
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
       if (fabLongPressTimerRef.current) clearTimeout(fabLongPressTimerRef.current);
     };
@@ -207,48 +228,74 @@ export default function App() {
 
   useEffect(() => {
     let isMounted = true;
-    const loadedTrips = getStoredTrips();
-    setTrips(loadedTrips);
-    const activeId = getCurrentTripId();
-    const found = loadedTrips.find((t) => t.id === activeId);
-    setCurrentTripIdState(found ? found.id : (loadedTrips[0]?.id || ''));
-
     const urlParams = new URLSearchParams(window.location.search);
+    const shareId = urlParams.get('share');
+    const collabId = urlParams.get('collab');
+
+    hydrateStorageFromIndexedDB().then((hydrated) => {
+      if (!isMounted) return;
+      const loadedTrips = hydrated.length > 0 ? hydrated : getStoredTrips();
+      setTrips(loadedTrips);
+      if (!shareId && !collabId) {
+        const activeId = getCurrentTripId();
+        const found = loadedTrips.find((t) => t.id === activeId);
+        setCurrentTripIdState(found ? found.id : (loadedTrips[0]?.id || ''));
+      }
+    });
 
     // Check for shared trip in URL
-    const shareId = urlParams.get('share');
     if (shareId) {
-      fetchSharedTrip(shareId).then((shared) => {
-        if (!isMounted || !shared) return;
-        setSharedBannerTrip(shared);
-        setTrips((prev) => {
-          const exists = prev.some((t) => t.id === shared.id);
-          const nextTrips = exists ? prev : [shared, ...prev];
-          saveTrips(nextTrips);
-          return nextTrips;
+      fetchSharedTrip(shareId)
+        .then((shared) => {
+          if (!isMounted) return;
+          if (!shared) {
+            showToast(lang === 'zh' ? '找不到該分享行程或連結已失效' : 'Shared trip not found');
+            return;
+          }
+          setSharedBannerTrip(shared);
+          setTrips((prev) => {
+            const exists = prev.some((t) => t.id === shared.id);
+            const nextTrips = exists ? prev : [shared, ...prev];
+            saveTrips(nextTrips);
+            return nextTrips;
+          });
+          setCurrentTripIdState(shared.id);
+          setCurrentTripId(shared.id);
+        })
+        .catch(() => {
+          if (isMounted) {
+            showToast(lang === 'zh' ? '無法載入分享行程，請確認網路連線' : 'Failed to load shared trip');
+          }
         });
-        setCurrentTripIdState(shared.id);
-        setCurrentTripId(shared.id);
-      });
     }
 
     // Check for collaborative trip in URL
-    const collabId = urlParams.get('collab');
     if (collabId) {
-      fetchCollaborativeTrip(collabId).then((collabTrip) => {
-        if (!isMounted || !collabTrip) return;
-        setCollabBannerTrip(collabTrip);
-        setTrips((prev) => {
-          const idx = prev.findIndex((t) => t.id === collabTrip.id || t.collabId === collabId);
-          if (idx >= 0) {
-            const updated = [...prev];
-            updated[idx] = collabTrip;
-            return updated;
+      fetchCollaborativeTrip(collabId)
+        .then((collabTrip) => {
+          if (!isMounted) return;
+          if (!collabTrip) {
+            showToast(lang === 'zh' ? '找不到該共編行程或連結已失效' : 'Collaborative trip not found');
+            return;
           }
-          return [collabTrip, ...prev];
+          setCollabBannerTrip(collabTrip);
+          setTrips((prev) => {
+            const idx = prev.findIndex((t) => t.id === collabTrip.id || t.collabId === collabId);
+            const next =
+              idx >= 0
+                ? prev.map((t, i) => (i === idx ? collabTrip : t))
+                : [collabTrip, ...prev];
+            saveTrips(next);
+            return next;
+          });
+          setCurrentTripIdState(collabTrip.id);
+          setCurrentTripId(collabTrip.id);
+        })
+        .catch(() => {
+          if (isMounted) {
+            showToast(lang === 'zh' ? '無法載入共編行程，請確認網路連線' : 'Failed to load collaborative trip');
+          }
         });
-        setCurrentTripIdState(collabTrip.id);
-      });
     }
 
     return () => {
@@ -272,7 +319,9 @@ export default function App() {
 
     const unsubscribe = subscribeCollaborativeTrip(
       activeCollabId,
-      (liveTrip) => {
+      (liveTrip, meta: SnapshotMeta) => {
+        if (meta.hasPendingWrites) return;
+
         const currentLocal = tripsRef.current.find(
           (t) => (activeCollabId && t.collabId === activeCollabId) || t.id === activeId
         ) || getStoredTrips().find(
@@ -288,7 +337,7 @@ export default function App() {
         const localUpdated = currentLocal.updatedAt || 0;
         const cloudUpdated = liveTrip.updatedAt || 0;
 
-        // Notion-like automatic sync: If cloud is newer or equal, adopt live trip directly
+        // Automatic sync: If cloud is newer or equal, adopt live trip directly
         if (cloudUpdated >= localUpdated) {
           setTrips((prev) => {
             const idx = prev.findIndex((t) => t.collabId === activeCollabId || t.id === activeId);
@@ -303,7 +352,7 @@ export default function App() {
           return;
         }
 
-        // Notion-style silent background smart merge: If local has newer un-synced changes, merge them and push to cloud seamlessly
+        // Silent background smart merge: If local has newer un-synced changes, merge them and push to cloud
         if (localUpdated > cloudUpdated) {
           const merged = mergeSingleTrip(currentLocal, liveTrip);
           setTrips((prev) => {
@@ -352,6 +401,7 @@ export default function App() {
   // Listen to Auth State and subscribe to cloud trips
   useEffect(() => {
     let unsubscribeFirestore: (() => void) | null = null;
+    let isEffectMounted = true;
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
@@ -376,18 +426,71 @@ export default function App() {
         }, 150);
       }
 
-      if (user) {
-        // Subscribe to user cloud trips
-        unsubscribeFirestore = subscribeUserTrips(user.uid, async (cloudTrips) => {
-          if (cloudTrips && cloudTrips.length > 0) {
+      if (!user) return;
+
+      // 1. Flush any offline operations scoped to this user
+      flushPendingSyncQueue(user.uid)
+        .then(({ successCount }) => {
+          if (successCount > 0) {
+            showToast(lang === 'zh' ? `已同步 ${successCount} 筆離線變更` : `Synced ${successCount} offline changes`);
+          }
+        })
+        .catch(() => {});
+
+      // 2. Progressive background migration of any legacy inline Base64 trips -> media:// refs
+      (async () => {
+        try {
+          const localTrips = getStoredTrips();
+          const updatedLocal: Trip[] = [];
+          let anyMigrated = false;
+          for (const tr of localTrips) {
+            const { trip: lightweight, extractedRecords } = await extractInlineImagesToMediaRefs(tr);
+            if (extractedRecords.length > 0) {
+              anyMigrated = true;
+              updatedLocal.push(lightweight);
+              saveTripToCloud(user.uid, lightweight).catch(() => enqueueTripSave(user.uid, lightweight));
+            } else {
+              updatedLocal.push(tr);
+            }
+          }
+          if (anyMigrated && isEffectMounted) {
+            setTrips(updatedLocal);
+            saveTrips(updatedLocal);
+          }
+        } catch (err) {
+          console.warn('Progressive media migration warning:', err);
+        }
+      })();
+
+      // 3. Fetch cloud tombstones before subscribing to user trips
+      let cloudTombstones: Record<string, number> = {};
+      try {
+        cloudTombstones = await fetchUserTombstones(user.uid);
+      } catch {
+        cloudTombstones = {};
+      }
+      if (!isEffectMounted || currentUserRef.current?.uid !== user.uid) return;
+
+      // 4. Subscribe to user cloud trips with echo suppression & tombstone awareness
+      unsubscribeFirestore = subscribeUserTrips(
+        user.uid,
+        async (cloudTrips, meta: SnapshotMeta) => {
+          if (meta.hasPendingWrites) return;
+
+          if ((cloudTrips && cloudTrips.length > 0) || Object.keys(cloudTombstones).length > 0) {
             const currentLocal = getStoredTrips();
             const deletedIds = new Set(getDeletedTripIds());
-            const filteredCloud = cloudTrips.filter((c) => !deletedIds.has(c.id));
+            const filteredCloud = (cloudTrips || []).filter((c) => !deletedIds.has(c.id));
 
-            // Notion-style silent background smart merge
-            const { merged, tripsToUpload } = mergeTrips(currentLocal, filteredCloud);
+            const { merged, tripsToUpload, deletedLocalTripIds } = mergeTrips(
+              currentLocal,
+              filteredCloud,
+              cloudTombstones,
+              !meta.fromCache
+            );
 
-            // Symmetrical change detection ensures all device edits (photos, spots, notes) are applied immediately
+            deletedLocalTripIds.forEach((id) => recordDeletedTripId(id));
+
             const hasChange =
               merged.length !== currentLocal.length ||
               merged.some((m) => {
@@ -399,12 +502,11 @@ export default function App() {
                 return !m || hasTripContentDifference(m, l);
               });
 
-            if (hasChange) {
+            if (hasChange || deletedLocalTripIds.length > 0) {
               setTrips(merged);
               saveTrips(merged);
             }
 
-            // If local had newer changes or added items, push them to cloud seamlessly in background
             if (tripsToUpload.length > 0) {
               for (const tr of tripsToUpload) {
                 if (!deletedIds.has(tr.id)) {
@@ -413,30 +515,37 @@ export default function App() {
                   });
                 }
               }
-              showToast(lang === 'zh' ? '✨ 登入成功！已為您將本機既有行程與相片備份至雲端。' : '✨ Signed in! Local trips & photos synced to cloud.');
+              showToast(lang === 'zh' ? '已將本機行程與相片同步至雲端' : 'Local trips & photos synced to cloud');
             }
 
             const activeId = getCurrentTripId();
             const exists = merged.find((t) => t.id === activeId);
-            if (!exists && merged[0]) {
-              setCurrentTripIdState(merged[0].id);
-              setCurrentTripId(merged[0].id);
+            if (!exists) {
+              const fallbackId = merged[0]?.id || '';
+              setCurrentTripIdState(fallbackId);
+              setCurrentTripId(fallbackId);
             }
           } else {
-            // First login with empty cloud: auto-sync existing local trips to user's Firestore!
+            // First login with empty cloud: auto-sync existing local trips to user's Firestore
             const currentLocal = getStoredTrips();
-            if (currentLocal && currentLocal.length > 0) {
-              for (const tr of currentLocal) {
-                await saveTripToCloud(user.uid, tr);
+            const deletedIds = new Set(getDeletedTripIds());
+            const toSync = (currentLocal || []).filter((tr) => !deletedIds.has(tr.id));
+            if (toSync.length > 0) {
+              for (const tr of toSync) {
+                await saveTripToCloud(user.uid, tr).catch(() => enqueueTripSave(user.uid, tr));
               }
-              showToast(lang === 'zh' ? '✨ 登入成功！已將本機既有行程自動建立至雲端資料庫。' : '✨ Signed in! Local trips created in cloud.');
+              showToast(lang === 'zh' ? '已將本機既有行程同步至雲端' : 'Local trips synced to cloud');
             }
           }
-        });
-      }
+        },
+        () => {
+          showToast(lang === 'zh' ? '雲端連線不穩，資料已安全保留於本機' : 'Cloud sync unavailable, saved locally');
+        }
+      );
     });
 
     return () => {
+      isEffectMounted = false;
       if (unsubscribeFirestore) {
         unsubscribeFirestore();
         unsubscribeFirestore = null;
@@ -449,7 +558,7 @@ export default function App() {
   useEffect(() => {
     const handleOnline = async () => {
       try {
-        const { successCount } = await flushPendingSyncQueue();
+        const { successCount } = await flushPendingSyncQueue(currentUserRef.current?.uid);
         if (successCount > 0) {
           showToast(lang === 'zh' ? `網路已連線，已同步 ${successCount} 筆變更` : `Online: synced ${successCount} changes`);
         }
@@ -461,6 +570,113 @@ export default function App() {
     return () => window.removeEventListener('online', handleOnline);
   }, []);
 
+  // Debounced cloud write scheduler + beforeunload/visibilitychange flush
+  const cloudSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const pendingCloudWritesRef = useRef<
+    Map<
+      string,
+      {
+        type: 'user' | 'collab';
+        uid?: string;
+        collabId?: string;
+        trip: Trip;
+        editorName?: string;
+      }
+    >
+  >(new Map());
+
+  const flushPendingDebouncedSaves = (enqueueOnly = false) => {
+    cloudSaveTimersRef.current.forEach((timer) => clearTimeout(timer));
+    cloudSaveTimersRef.current.clear();
+
+    const entries = Array.from(pendingCloudWritesRef.current.entries());
+    pendingCloudWritesRef.current.clear();
+
+    for (const [, task] of entries) {
+      if (task.type === 'collab' && task.collabId) {
+        if (enqueueOnly || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+          enqueueCollabSync(task.collabId, task.trip, task.editorName);
+        } else {
+          syncCollaborativeTrip(task.collabId, task.trip, task.editorName).catch(() => {
+            enqueueCollabSync(task.collabId!, task.trip, task.editorName);
+          });
+        }
+      } else if (task.type === 'user' && task.uid) {
+        if (enqueueOnly || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+          enqueueTripSave(task.uid, task.trip);
+        } else {
+          saveTripToCloud(task.uid, task.trip).catch(() => {
+            enqueueTripSave(task.uid!, task.trip);
+          });
+        }
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      flushPendingDebouncedSaves(true);
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        flushPendingDebouncedSaves(false);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      cloudSaveTimersRef.current.forEach((timer) => clearTimeout(timer));
+      cloudSaveTimersRef.current.clear();
+    };
+  }, []);
+
+  const scheduleCloudWrite = (
+    key: string,
+    task: {
+      type: 'user' | 'collab';
+      uid?: string;
+      collabId?: string;
+      trip: Trip;
+      editorName?: string;
+    }
+  ) => {
+    const existingTimer = cloudSaveTimersRef.current.get(key);
+    if (existingTimer) clearTimeout(existingTimer);
+    pendingCloudWritesRef.current.set(key, task);
+
+    const timer = setTimeout(() => {
+      cloudSaveTimersRef.current.delete(key);
+      const pending = pendingCloudWritesRef.current.get(key);
+      if (!pending) return;
+      pendingCloudWritesRef.current.delete(key);
+
+      if (pending.type === 'collab' && pending.collabId) {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          enqueueCollabSync(pending.collabId, pending.trip, pending.editorName);
+        } else {
+          syncCollaborativeTrip(pending.collabId, pending.trip, pending.editorName).catch((err) => {
+            console.warn('Collab sync failed, enqueuing for offline reconnect:', err);
+            enqueueCollabSync(pending.collabId!, pending.trip, pending.editorName);
+          });
+        }
+      } else if (pending.type === 'user' && pending.uid) {
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          enqueueTripSave(pending.uid, pending.trip);
+        } else {
+          saveTripToCloud(pending.uid, pending.trip).catch((err) => {
+            console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
+            enqueueTripSave(pending.uid!, pending.trip);
+            showToast(lang === 'zh' ? '雲端同步稍有延遲，資料已安全保留於本機' : 'Cloud save delayed, safely queued offline');
+          });
+        }
+      }
+    }, 400);
+
+    cloudSaveTimersRef.current.set(key, timer);
+  };
+
   const handleToggleLang = () => {
     const nextLang: Language = lang === 'zh' ? 'en' : 'zh';
     setLang(nextLang);
@@ -468,7 +684,7 @@ export default function App() {
   };
 
   const applyUpdateTrip = (updatedTrip: Trip) => {
-    // 1. Immediately update React state & localStorage (works 100% offline)
+    // 1. Immediately update React state & local persistence (IndexedDB + localStorage)
     setTrips((prevTrips) => {
       const idx = prevTrips.findIndex((t) => t.id === updatedTrip.id);
       const nextTrips = idx >= 0
@@ -478,38 +694,44 @@ export default function App() {
       return nextTrips;
     });
 
-    // 2. Collab sync with offline fallback queue
+    const user = currentUserRef.current;
+
+    // 2. Debounced collab sync with offline fallback queue
     if (updatedTrip.collabId && updatedTrip.isCollaborative) {
-      const activeCollabId = updatedTrip.collabId;
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        enqueueCollabSync(activeCollabId, updatedTrip, currentUser?.displayName || undefined);
-      } else {
-        syncCollaborativeTrip(activeCollabId, updatedTrip, currentUser?.displayName || undefined).catch((err) => {
-          console.warn('Collab sync failed, enqueuing for offline reconnect:', err);
-          enqueueCollabSync(activeCollabId, updatedTrip, currentUser?.displayName || undefined);
-        });
-      }
+      scheduleCloudWrite(`collab:${updatedTrip.collabId}`, {
+        type: 'collab',
+        collabId: updatedTrip.collabId,
+        trip: updatedTrip,
+        editorName: user?.displayName || user?.email || undefined,
+      });
     }
 
-    // 3. User Cloud sync with offline fallback queue
-    if (currentUser) {
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        enqueueTripSave(currentUser.uid, updatedTrip);
-      } else {
-        saveTripToCloud(currentUser.uid, updatedTrip).catch((err) => {
-          console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
-          enqueueTripSave(currentUser.uid, updatedTrip);
-          showToast(lang === 'zh' ? '雲端同步稍有延遲，照片已安全保留於本機並排入重傳佇列' : 'Cloud save delayed, safely queued offline');
-        });
-      }
+    // 3. Debounced user cloud sync with offline fallback queue
+    if (user) {
+      scheduleCloudWrite(`user:${user.uid}:${updatedTrip.id}`, {
+        type: 'user',
+        uid: user.uid,
+        trip: updatedTrip,
+      });
     }
   };
 
   const handleUpdateTrip = (updatedTrip: Trip) => {
-    if (!currentUser) {
+    const user = currentUserRef.current;
+    if (!user) {
       requireAuth(() => {
+        const perm = checkUserTripPermission(updatedTrip, currentUserRef.current);
+        if (updatedTrip.isCollaborative && !perm.canEdit) {
+          showToast(lang === 'zh' ? '僅檢視權限，無法編輯' : 'View-only permission');
+          return;
+        }
         applyUpdateTrip(updatedTrip);
       }, lang === 'zh' ? '編輯行程並同步至雲端' : 'Edit trip and sync to cloud');
+      return;
+    }
+    const perm = checkUserTripPermission(updatedTrip, user);
+    if (updatedTrip.isCollaborative && !perm.canEdit) {
+      showToast(lang === 'zh' ? '僅檢視權限，無法編輯' : 'View-only permission');
       return;
     }
     applyUpdateTrip(updatedTrip);
@@ -534,11 +756,17 @@ export default function App() {
   }, [currentTrip?.title, t.appName, t.appSubtitle]);
 
   const handleSaveTripModal = (data: Partial<Trip> | Trip) => {
-    if (!currentUser) {
+    const user = currentUserRef.current;
+    if (!user) {
       requireAuth(() => handleSaveTripModal(data), lang === 'zh' ? '建立與儲存旅程' : 'Save trip');
       return;
     }
     if (tripModalData) {
+      const perm = checkUserTripPermission(tripModalData, user);
+      if (tripModalData.isCollaborative && !perm.canEdit) {
+        showToast(lang === 'zh' ? '僅檢視權限，無法編輯' : 'View-only permission');
+        return;
+      }
       const updated: Trip = {
         ...tripModalData,
         ...data,
@@ -552,10 +780,12 @@ export default function App() {
       } else {
         newTrip = {
           id: `trip-${Date.now()}`,
+          ownerId: user.uid,
+          ownerEmail: user.email || undefined,
           title: data.title || (lang === 'zh' ? '新旅遊行程' : 'New Trip'),
           destination: data.destination || (lang === 'zh' ? '旅遊目的地' : 'Destination'),
-          startDate: data.startDate || new Date().toISOString().slice(0, 10),
-          endDate: data.endDate || new Date().toISOString().slice(0, 10),
+          startDate: data.startDate || getTodayLocal(),
+          endDate: data.endDate || getTodayLocal(),
           currency: data.currency || 'JPY',
           budgetTotal: data.budgetTotal || 50000,
           coverGradient: data.coverGradient || 'from-emerald-600 via-teal-600 to-cyan-700',
@@ -590,15 +820,13 @@ export default function App() {
       setCurrentTripIdState(newTrip.id);
       setCurrentTripId(newTrip.id);
 
-      if (currentUser) {
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-          enqueueTripSave(currentUser.uid, newTrip);
-        } else {
-          saveTripToCloud(currentUser.uid, newTrip).catch((err) => {
-            console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
-            enqueueTripSave(currentUser.uid, newTrip);
-          });
-        }
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        enqueueTripSave(user.uid, newTrip);
+      } else {
+        saveTripToCloud(user.uid, newTrip).catch((err) => {
+          console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
+          enqueueTripSave(user.uid, newTrip);
+        });
       }
     }
     setShowTripModal(false);
@@ -611,8 +839,13 @@ export default function App() {
 
   const handleConfirmDeleteTrip = () => {
     if (trips.length <= 1) return;
-    if (!currentUser) {
+    const user = currentUserRef.current;
+    if (!user) {
       requireAuth(() => handleConfirmDeleteTrip(), lang === 'zh' ? '刪除旅程' : 'Delete trip');
+      return;
+    }
+    if (currentTrip.isCollaborative && !permission.isOwner) {
+      showToast(lang === 'zh' ? '僅擁有者可刪除共編旅程' : 'Only owner can delete this trip');
       return;
     }
 
@@ -627,27 +860,30 @@ export default function App() {
     setCurrentTripId(nextActiveId);
     setShowDeleteTripModal(false);
 
-    if (currentUser) {
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        enqueueTripDelete(currentUser.uid, tripToDeleteId);
-      } else {
-        deleteTripFromCloud(currentUser.uid, tripToDeleteId)
-          .then(() => {
-            clearDeletedTripId(tripToDeleteId);
-          })
-          .catch((err) => {
-            console.warn('Cloud delete failed, enqueuing for offline reconnect:', err);
-            enqueueTripDelete(currentUser.uid, tripToDeleteId);
-          });
-      }
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      enqueueTripDelete(user.uid, tripToDeleteId);
+    } else {
+      deleteTripFromCloud(user.uid, tripToDeleteId)
+        .then(() => {
+          clearDeletedTripId(tripToDeleteId);
+        })
+        .catch((err) => {
+          console.warn('Cloud delete failed, enqueuing for offline reconnect:', err);
+          enqueueTripDelete(user.uid, tripToDeleteId);
+        });
     }
     showToast(lang === 'zh' ? '已成功刪除旅程' : 'Trip deleted');
   };
 
   const handleSaveItem = (itemData: Omit<ItineraryItem, 'id'>, existingId?: string) => {
     if (!currentTrip || !editingItemData) return;
-    if (!currentUser) {
+    const user = currentUserRef.current;
+    if (!user) {
       requireAuth(() => handleSaveItem(itemData, existingId), lang === 'zh' ? '儲存景點資訊' : 'Save spot');
+      return;
+    }
+    if (currentTrip.isCollaborative && !permission.canEdit) {
+      showToast(lang === 'zh' ? '僅檢視權限，無法編輯' : 'View-only permission');
       return;
     }
     const { dayNumber } = editingItemData;
@@ -817,15 +1053,24 @@ export default function App() {
   };
 
   const handleImportTrip = (imported: Trip) => {
-    const exists = trips.some((t) => t.id === imported.id);
-    const sanitized = exists
-      ? { ...imported, id: `trip-${Date.now()}-${Math.random().toString(36).substr(2, 6)}` }
-      : imported;
-    const updated = [sanitized, ...trips.filter((t) => t.id !== sanitized.id)];
-    setTrips(updated);
-    saveTrips(updated);
-    setCurrentTripIdState(sanitized.id);
-    setCurrentTripId(sanitized.id);
+    requireAuth(() => {
+      const exists = trips.some((t) => t.id === imported.id);
+      const sanitized: Trip = exists
+        ? {
+            ...imported,
+            id: `trip-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+            ownerId: currentUserRef.current?.uid || imported.ownerId,
+            updatedAt: Date.now(),
+          }
+        : {
+            ...imported,
+            ownerId: currentUserRef.current?.uid || imported.ownerId,
+            updatedAt: Date.now(),
+          };
+      applyUpdateTrip(sanitized);
+      setCurrentTripIdState(sanitized.id);
+      setCurrentTripId(sanitized.id);
+    }, lang === 'zh' ? '匯入與儲存旅程' : 'Import and save trip');
   };
 
   if (!currentTrip) {
@@ -847,25 +1092,20 @@ export default function App() {
       }`}>
         <div className="max-w-6xl mx-auto px-2.5 sm:px-6 h-14 flex items-center justify-between gap-1 sm:gap-3">
           {/* Brand */}
-          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <HiyoriLogo className="w-7 h-7 sm:w-8 sm:h-8 shrink-0" />
-            <div className="flex items-center gap-1.5">
-              <h1 className="font-bold text-sm sm:text-base tracking-tight text-slate-900 dark:text-white">
-                {t.appName}
-              </h1>
-              <span className="hidden md:inline-block text-[10px] font-semibold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.5 rounded-md border border-amber-200/80 dark:border-amber-800/60">
-                旅行日和
-              </span>
-            </div>
+            <h1 className="font-bold text-sm sm:text-base tracking-tight text-slate-900 dark:text-white">
+              {t.appName}
+            </h1>
           </div>
 
           {/* Quick Actions (Trip Switcher & Control Buttons) */}
-          <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
             {/* Trip Switcher */}
             <div className="relative shrink min-w-0" ref={tripSwitcherRef}>
               <button
                 onClick={() => setShowTripSwitcher(!showTripSwitcher)}
-                className="flex items-center gap-1 h-9 px-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 transition shadow-2xs max-w-[85px] xs:max-w-[125px] sm:max-w-[190px]"
+                className="flex items-center gap-1 h-9 px-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 transition shadow-2xs max-w-[140px] xs:max-w-[180px] sm:max-w-[230px]"
                 title="切換旅程"
               >
                 <Plane className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
@@ -994,8 +1234,8 @@ export default function App() {
               onOpenExportPDF={() => setShowPDFExportModal(true)}
               onOpenShareTrip={() => setShowShareModal(true)}
               onOpenCollaborate={() => setShowCollabModal(true)}
-              onResetData={() => {
-                localStorage.clear();
+              onResetData={async () => {
+                await resetAllLocalData();
                 window.location.reload();
               }}
             />
@@ -1007,56 +1247,52 @@ export default function App() {
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-4 pb-[calc(10rem+env(safe-area-inset-bottom,0px))] sm:pb-20 space-y-4">
         {/* Collaborative Trip Connected Alert */}
         {collabBannerTrip && (
-          <div className="bg-emerald-950/90 text-white px-4 py-3.5 rounded-2xl shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-emerald-800/80 animate-in fade-in duration-200">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-300 flex items-center justify-center shrink-0 border border-emerald-400/30">
-                <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
-              </div>
-              <div className="text-xs">
-                <p className="font-bold text-sm text-white">已加入多人即時共編行程：【{collabBannerTrip.title}】</p>
-                <p className="text-emerald-200 text-[11px] mt-0.5">任何修改（景點、時間、花費）將即時同步給所有同行成員！</p>
-              </div>
+          <div className="bg-emerald-950/90 text-white px-3.5 py-2.5 rounded-2xl shadow-sm flex items-center justify-between gap-2.5 border border-emerald-800/80 animate-in fade-in duration-150">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Radio className="w-4 h-4 text-emerald-400 shrink-0" />
+              <p className="text-xs font-semibold text-white truncate">
+                共編中：{collabBannerTrip.title}
+              </p>
             </div>
             <button
               onClick={() => {
                 setCollabBannerTrip(null);
                 window.history.replaceState({}, '', window.location.pathname);
               }}
-              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition active:scale-95 shrink-0 self-end sm:self-auto"
+              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition active:scale-95 shrink-0"
             >
-              我知道了
+              確定
             </button>
           </div>
         )}
 
         {/* Shared Trip Banner Alert */}
         {sharedBannerTrip && (
-          <div className="bg-slate-900 text-white px-4 py-3.5 rounded-2xl shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 border border-slate-800 animate-in fade-in duration-200">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-teal-500/20 text-teal-300 flex items-center justify-center shrink-0 border border-teal-400/30">
-                <Users className="w-4 h-4" />
-              </div>
-              <div className="text-xs">
-                <p className="font-bold text-sm text-white">正在查閱親友分享的旅程：【{sharedBannerTrip.title}】</p>
-                <p className="text-teal-200 text-[11px] mt-0.5">免登入直接檢視景點與地圖！您也可以將此行程存入您自己的行程庫中。</p>
-              </div>
+          <div className="bg-slate-900 text-white px-3.5 py-2.5 rounded-2xl shadow-sm flex flex-wrap items-center justify-between gap-2.5 border border-slate-800 animate-in fade-in duration-150">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Users className="w-4 h-4 text-teal-300 shrink-0" />
+              <p className="font-semibold text-xs text-white truncate">
+                親友分享：{sharedBannerTrip.title}
+              </p>
             </div>
-            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0 ml-auto">
               <button
                 onClick={() => {
-                  const copyTrip: Trip = {
-                    ...sharedBannerTrip,
-                    id: `trip-${Date.now()}`,
-                    title: `${sharedBannerTrip.title} (親友副本)`,
-                    createdAt: Date.now(),
-                    updatedAt: Date.now(),
-                  };
-                  handleImportTrip(copyTrip);
-                  setSharedBannerTrip(null);
-                  window.history.replaceState({}, '', window.location.pathname);
-                  showToast(lang === 'zh' ? '已成功儲存至您的行程庫中！' : 'Saved to your trips library!');
+                  requireAuth(() => {
+                    const copyTrip: Trip = {
+                      ...sharedBannerTrip,
+                      id: `trip-${Date.now()}`,
+                      title: `${sharedBannerTrip.title} (副本)`,
+                      createdAt: Date.now(),
+                      updatedAt: Date.now(),
+                    };
+                    handleImportTrip(copyTrip);
+                    setSharedBannerTrip(null);
+                    window.history.replaceState({}, '', window.location.pathname);
+                    showToast(lang === 'zh' ? '已儲存至我的行程' : 'Saved to my trips');
+                  }, lang === 'zh' ? '儲存分享行程' : 'Save shared trip');
                 }}
-                className="px-3.5 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs shadow-md transition active:scale-95 flex items-center gap-1.5"
+                className="px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs transition active:scale-95 flex items-center gap-1"
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>儲存到我的行程</span>
@@ -1066,8 +1302,8 @@ export default function App() {
                   setSharedBannerTrip(null);
                   window.history.replaceState({}, '', window.location.pathname);
                 }}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs transition"
-                title="關閉提示"
+                className="min-w-[36px] min-h-[36px] rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition"
+                aria-label="關閉"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1097,25 +1333,12 @@ export default function App() {
 
             <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 ml-auto">
               <button
-                onClick={() => setShowCollabModal(true)}
-                className="hidden sm:flex p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs transition"
-                title="成員與權限"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-teal-600" />
-              </button>
-              <button
                 onClick={() => setShowShareModal(true)}
-                className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs transition"
+                className="min-w-[36px] min-h-[36px] rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center transition"
                 title="分享行程"
+                aria-label="分享行程"
               >
                 <Share2 className="w-3.5 h-3.5 text-teal-600" />
-              </button>
-              <button
-                onClick={() => setShowPDFExportModal(true)}
-                className="hidden sm:flex p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs transition"
-                title={t.exportPDF}
-              >
-                <Printer className="w-3.5 h-3.5 text-teal-600" />
               </button>
               {permission.canEdit && (
                 <button
@@ -1125,18 +1348,20 @@ export default function App() {
                       setShowTripModal(true);
                     }, lang === 'zh' ? '編輯行程資訊' : 'Edit trip details');
                   }}
-                  className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs transition"
+                  className="min-w-[36px] min-h-[36px] rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center transition"
                   title="編輯行程"
+                  aria-label="編輯行程"
                 >
                   <Edit className="w-3.5 h-3.5" />
                 </button>
               )}
               <button
                 onClick={() => setIsHeroExpanded(true)}
-                className="px-2 py-1.5 sm:px-2.5 rounded-xl text-[10px] sm:text-[11px] font-semibold text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 transition flex items-center gap-0.5 sm:gap-1"
-                title="展開完整封面"
+                className="min-h-[36px] px-2.5 rounded-xl text-[11px] font-semibold text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 transition flex items-center gap-1"
+                title="展開封面"
+                aria-label="展開封面"
               >
-                <span className="hidden sm:inline">展開封面</span>
+                <span className="hidden sm:inline">更多</span>
                 <ChevronDown className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1164,9 +1389,9 @@ export default function App() {
                     <button
                       onClick={() => setShowCollabModal(true)}
                       className="px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-200 border border-emerald-300/30 text-[10px] font-bold flex items-center gap-1 transition hover:bg-emerald-400/30"
-                      title="點擊管理成員與權限"
+                      title="管理成員與權限"
                     >
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                       <span>
                         {permission.isOwner
                           ? '擁有者 · 多人共編'
@@ -1268,38 +1493,20 @@ export default function App() {
           </div>
         )}
 
-        {/* Unauthenticated Read-Only Preview Notice Banner */}
+        {/* Unauthenticated Read-Only Preview Notice Banner (Slim 1-row) */}
         {!currentUser && (
-          <div className="bg-gradient-to-r from-teal-900/95 via-slate-900/95 to-cyan-900/95 text-white px-4 py-3 rounded-2xl border border-teal-500/30 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-lg animate-in fade-in duration-200">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-8 h-8 rounded-xl bg-teal-500/20 text-teal-300 flex items-center justify-center shrink-0 border border-teal-400/20">
-                <Eye className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="font-bold text-slate-100 flex items-center gap-1.5 flex-wrap">
-                  <span>{lang === 'zh' ? '目前為唯讀瀏覽模式' : 'Read-Only Preview Mode'}</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 font-semibold border border-teal-400/20">
-                    {lang === 'zh' ? '點擊編輯將引導登入' : 'Sign in required to edit'}
-                  </span>
-                </p>
-                <p className="text-slate-300 text-[11px] mt-0.5 leading-relaxed">
-                  {lang === 'zh'
-                    ? '登入 Google 帳號即可開始自由編輯、記錄支出並即時備份至專屬雲端資料庫，確保資料永不遺失。'
-                    : 'Sign in with Google to edit, log expenses, and auto-sync your itinerary safely.'}
-                </p>
-              </div>
+          <div className="bg-slate-900 dark:bg-slate-900/95 text-white px-3.5 py-2 rounded-2xl border border-slate-800 text-xs flex items-center justify-between gap-2 shadow-sm animate-in fade-in duration-150">
+            <div className="flex items-center gap-2 min-w-0">
+              <Eye className="w-3.5 h-3.5 text-teal-300 shrink-0" />
+              <span className="font-medium text-slate-200 truncate">
+                {lang === 'zh' ? '唯讀預覽 · 登入可編輯並同步' : 'Read-only · Sign in to edit & sync'}
+              </span>
             </div>
             <button
-              onClick={() => requireAuth(() => {}, lang === 'zh' ? '啟用完整編輯' : 'Enable editing')}
-              className="px-4 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs shrink-0 self-end sm:self-auto transition flex items-center gap-2 shadow-md active:scale-95 cursor-pointer"
+              onClick={() => requireAuth(() => {}, lang === 'zh' ? '編輯並同步' : 'Edit & sync')}
+              className="px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-[11px] shrink-0 transition active:scale-95 cursor-pointer"
             >
-              <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
-              </svg>
-              <span>{lang === 'zh' ? '登入 Google 帳號' : 'Sign in with Google'}</span>
+              {lang === 'zh' ? 'Google 登入' : 'Sign In'}
             </button>
           </div>
         )}
@@ -1393,14 +1600,24 @@ export default function App() {
             <TimelineTab
               trip={currentTrip}
               lang={lang}
+              canEdit={permission.canEdit}
+              isNavHidden={isNavHidden}
               onUpdateTrip={handleUpdateTrip}
               onOpenAddItem={(dayNumber, suggestedStartTime) => {
+                if (currentTrip.isCollaborative && !permission.canEdit) {
+                  showToast(lang === 'zh' ? '目前為僅檢視權限' : 'View-only mode');
+                  return;
+                }
                 requireAuth(() => {
                   setEditingItemData({ dayNumber, initialStartTime: suggestedStartTime });
                   setShowItemModal(true);
                 }, lang === 'zh' ? '新增行程景點' : 'Add itinerary spot');
               }}
               onOpenEditItem={(item, dayNumber) => {
+                if (currentTrip.isCollaborative && !permission.canEdit) {
+                  showToast(lang === 'zh' ? '目前為僅檢視權限' : 'View-only mode');
+                  return;
+                }
                 requireAuth(() => {
                   setEditingItemData({ item, dayNumber });
                   setShowItemModal(true);
@@ -1422,9 +1639,14 @@ export default function App() {
             <LiveCompanionTab
               trip={currentTrip}
               lang={lang}
+              canEdit={permission.canEdit}
               onUpdateTrip={handleUpdateTrip}
               onNavigateToTimelineDay={() => setActiveTab('timeline')}
               onOpenQuickAction={(tab) => {
+                if (currentTrip.isCollaborative && !permission.canEdit) {
+                  showToast(lang === 'zh' ? '目前為僅檢視權限' : 'View-only mode');
+                  return;
+                }
                 requireAuth(() => {
                   setQuickActionTab(tab);
                   setShowQuickActionModal(true);
@@ -1437,6 +1659,7 @@ export default function App() {
             <ExpensesTab
               trip={currentTrip}
               lang={lang}
+              canEdit={permission.canEdit}
               onUpdateTrip={handleUpdateTrip}
               requireAuth={requireAuth}
             />
@@ -1446,6 +1669,7 @@ export default function App() {
             <NotesAndPrepTab
               trip={currentTrip}
               lang={lang}
+              canEdit={permission.canEdit}
               onUpdateTrip={handleUpdateTrip}
               requireAuth={requireAuth}
             />
@@ -1456,6 +1680,7 @@ export default function App() {
               trip={currentTrip}
               allTrips={trips}
               lang={lang}
+              canEdit={permission.canEdit}
               onUpdateTrip={handleUpdateTrip}
               onSelectTrip={handleSelectTrip}
               onOpenGlobalHub={() => setShowGlobalHubModal(true)}
@@ -1593,6 +1818,10 @@ export default function App() {
           item={editingItemData.item}
           dayNumber={editingItemData.dayNumber}
           currency={currentTrip.currency}
+          tripId={currentTrip.id}
+          ownerId={currentTrip.ownerId}
+          collabId={currentTrip.collabId}
+          canEdit={permission.canEdit}
           existingDayItems={currentTrip.days.find((d) => d.dayNumber === editingItemData.dayNumber)?.items || []}
           defaultStartTime={editingItemData.initialStartTime}
           onSave={handleSaveItem}
@@ -1619,8 +1848,8 @@ export default function App() {
         <SettingsModal
           trips={trips}
           lang={lang}
-          onResetData={() => {
-            localStorage.clear();
+          onResetData={async () => {
+            await resetAllLocalData();
             window.location.reload();
           }}
           onSimulateConflict={() => {
@@ -1667,6 +1896,7 @@ export default function App() {
           trip={currentTrip}
           userId={currentUser?.uid}
           currentUser={currentUser}
+          onRequireAuth={() => requireAuth(() => {}, lang === 'zh' ? '建立分享連結' : 'Create share link')}
           onUpdateTrip={handleUpdateTrip}
           lang={lang}
           onClose={() => setShowShareModal(false)}
@@ -1678,6 +1908,7 @@ export default function App() {
           trip={currentTrip}
           currentUser={currentUser}
           lang={lang}
+          onRequireAuth={() => requireAuth(() => {}, lang === 'zh' ? '建立共編連結' : 'Create collaboration link')}
           onUpdateTrip={handleUpdateTrip}
           onClose={() => setShowCollabModal(false)}
         />
@@ -1717,6 +1948,7 @@ export default function App() {
         <TravelQuickActionModal
           trip={currentTrip}
           lang={lang}
+          canEdit={permission.canEdit}
           initialTab={quickActionTab}
           onUpdateTrip={handleUpdateTrip}
           onClose={() => setShowQuickActionModal(false)}
@@ -1729,10 +1961,18 @@ export default function App() {
         <GlobalTravelHubModal
           trips={trips}
           currentTripId={currentTrip.id}
+          currentUser={currentUser}
           lang={lang}
           onUpdateTrip={handleUpdateTrip}
-          onSelectTrip={(selectedId) => {
+          requireAuth={requireAuth}
+          onSelectTrip={(selectedId, targetSpotId) => {
             handleSelectTrip(selectedId);
+            if (targetSpotId) {
+              setMemoriesSpotId(targetSpotId);
+              setActiveTab('memories');
+            } else {
+              setActiveTab('timeline');
+            }
             setShowGlobalHubModal(false);
             const found = trips.find((t) => t.id === selectedId);
             if (found) {
@@ -1767,78 +2007,80 @@ export default function App() {
         lang={lang}
       />
 
-      {/* Floating Travel Quick Action Button (Single Clean FAB) */}
-      <div
-        style={{ position: 'fixed', zIndex: 40 }}
-        className={`fixed right-4 sm:bottom-8 sm:right-8 flex flex-col items-end gap-2 animate-in fade-in select-none max-sm:transition-all max-sm:duration-300 max-sm:ease-in-out ${
-          isNavHidden
-            ? 'max-sm:bottom-[calc(1.25rem+env(safe-area-inset-bottom,0px))]'
-            : 'max-sm:bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))]'
-        }`}
-      >
-        {/* Optional Secondary Todos Pill if expanded */}
-        {showFabNote && (
+      {/* Floating Travel Quick Action Button (Single Clean FAB, hidden for read-only collaborators) */}
+      {(!currentTrip.isCollaborative || permission.canEdit) && (
+        <div
+          style={{ position: 'fixed', zIndex: 40 }}
+          className={`fixed right-4 sm:bottom-8 sm:right-8 flex flex-col items-end gap-2 animate-in fade-in select-none max-sm:transition-all max-sm:duration-300 max-sm:ease-in-out ${
+            isNavHidden
+              ? 'max-sm:bottom-[calc(1.25rem+env(safe-area-inset-bottom,0px))]'
+              : 'max-sm:bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))]'
+          }`}
+        >
+          {/* Optional Secondary Todos Pill if expanded */}
+          {showFabNote && (
+            <button
+              onClick={() => {
+                requireAuth(() => {
+                  setShowFabNote(false);
+                  setQuickActionTab('todos');
+                  setShowQuickActionModal(true);
+                }, lang === 'zh' ? '行程待辦事項' : 'Trip todos');
+              }}
+              className="px-3.5 py-1.5 rounded-full bg-slate-900/95 dark:bg-slate-800/95 text-teal-300 font-bold text-xs shadow-lg border border-teal-500/30 flex items-center gap-1.5 transition active:scale-95 animate-in slide-in-from-bottom-2 duration-150 backdrop-blur-md"
+            >
+              <CheckSquare className="w-3.5 h-3.5 text-teal-400" />
+              <span>行程待辦</span>
+            </button>
+          )}
+
+          {/* Primary Circular Expense FAB */}
           <button
             onClick={() => {
               requireAuth(() => {
-                setShowFabNote(false);
-                setQuickActionTab('todos');
+                setQuickActionTab('expense');
                 setShowQuickActionModal(true);
-              }, lang === 'zh' ? '行程待辦事項' : 'Trip todos');
+              }, lang === 'zh' ? '快速記帳' : 'Quick expense');
             }}
-            className="px-3.5 py-1.5 rounded-full bg-slate-900/95 dark:bg-slate-800/95 text-teal-300 font-bold text-xs shadow-lg border border-teal-500/30 flex items-center gap-1.5 transition active:scale-95 animate-in slide-in-from-bottom-2 duration-150 backdrop-blur-md"
-          >
-            <CheckSquare className="w-3.5 h-3.5 text-teal-400" />
-            <span>行程待辦</span>
-          </button>
-        )}
-
-        {/* Primary Circular Expense FAB */}
-        <button
-          onClick={() => {
-            requireAuth(() => {
-              setQuickActionTab('expense');
-              setShowQuickActionModal(true);
-            }, lang === 'zh' ? '快速記帳' : 'Quick expense');
-          }}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setShowFabNote((prev) => !prev);
-          }}
-          onTouchStart={() => {
-            fabLongPressTimerRef.current = setTimeout(() => {
+            onContextMenu={(e) => {
+              e.preventDefault();
               setShowFabNote((prev) => !prev);
-              if ('vibrate' in navigator) navigator.vibrate?.(40);
-            }, 450);
-          }}
-          onTouchEnd={() => {
-            if (fabLongPressTimerRef.current) {
-              clearTimeout(fabLongPressTimerRef.current);
-              fabLongPressTimerRef.current = null;
-            }
-          }}
-          onTouchCancel={() => {
-            if (fabLongPressTimerRef.current) {
-              clearTimeout(fabLongPressTimerRef.current);
-              fabLongPressTimerRef.current = null;
-            }
-          }}
-          className="w-13 h-13 rounded-full bg-teal-600 hover:bg-teal-700 active:scale-90 text-white shadow-[0_8px_25px_rgba(13,148,136,0.4)] flex items-center justify-center transition-all duration-200 border-2 border-white/40 dark:border-white/15 group cursor-pointer"
-          title="旅途快速記帳 (長按或右鍵切換便籤)"
-          aria-label="快速記帳"
-        >
-          <div className="relative flex items-center justify-center">
-            <DollarSign className="w-5 h-5 stroke-[2.5] group-hover:scale-110 transition-transform" />
-            <span className="absolute -top-1 -right-1.5 text-[10px] font-black text-teal-200 leading-none">+</span>
-          </div>
-        </button>
-      </div>
+            }}
+            onTouchStart={() => {
+              fabLongPressTimerRef.current = setTimeout(() => {
+                setShowFabNote((prev) => !prev);
+                if ('vibrate' in navigator) navigator.vibrate?.(40);
+              }, 450);
+            }}
+            onTouchEnd={() => {
+              if (fabLongPressTimerRef.current) {
+                clearTimeout(fabLongPressTimerRef.current);
+                fabLongPressTimerRef.current = null;
+              }
+            }}
+            onTouchCancel={() => {
+              if (fabLongPressTimerRef.current) {
+                clearTimeout(fabLongPressTimerRef.current);
+                fabLongPressTimerRef.current = null;
+              }
+            }}
+            className="w-13 h-13 rounded-full bg-teal-600 hover:bg-teal-700 active:scale-90 text-white shadow-[0_8px_25px_rgba(13,148,136,0.4)] flex items-center justify-center transition-all duration-200 border-2 border-white/40 dark:border-white/15 group cursor-pointer"
+            title="旅途快速記帳 (長按或右鍵切換便籤)"
+            aria-label="快速記帳"
+          >
+            <div className="relative flex items-center justify-center">
+              <DollarSign className="w-5 h-5 stroke-[2.5] group-hover:scale-110 transition-transform" />
+              <span className="absolute -top-1 -right-1.5 text-[10px] font-black text-teal-200 leading-none">+</span>
+            </div>
+          </button>
+        </div>
+      )}
 
       {/* Floating Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-2xl bg-slate-900/95 text-white text-xs font-bold shadow-2xl border border-slate-700/80 flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-150 backdrop-blur-md">
+        <div className="fixed top-4 sm:top-16 left-1/2 -translate-x-1/2 z-[70] max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-2xl bg-slate-900/95 text-white text-xs font-bold shadow-2xl border border-slate-700/80 flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-150 backdrop-blur-md">
           <Check className="w-3.5 h-3.5 text-teal-400 shrink-0" />
-          <span>{toastMessage}</span>
+          <span className="truncate">{toastMessage}</span>
         </div>
       )}
 

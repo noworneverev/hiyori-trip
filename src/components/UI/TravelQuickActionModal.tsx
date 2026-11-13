@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { Trip, ExpenseItem, PaymentMethod } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
-import { compressImageFile } from '../../utils/image';
+import { getTodayLocal } from '../../utils/date';
+import { compressImageFile, resolveMediaSrc, storeImageAsMediaRef } from '../../utils/image';
 import { canUploadImages } from '../../utils/userPermissions';
+import { MediaImage } from './MediaImage';
 import {
   SUPPORTED_CURRENCIES,
   CURRENCY_MAP,
@@ -42,19 +44,14 @@ import {
 interface TravelQuickActionModalProps {
   trip: Trip;
   lang: Language;
+  canEdit?: boolean;
   onUpdateTrip: (updatedTrip: Trip) => void;
   onClose: () => void;
   initialTab?: 'expense' | 'todos';
   onShowToast?: (msg: string) => void;
 }
 
-export const getLocalTodayDate = (): string => {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
+export const getLocalTodayDate = getTodayLocal;
 
 const CATEGORY_ITEMS = [
   { key: 'food', label: '美食餐飲', icon: Utensils },
@@ -87,6 +84,7 @@ const PAYMENT_METHODS: { key: PaymentMethod; label: string; icon: React.ElementT
 export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   trip,
   lang,
+  canEdit = true,
   onUpdateTrip,
   onClose,
   initialTab = 'expense',
@@ -203,25 +201,32 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   // Handle uploading receipt/invoice photos
   const handleReceiptFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || files.length === 0) return;
+    if (!files || files.length === 0 || !canEdit) return;
+
+    const remainingSlots = Math.max(0, 5 - receiptImages.length);
+    if (remainingSlots <= 0) {
+      onShowToast?.('每筆支出最多附加 5 張發票收據');
+      e.target.value = '';
+      return;
+    }
 
     setIsCompressingReceipts(true);
     try {
-      const compressedList: string[] = [];
-      for (let i = 0; i < files.length; i++) {
+      const refsList: string[] = [];
+      const countToProcess = Math.min(files.length, remainingSlots);
+      for (let i = 0; i < countToProcess; i++) {
         const file = files[i];
         const compressed = await compressImageFile(file, 840, 0.68);
-        compressedList.push(compressed);
+        const mediaRef = await storeImageAsMediaRef(trip.id, compressed);
+        refsList.push(mediaRef);
       }
-      setReceiptImages((prev) => [...prev, ...compressedList]);
+      setReceiptImages((prev) => [...prev, ...refsList].slice(0, 5));
       if (onShowToast) {
-        onShowToast(`已上傳 ${files.length} 張發票收據！`);
+        onShowToast(`已上傳 ${refsList.length} 張發票收據！`);
       }
     } catch (err) {
       console.error('Failed to compress receipt images:', err);
-      if (onShowToast) {
-        onShowToast('發票上傳失敗，請再試一次');
-      }
+      onShowToast?.(err instanceof Error ? err.message : '發票上傳失敗，請確認格式或大小後重試');
     } finally {
       setIsCompressingReceipts(false);
       e.target.value = '';
@@ -296,6 +301,10 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
 
   const handleSaveQuickExpense = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!canEdit) {
+      onShowToast?.('目前為僅檢視權限');
+      return;
+    }
     if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) return;
 
     const matchedCat = CATEGORY_ITEMS.find((c) => c.key === expenseCat);
@@ -357,6 +366,10 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
 
   const handleAddTodo = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEdit) {
+      onShowToast?.('目前為僅檢視權限');
+      return;
+    }
     const title = newTodoTitle.trim();
     if (!title) return;
 
@@ -380,6 +393,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   };
 
   const handleToggleTodo = (id: string) => {
+    if (!canEdit) return;
     const updated = todos.map((t) =>
       t.id === id ? { ...t, completed: !t.completed } : t
     );
@@ -391,35 +405,72 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   };
 
   const handleDeleteTodo = (id: string) => {
+    if (!canEdit) return;
     const updated = todos.filter((t) => t.id !== id);
     onUpdateTrip({
       ...trip,
       todos: updated,
+      deletedItemIds: {
+        ...(trip.deletedItemIds || {}),
+        [id]: Date.now(),
+      },
       updatedAt: Date.now(),
     });
     onShowToast?.('已刪除待辦事項');
   };
 
   const handleClearCompletedTodos = () => {
+    if (!canEdit) return;
+    const now = Date.now();
+    const removedIds: Record<string, number> = {};
+    todos.filter((t) => t.completed).forEach((t) => {
+      removedIds[t.id] = now;
+    });
     const remaining = todos.filter((t) => !t.completed);
     onUpdateTrip({
       ...trip,
       todos: remaining,
-      updatedAt: Date.now(),
+      deletedItemIds: {
+        ...(trip.deletedItemIds || {}),
+        ...removedIds,
+      },
+      updatedAt: now,
     });
     onShowToast?.('已清除所有已完成項目');
   };
 
+  const handleDownloadLightboxImage = async () => {
+    if (!previewImage) return;
+    const resolved = await resolveMediaSrc(previewImage, {
+      tripId: trip.id,
+      ownerId: trip.ownerId,
+      collabId: trip.collabId,
+    });
+    const href = resolved || previewImage;
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = `receipt-${Date.now()}.jpg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        if (previewImage) {
+          setPreviewImage(null);
+        } else {
+          onClose();
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [onClose]);
+  }, [previewImage, onClose]);
 
   return (
     <div
@@ -441,9 +492,6 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
             <h3 className="text-base font-bold tracking-tight">
               旅途隨身手帖
             </h3>
-            <p className="text-xs text-teal-200/90 mt-0.5">
-              一秒快速記帳 · 行程待辦事項
-            </p>
           </div>
           <div className="flex items-center gap-2">
             {activeTab === 'expense' && parsedAmount > 0 && (
@@ -728,7 +776,6 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                               handleRenameQuickCategory(catKey, catRenameVal);
                             }
                           }}
-                          autoFocus
                         />
                         <button
                           type="button"
@@ -841,17 +888,17 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               />
             </div>
 
-            {/* 6. 發票憑證上傳 (僅 n9102125@gmail.com 顯示上傳功能) */}
-            {canUploadImages() && (
+            {/* 6. 發票憑證上傳 */}
+            {canUploadImages({ canEdit }) && (
               <div className="p-3.5 rounded-2xl bg-teal-50/70 dark:bg-slate-800/80 border border-teal-200 dark:border-teal-800/60 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-teal-900 dark:text-teal-200 flex items-center gap-1.5">
                     <Camera className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                    <span>發票 / 收據憑證 (選填，支援多張相片)</span>
+                    <span>發票 / 收據憑證 (最多 5 張)</span>
                   </label>
                   {receiptImages.length > 0 && (
                     <span className="text-[11px] font-bold text-teal-700 dark:text-teal-300">
-                      已附加 {receiptImages.length} 張發票
+                      已附加 {receiptImages.length} / 5 張
                     </span>
                   )}
                 </div>
@@ -870,11 +917,11 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                 <button
                   type="button"
                   onClick={() => receiptInputRef.current?.click()}
-                  disabled={isCompressingReceipts}
-                  className="w-full py-2.5 px-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 text-teal-900 dark:text-teal-200 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 transition cursor-pointer"
+                  disabled={isCompressingReceipts || receiptImages.length >= 5}
+                  className="w-full py-2.5 px-3 rounded-xl bg-white dark:bg-slate-900 border border-teal-300 dark:border-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 text-teal-900 dark:text-teal-200 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-95 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Camera className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                  <span>上傳發票收據 (拍照或相簿)</span>
+                  <span>{receiptImages.length >= 5 ? '已達 5 張上限' : '上傳發票收據 (拍照或相簿)'}</span>
                 </button>
 
                 {/* Compressing indicator */}
@@ -893,8 +940,11 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                         key={idx}
                         className="relative shrink-0 w-16 h-16 rounded-xl overflow-hidden border-2 border-teal-500 shadow-xs group"
                       >
-                        <img
+                        <MediaImage
                           src={imgUrl}
+                          tripId={trip.id}
+                          ownerId={trip.ownerId}
+                          collabId={trip.collabId}
                           alt={`發票 ${idx + 1}`}
                           onClick={() => setPreviewImage(imgUrl)}
                           className="w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform"
@@ -902,10 +952,10 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                         <button
                           type="button"
                           onClick={() => handleRemoveReceiptImage(idx)}
-                          className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center text-xs transition"
+                          className="absolute top-0.5 right-0.5 w-7 h-7 rounded-full bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center text-xs transition cursor-pointer"
                           title="移除此張發票"
                         >
-                          <X className="w-3 h-3" />
+                          <X className="w-3.5 h-3.5" />
                         </button>
                         <span className="absolute bottom-0.5 left-0.5 px-1 rounded bg-black/60 text-[9px] text-white font-mono">
                           #{idx + 1}
@@ -1071,7 +1121,6 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                   onChange={(e) => setNewTodoTitle(e.target.value)}
                   placeholder="新增待辦事項... (例如：購買新幹線車票、領取網卡)"
                   className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden"
-                  autoFocus
                 />
                 <button
                   type="button"
@@ -1167,7 +1216,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleDeleteTodo(todo.id)}
-                        className="p-1.5 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 sm:opacity-0 group-hover:opacity-100 ml-2"
+                        className="min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-rose-500 dark:text-zinc-500 dark:hover:text-rose-400 transition cursor-pointer opacity-80 sm:opacity-0 sm:group-hover:opacity-100 ml-1"
                         title="刪除"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -1225,7 +1274,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                           <button
                             type="button"
                             onClick={() => handleDeleteTodo(todo.id)}
-                            className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
+                            className="min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-rose-500 dark:text-zinc-500 dark:hover:text-rose-400 transition cursor-pointer opacity-80 sm:opacity-0 sm:group-hover:opacity-100"
                             title="刪除"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1250,8 +1299,11 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
           onClick={() => setPreviewImage(null)}
         >
           <div className="relative max-w-2xl max-h-[85vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
-            <img
+            <MediaImage
               src={previewImage}
+              tripId={trip.id}
+              ownerId={trip.ownerId}
+              collabId={trip.collabId}
               alt="發票收據大圖"
               className="max-h-[78vh] w-auto max-w-full rounded-2xl object-contain shadow-2xl border border-white/20"
             />
@@ -1259,17 +1311,17 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               <button
                 type="button"
                 onClick={() => setPreviewImage(null)}
-                className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs backdrop-blur-md transition active:scale-95"
+                className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs backdrop-blur-md transition active:scale-95 cursor-pointer"
               >
                 關閉大圖
               </button>
-              <a
-                href={previewImage}
-                download="receipt-photo.jpg"
-                className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs transition active:scale-95 shadow-xs"
+              <button
+                type="button"
+                onClick={handleDownloadLightboxImage}
+                className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs transition active:scale-95 shadow-xs cursor-pointer"
               >
                 下載照片
-              </a>
+              </button>
             </div>
           </div>
         </div>

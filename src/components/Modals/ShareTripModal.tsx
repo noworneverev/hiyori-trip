@@ -26,6 +26,7 @@ interface ShareTripModalProps {
   trip: Trip;
   userId?: string;
   currentUser?: User | null;
+  onRequireAuth?: () => void;
   onUpdateTrip?: (updatedTrip: Trip) => void;
   lang: Language;
   onClose: () => void;
@@ -34,12 +35,14 @@ interface ShareTripModalProps {
 export const ShareTripModal: React.FC<ShareTripModalProps> = ({
   trip,
   currentUser,
+  onRequireAuth,
   onUpdateTrip,
   lang,
   onClose,
 }) => {
   useBodyScrollLock(true);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(() => {
     if (trip.collabId && trip.isCollaborative) {
       const base = getPublicShareBaseUrl();
@@ -52,16 +55,29 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
   const [showQrCode, setShowQrCode] = useState(false);
 
   const handleGenerateLiveShare = async () => {
+    setShareError(null);
+    if (!currentUser) {
+      setShareError('請先登入 Google 帳號，才能建立即時雲端分享連結');
+      onRequireAuth?.();
+      return;
+    }
+
     setIsPublishing(true);
     try {
-      const collabId = await enableTripCollaboration(trip, currentUser);
+      const normalizedTrip: Trip = {
+        ...trip,
+        generalAccess: trip.generalAccess || 'link_viewer',
+        ownerId: trip.ownerId || currentUser.uid,
+        ownerEmail: trip.ownerEmail || currentUser.email || '',
+      };
+      const collabId = await enableTripCollaboration(normalizedTrip, currentUser);
       const base = getPublicShareBaseUrl();
       const url = `${base}?collab=${collabId}`;
       setShareUrl(url);
 
       if (onUpdateTrip) {
         onUpdateTrip({
-          ...trip,
+          ...normalizedTrip,
           collabId,
           isCollaborative: true,
           updatedAt: Date.now(),
@@ -69,10 +85,9 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
       }
     } catch (err) {
       console.error('Failed to enable collaboration:', err);
-      // Fallback
-      const base = getPublicShareBaseUrl();
-      const fallbackCollabId = trip.collabId || `collab_${Date.now()}`;
-      setShareUrl(`${base}?collab=${fallbackCollabId}`);
+      setShareError(
+        err instanceof Error ? err.message : '無法建立雲端分享連結，請確認網路連線後重試'
+      );
     } finally {
       setIsPublishing(false);
     }
@@ -148,7 +163,7 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition cursor-pointer"
+            className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -183,18 +198,17 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
 
           {!shareUrl ? (
             /* Publish Prompt Step */
-            <div className="py-4 text-center space-y-4">
-              <div className="max-w-md mx-auto text-xs text-slate-600 dark:text-zinc-300 leading-relaxed space-y-2">
-                <div className="p-3 bg-teal-50 dark:bg-teal-950/40 rounded-2xl border border-teal-100 dark:border-teal-900/60 text-teal-900 dark:text-teal-200 text-left space-y-1">
-                  <div className="flex items-center gap-1.5 font-bold text-xs">
-                    <Radio className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                    <span>即時雲端同步</span>
-                  </div>
-                  <p className="text-xs text-slate-600 dark:text-zinc-300">
-                    產生專屬連結，親友可直接瀏覽，後續任何變更皆會自動更新。
-                  </p>
+            <div className="py-3 text-center space-y-3">
+              <p className="text-xs text-slate-600 dark:text-zinc-300 flex items-center justify-center gap-1.5">
+                <Radio className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+                <span>訪客取得連結後即可即時瀏覽，無需登入</span>
+              </p>
+
+              {shareError && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-semibold text-left">
+                  {shareError}
                 </div>
-              </div>
+              )}
 
               <button
                 type="button"
@@ -210,7 +224,7 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
                 ) : (
                   <>
                     <Globe className="w-4 h-4" />
-                    <span>建立分享連結</span>
+                    <span>{currentUser ? '建立分享連結' : '登入並建立分享連結'}</span>
                   </>
                 )}
               </button>
@@ -276,16 +290,6 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
                 </button>
               </div>
 
-              <div className="p-3 rounded-2xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900/50 text-xs text-teal-900 dark:text-teal-200 space-y-1">
-                <p className="font-bold flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                  <span>內容自動隨時更新：</span>
-                </p>
-                <p className="text-slate-600 dark:text-zinc-300 leading-relaxed text-[11px]">
-                  任何持此連結的人皆會收到最新版行程。當您新增景點、更改時間或勾選待辦時，對方手機畫面都會自動同步更新。
-                </p>
-              </div>
-
               {/* QR Code Display Card */}
               {showQrCode && (
                 <div className="p-4 rounded-2xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-center space-y-2 animate-in fade-in duration-150">
@@ -298,7 +302,7 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
                     />
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                    讓旁邊的親友拿起手機相機直接掃描，即可立刻開啟行程！
+                    掃描 QR Code 立即開啟行程
                   </p>
                 </div>
               )}
@@ -307,10 +311,7 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-100 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/40 flex items-center justify-between">
-          <span className="text-[11px] text-slate-400 dark:text-zinc-500">
-            日和手帳 Hiyori 即時協作分享
-          </span>
+        <div className="px-5 py-3 border-t border-slate-100 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/40 flex items-center justify-end">
           <button
             type="button"
             onClick={onClose}

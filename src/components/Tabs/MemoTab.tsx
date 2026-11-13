@@ -32,7 +32,9 @@ import {
 interface MemoTabProps {
   trip: Trip;
   lang: Language;
+  canEdit?: boolean;
   onUpdateTrip: (updatedTrip: Trip) => void;
+  requireAuth?: (action: () => void, reason?: string) => boolean;
 }
 
 interface StickyNoteItem {
@@ -109,7 +111,7 @@ const OFFICIAL_EMERGENCY_HOTLINES = [
   },
 ] as const;
 
-export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) => {
+export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, onUpdateTrip, requireAuth }) => {
   const t = TRANSLATIONS[lang];
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showEmergencyGuide, setShowEmergencyGuide] = useState(false);
@@ -141,6 +143,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
       isInitialMount.current = false;
       return;
     }
+    if (!canEdit) return;
     setIsAutoSaving(true);
     const timer = setTimeout(() => {
       if (tripNotes !== (trip.notes || '')) {
@@ -157,7 +160,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
       }
     }, 600);
     return () => clearTimeout(timer);
-  }, [tripNotes]);
+  }, [tripNotes, canEdit]);
 
   // Quick Sticky Notes synced with local storage (same as quick action modal)
   const STORAGE_KEY_NOTES = `hiyori_scratchpad_${trip.id}`;
@@ -203,6 +206,9 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
   const handleAddSticky = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStickyContent.trim()) return;
+    if (requireAuth && !requireAuth(() => handleAddSticky(e), lang === 'zh' ? '新增速記便籤' : 'Add sticky note')) {
+      return;
+    }
     const cat = STICKY_CATS.find((c) => c.key === newStickyCat) || STICKY_CATS[0];
     const newNote: StickyNoteItem = {
       id: `sticky-${Date.now()}`,
@@ -218,6 +224,9 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
   };
 
   const handleStartEditSticky = (note: StickyNoteItem) => {
+    if (requireAuth && !requireAuth(() => handleStartEditSticky(note), lang === 'zh' ? '編輯速記便籤' : 'Edit sticky note')) {
+      return;
+    }
     setEditingStickyId(note.id);
     setEditStickyLabel(note.label);
     setEditStickyContent(note.content);
@@ -243,12 +252,18 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
   };
 
   const handleDeleteSticky = (id: string) => {
+    if (requireAuth && !requireAuth(() => handleDeleteSticky(id), lang === 'zh' ? '刪除速記便籤' : 'Delete sticky note')) {
+      return;
+    }
     setStickyNotes(stickyNotes.filter((n) => n.id !== id));
     if (editingStickyId === id) setEditingStickyId(null);
   };
 
   const handleToggleStickyComplete = (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    if (requireAuth && !requireAuth(() => handleToggleStickyComplete(id, e), lang === 'zh' ? '切換便籤完成狀態' : 'Toggle sticky note')) {
+      return;
+    }
     setStickyNotes((prev) =>
       prev.map((n) => (n.id === id ? { ...n, completed: !n.completed } : n))
     );
@@ -267,6 +282,10 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
   };
 
   const handleSaveNotes = () => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(handleSaveNotes, lang === 'zh' ? '儲存旅遊備忘錄' : 'Save travel memo')) {
+      return;
+    }
     onUpdateTrip({
       ...trip,
       notes: tripNotes,
@@ -277,6 +296,10 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
   };
 
   const handleAppendTemplate = (templateText: string) => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(() => handleAppendTemplate(templateText), lang === 'zh' ? '套用筆記範本' : 'Insert memo template')) {
+      return;
+    }
     const updated = tripNotes.trim()
       ? `${tripNotes.trim()}\n\n${templateText}`
       : templateText;
@@ -292,7 +315,10 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
 
   const handleAddContact = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!contactName.trim() || !contactPhone.trim()) return;
+    if (!canEdit || !contactName.trim() || !contactPhone.trim()) return;
+    if (requireAuth && !requireAuth(() => handleAddContact(e), lang === 'zh' ? '新增緊急聯絡人' : 'Add emergency contact')) {
+      return;
+    }
 
     const newContact: EmergencyContact = {
       id: `em-${Date.now()}`,
@@ -317,9 +343,17 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
   };
 
   const handleDeleteContact = (id: string) => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(() => handleDeleteContact(id), lang === 'zh' ? '刪除緊急聯絡人' : 'Delete emergency contact')) {
+      return;
+    }
     onUpdateTrip({
       ...trip,
       emergencyContacts: trip.emergencyContacts.filter((c) => c.id !== id),
+      deletedItemIds: {
+        ...(trip.deletedItemIds || {}),
+        [id]: Date.now(),
+      },
       updatedAt: Date.now(),
     });
   };
@@ -338,7 +372,12 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
 
           <button
             type="button"
-            onClick={() => setShowAddSticky(!showAddSticky)}
+            onClick={() => {
+              if (!showAddSticky && requireAuth && !requireAuth(() => setShowAddSticky(true), lang === 'zh' ? '新增速記便籤' : 'Add sticky note')) {
+                return;
+              }
+              setShowAddSticky(!showAddSticky);
+            }}
             className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition active:scale-95 shadow-2xs self-start sm:self-auto"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -611,91 +650,102 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
             </h3>
           </div>
 
-          <div className="flex items-center gap-2.5 self-end sm:self-auto shrink-0">
-            {/* Real-time Auto-save Indicator */}
-            <div className="text-[11px] font-medium flex items-center gap-1.5">
-              {isAutoSaving ? (
-                <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                  <span>儲存中...</span>
-                </span>
-              ) : isSavedNotes ? (
-                <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5" />
-                  <span>已儲存</span>
-                </span>
-              ) : (
-                <span className="text-slate-400">已同步</span>
-              )}
-            </div>
+          {canEdit && (
+            <div className="flex items-center gap-2.5 self-end sm:self-auto shrink-0">
+              {/* Real-time Auto-save Indicator */}
+              <div className="text-[11px] font-medium flex items-center gap-1.5">
+                {isAutoSaving ? (
+                  <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-amber-500" />
+                    <span>儲存中...</span>
+                  </span>
+                ) : isSavedNotes ? (
+                  <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" />
+                    <span>已儲存</span>
+                  </span>
+                ) : (
+                  <span className="text-slate-400">已同步</span>
+                )}
+              </div>
 
-            <button
-              onClick={handleSaveNotes}
-              className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 transition active:scale-95"
-            >
-              <Check className="w-3.5 h-3.5" />
-              <span>儲存</span>
-            </button>
-          </div>
+              <button
+                onClick={handleSaveNotes}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 transition active:scale-95"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>儲存</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Quick Template Insert Buttons */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1">
-          <span className="text-[11px] text-slate-400 font-medium">範本：</span>
-          <button
-            type="button"
-            onClick={() =>
-              handleAppendTemplate('【航班資訊】\n• 去程航班：\n• 起飛時間：\n• 航廈航廈：\n• 訂位代號：\n• 回程航班：')
-            }
-            className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
-          >
-            <Plane className="w-3 h-3 text-sky-600" />
-            <span>+ 航班資訊</span>
-          </button>
+        {canEdit && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <span className="text-[11px] text-slate-400 font-medium">範本：</span>
+            <button
+              type="button"
+              onClick={() =>
+                handleAppendTemplate('【航班資訊】\n• 去程航班：\n• 起飛時間：\n• 航廈航廈：\n• 訂位代號：\n• 回程航班：')
+              }
+              className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
+            >
+              <Plane className="w-3 h-3 text-sky-600" />
+              <span>+ 航班資訊</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() =>
-              handleAppendTemplate('【飯店入住憑證】\n• 飯店名稱：\n• 地址：\n• 入住時間：15:00 後\n• 退房時間：11:00 前\n• 訂房代號：')
-            }
-            className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
-          >
-            <Building className="w-3 h-3 text-indigo-600" />
-            <span>+ 飯店憑證</span>
-          </button>
+            <button
+              type="button"
+              onClick={() =>
+                handleAppendTemplate('【飯店入住憑證】\n• 飯店名稱：\n• 地址：\n• 入住時間：15:00 後\n• 退房時間：11:00 前\n• 訂房代號：')
+              }
+              className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
+            >
+              <Building className="w-3 h-3 text-indigo-600" />
+              <span>+ 飯店憑證</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() =>
-              handleAppendTemplate('【上網與通訊】\n• eSIM / SIM卡供應商：\n• 開通 APN 設定：\n• 漫遊客服專線：')
-            }
-            className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
-          >
-            <Wifi className="w-3 h-3 text-emerald-600" />
-            <span>+ 上網設定</span>
-          </button>
+            <button
+              type="button"
+              onClick={() =>
+                handleAppendTemplate('【上網與通訊】\n• eSIM / SIM卡供應商：\n• 開通 APN 設定：\n• 漫遊客服專線：')
+              }
+              className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
+            >
+              <Wifi className="w-3 h-3 text-emerald-600" />
+              <span>+ 上網設定</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() =>
-              handleAppendTemplate('【必買伴手禮清單】\n• 1. \n• 2. \n• 3. ')
-            }
-            className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
-          >
-            <ShoppingBag className="w-3 h-3 text-rose-600" />
-            <span>+ 伴手禮清單</span>
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={() =>
+                handleAppendTemplate('【必買伴手禮清單】\n• 1. \n• 2. \n• 3. ')
+              }
+              className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
+            >
+              <ShoppingBag className="w-3 h-3 text-rose-600" />
+              <span>+ 伴手禮清單</span>
+            </button>
+          </div>
+        )}
 
         <textarea
-          rows={9}
+          rows={8}
+          readOnly={!canEdit}
           value={tripNotes}
-          onChange={(e) => setTripNotes(e.target.value)}
-          onBlur={handleSaveNotes}
+          onChange={(e) => {
+            if (!canEdit) return;
+            const val = e.target.value;
+            if (requireAuth && !requireAuth(() => setTripNotes(val), lang === 'zh' ? '編輯旅遊備忘錄' : 'Edit travel memo')) {
+              return;
+            }
+            setTripNotes(val);
+          }}
           placeholder={
             lang === 'zh'
-              ? '隨意輸入自由筆記、出發叮嚀或重要資訊 (即時自動儲存)...'
-              : 'Type notes, confirmation numbers, reservations here (auto-saved)...'
+              ? '輸入自由筆記或重要資訊...'
+              : 'Type travel notes...'
           }
           className="w-full p-4 rounded-2xl border border-slate-200 dark:border-slate-700/80 focus:ring-2 focus:ring-teal-500/25 focus:border-teal-500 outline-hidden text-xs leading-relaxed font-mono bg-slate-50/60 dark:bg-slate-800/50 text-slate-800 dark:text-slate-100"
         />
@@ -715,37 +765,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
         </div>
       </div>
 
-      {/* 2. Pre-trip Checklist & Reminders (Middle) */}
-      <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 shadow-2xs space-y-3">
-        <h4 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-          <Info className="w-4 h-4 text-teal-600" />
-          <span>行前提醒</span>
-        </h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
-          <div className="p-3.5 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-100 dark:border-teal-900/40 space-y-1">
-            <span className="font-bold text-teal-900 dark:text-teal-200 block">護照有效期限</span>
-            <p className="text-slate-600 dark:text-slate-400 text-[11px] leading-relaxed">
-              確認護照有效期限距回程日期至少有 6 個月以上，並備妥手機電子檔截圖。
-            </p>
-          </div>
-
-          <div className="p-3.5 rounded-2xl bg-sky-50/50 dark:bg-sky-950/20 border border-sky-100 dark:border-sky-900/40 space-y-1">
-            <span className="font-bold text-sky-900 dark:text-sky-200 block">海外刷卡與換匯</span>
-            <p className="text-slate-600 dark:text-slate-400 text-[11px] leading-relaxed">
-              開啟信用卡海外交易功能，並準備部分外幣現鈔應付交通票卡加值或傳統小吃。
-            </p>
-          </div>
-
-          <div className="p-3.5 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40 space-y-1">
-            <span className="font-bold text-amber-900 dark:text-amber-200 block">旅遊平安與不便險</span>
-            <p className="text-slate-600 dark:text-slate-400 text-[11px] leading-relaxed">
-              投保海外急難救助與班機延誤不便險，並將保單英文證明與救援專線號碼留存。
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* 3. Emergency & Safety Section (行前準備與備忘 - 安全專區) */}
+      {/* 3. Emergency & Safety Section */}
       <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 shadow-2xs space-y-4">
         {/* Section Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
@@ -764,14 +784,21 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
               <BookOpen className="w-4 h-4" />
               <span>應變指引</span>
             </button>
-            <button
-              type="button"
-              onClick={() => setShowAddContact(!showAddContact)}
-              className="px-3.5 py-2 min-h-[40px] rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs flex items-center gap-1.5 transition active:scale-95"
-            >
-              <Plus className="w-4 h-4" />
-              <span>新增聯絡人</span>
-            </button>
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!showAddContact && requireAuth && !requireAuth(() => setShowAddContact(true), lang === 'zh' ? '新增緊急聯絡人' : 'Add emergency contact')) {
+                    return;
+                  }
+                  setShowAddContact(!showAddContact);
+                }}
+                className="px-3.5 py-2 min-h-[40px] rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs flex items-center gap-1.5 transition active:scale-95"
+              >
+                <Plus className="w-4 h-4" />
+                <span>新增聯絡人</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -931,15 +958,17 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
                       <span className="font-bold text-slate-900 dark:text-white text-xs">
                         {contact.name}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteContact(contact.id)}
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
-                        title="刪除此聯絡人"
-                        aria-label="刪除此聯絡人"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteContact(contact.id)}
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                          title="刪除此聯絡人"
+                          aria-label="刪除此聯絡人"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
 
                     <p className="font-mono font-bold text-teal-700 dark:text-teal-400 text-sm mt-1">
@@ -985,7 +1014,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
               ))
             ) : (
               <div className="col-span-full py-5 text-center text-xs text-slate-400 bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
-                尚未新增自訂聯絡人，點擊上方「新增聯絡人」按鈕即可填入飯店或私人急難號碼。
+                尚無自訂聯絡人
               </div>
             )}
           </div>
@@ -1010,10 +1039,10 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, onUpdateTrip }) =>
                 </div>
                 <div>
                   <h3 className="font-bold text-slate-900 dark:text-white text-base">
-                    海外旅遊急難求助與應變指南
+                    急難求助與應變指南
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    離線時亦可隨時查閱撥打，保障行車、財物與生命安全
+                    離線可查閱撥打
                   </p>
                 </div>
               </div>

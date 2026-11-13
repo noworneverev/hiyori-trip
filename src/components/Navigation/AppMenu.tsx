@@ -5,7 +5,7 @@ import { performAppUpdate, UpdateState } from '../../utils/pwaUpdater';
 import { APP_VERSION, BUILD_DATE } from '../../constants/version';
 import { getSavedAccessibilityScale, applyAccessibilityScale, AccessibilityScale, ACCESSIBILITY_OPTIONS } from '../../utils/accessibility';
 import { getCustomGeminiKey, setCustomGeminiKey } from '../../utils/aiClient';
-import { getStorageUsage } from '../../utils/storage';
+import { getStorageUsage, getStorageUsageAsync, resetAllLocalData } from '../../utils/storage';
 import {
   Menu,
   X,
@@ -65,7 +65,18 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   const [isSavedKey, setIsSavedKey] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle' });
   const [scale, setScale] = useState<AccessibilityScale>(getSavedAccessibilityScale);
-  const storageInfo = getStorageUsage();
+  const [storageInfo, setStorageInfo] = useState(getStorageUsage);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    getStorageUsageAsync().then((info) => {
+      if (active) setStorageInfo(info);
+    });
+    return () => {
+      active = false;
+    };
+  }, [isOpen]);
 
   useBodyScrollLock(updateState.status === 'checking' || updateState.status === 'updating');
   const menuRef = useRef<HTMLDivElement>(null);
@@ -99,13 +110,21 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         setShowLangSubmenu(false);
       }
     };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false);
+        setShowLangSubmenu(false);
+      }
+    };
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
       document.addEventListener('touchstart', handleClickOutside, { passive: true });
+      window.addEventListener('keydown', handleKeyDown);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen]);
 
@@ -447,11 +466,11 @@ export const AppMenu: React.FC<AppMenuProps> = ({
                           <div className="flex items-center gap-1">
                             <button
                               type="button"
-                              onClick={() => {
+                              onClick={async () => {
                                 if (onResetData) {
                                   onResetData();
                                 } else {
-                                  localStorage.clear();
+                                  await resetAllLocalData();
                                   window.location.reload();
                                 }
                               }}
@@ -539,13 +558,8 @@ export const AppMenu: React.FC<AppMenuProps> = ({
             </div>
             <div>
               <h4 className="font-bold text-sm text-slate-900 dark:text-white">
-                {updateState.message || (lang === 'zh' ? '正在獲取最新版本...' : 'Loading latest version...')}
+                {updateState.message || (lang === 'zh' ? '正在更新...' : 'Updating...')}
               </h4>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
-                {lang === 'zh'
-                  ? '日和手帳正在更新，即將為您重新載入最新行程畫面'
-                  : 'Hiyori is updating, reloading your itinerary shortly'}
-              </p>
             </div>
           </div>
         </div>

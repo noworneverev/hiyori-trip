@@ -2,17 +2,29 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
 export interface PDFExportOptions {
-  onProgress?: (status: string) => void;
+  onProgress?: (status: 'rendering' | 'paginating' | 'downloading' | 'done') => void;
+}
+
+/**
+ * Strip dark mode classes inside cloned/print containers so PDFs and paper prints
+ * always render crisp ink-on-white regardless of the user's active dark theme.
+ */
+function stripDarkClasses(root: HTMLElement): void {
+  root.classList.remove('dark');
+  const darkNodes = root.querySelectorAll('[class*="dark:"]');
+  darkNodes.forEach((node) => {
+    const classes = Array.from(node.classList).filter((c) => !c.startsWith('dark:'));
+    node.className = classes.join(' ');
+  });
 }
 
 /**
  * Prints the target element using an isolated hidden iframe.
  * Produces 100% native vector output with fully selectable/copyable text,
- * zero layout clipping, zero duplicate pages, and pristine high-resolution typography.
+ * zero layout clipping, and dark-mode isolation.
  */
 export function printElementInIframe(element: HTMLElement, title: string = 'Itinerary_Guidebook'): Promise<void> {
   return new Promise((resolve) => {
-    // 1. Create isolated hidden iframe
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
     iframe.style.right = '0';
@@ -26,22 +38,22 @@ export function printElementInIframe(element: HTMLElement, title: string = 'Itin
 
     const doc = iframe.contentWindow?.document;
     if (!doc || !iframe.contentWindow) {
-      // Fallback to window.print if iframe fails
       window.print();
       resolve();
       return;
     }
 
-    // 2. Extract parent stylesheets, Tailwind styles, and fonts
+    const cloned = element.cloneNode(true) as HTMLElement;
+    stripDarkClasses(cloned);
+
     const headNodes = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
       .map((el) => el.outerHTML)
       .join('\n');
 
-    // 3. Construct clean standalone printable HTML
     doc.open();
     doc.write(`
       <!doctype html>
-      <html lang="zh-TW">
+      <html lang="zh-TW" class="light" style="color-scheme: light;">
         <head>
           <meta charset="UTF-8" />
           <title>${title}</title>
@@ -75,7 +87,6 @@ export function printElementInIframe(element: HTMLElement, title: string = 'Itin
             .no-print {
               display: none !important;
             }
-            /* Ensure tables and containers never clip */
             table {
               page-break-inside: auto;
             }
@@ -86,15 +97,14 @@ export function printElementInIframe(element: HTMLElement, title: string = 'Itin
           </style>
         </head>
         <body style="background: #ffffff; color: #0f172a; padding: 0; margin: 0;">
-          <div style="width: 100%; max-width: 100%; margin: 0 auto; background: #ffffff;">
-            ${element.innerHTML}
+          <div style="width: 100%; max-width: 100%; margin: 0 auto; background: #ffffff; color: #0f172a;">
+            ${cloned.innerHTML}
           </div>
         </body>
       </html>
     `);
     doc.close();
 
-    // 4. Wait for fonts & rendering to settle before invoking native print
     setTimeout(() => {
       try {
         iframe.contentWindow?.focus();
@@ -104,43 +114,39 @@ export function printElementInIframe(element: HTMLElement, title: string = 'Itin
         window.print();
       }
 
-      // 5. Clean up iframe
       setTimeout(() => {
         if (iframe.parentNode) {
           document.body.removeChild(iframe);
         }
         resolve();
       }, 1500);
-    }, 400);
+    }, 450);
   });
 }
 
 /**
  * Captures an element and converts it into a multi-page A4 PDF file for direct download.
- * Clones into an unconstrained container to prevent modal overflow clipping or page repeats.
+ * Isolates light theme inside onclone so dark mode never leaks into generated PDFs.
  */
 export async function exportElementToPDF(
   element: HTMLElement,
   filename: string,
   options?: PDFExportOptions
 ): Promise<void> {
-  if (options?.onProgress) {
-    options.onProgress('rendering');
-  }
+  options?.onProgress?.('rendering');
 
-  // Create an offscreen, completely unconstrained clone container
   const cloneWrapper = document.createElement('div');
   cloneWrapper.style.position = 'fixed';
   cloneWrapper.style.left = '-9999px';
   cloneWrapper.style.top = '0';
-  cloneWrapper.style.width = '794px'; // Standard A4 96 DPI pixel width
+  cloneWrapper.style.width = '794px';
   cloneWrapper.style.background = '#ffffff';
   cloneWrapper.style.color = '#0f172a';
   cloneWrapper.style.zIndex = '-999';
   cloneWrapper.style.overflow = 'visible';
 
-  // Deep clone target
   const cloned = element.cloneNode(true) as HTMLElement;
+  stripDarkClasses(cloned);
   cloned.style.width = '794px';
   cloned.style.maxWidth = '794px';
   cloned.style.height = 'auto';
@@ -151,12 +157,17 @@ export async function exportElementToPDF(
   cloned.style.border = 'none';
   cloned.style.margin = '0';
   cloned.style.padding = '24px 32px';
+  cloned.style.background = '#ffffff';
+  cloned.style.color = '#0f172a';
 
   cloneWrapper.appendChild(cloned);
   document.body.appendChild(cloneWrapper);
 
   try {
-    // 1. High-DPI canvas capture (scale: 2 for sharp vector-like text)
+    if ('fonts' in document) {
+      await document.fonts.ready.catch(() => {});
+    }
+
     const canvas = await html2canvas(cloned, {
       scale: 2,
       useCORS: true,
@@ -167,24 +178,22 @@ export async function exportElementToPDF(
       scrollX: 0,
       scrollY: 0,
       ignoreElements: (el) => el.classList?.contains('no-print'),
+      onclone: (clonedDoc) => {
+        clonedDoc.documentElement.classList.remove('dark');
+        clonedDoc.body.classList.remove('dark');
+      },
     });
 
-    if (options?.onProgress) {
-      options.onProgress('paginating');
-    }
+    options?.onProgress?.('paginating');
 
-    // 2. Standard A4 specifications
     const pdf = new jsPDF('p', 'mm', 'a4');
-    const pdfWidth = pdf.internal.pageSize.getWidth(); // 210 mm
-    const pdfHeight = pdf.internal.pageSize.getHeight(); // 297 mm
-
-    // Pixels corresponding to one A4 page height
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
     const pageHeightPx = Math.floor((canvas.width * pdfHeight) / pdfWidth);
 
     let renderedHeightPx = 0;
     let pageCount = 0;
 
-    // 3. Sequential slice pagination (never repeats content, covers 100% of height)
     while (renderedHeightPx < canvas.height) {
       const chunkHeightPx = Math.min(pageHeightPx, canvas.height - renderedHeightPx);
 
@@ -209,24 +218,21 @@ export async function exportElementToPDF(
         );
       }
 
-      const sliceImgData = sliceCanvas.toDataURL('image/png');
+      const sliceImgData = sliceCanvas.toDataURL('image/jpeg', 0.92);
       const renderedMmHeight = (chunkHeightPx * pdfWidth) / canvas.width;
 
       if (pageCount > 0) {
         pdf.addPage();
       }
 
-      pdf.addImage(sliceImgData, 'PNG', 0, 0, pdfWidth, renderedMmHeight);
+      pdf.addImage(sliceImgData, 'JPEG', 0, 0, pdfWidth, renderedMmHeight);
 
       renderedHeightPx += chunkHeightPx;
       pageCount++;
     }
 
-    if (options?.onProgress) {
-      options.onProgress('downloading');
-    }
+    options?.onProgress?.('downloading');
 
-    // 4. Download blob
     const safeFilename = filename.endsWith('.pdf') ? filename : `${filename}.pdf`;
     const pdfBlob = pdf.output('blob');
     const blobUrl = URL.createObjectURL(pdfBlob);
@@ -239,24 +245,17 @@ export async function exportElementToPDF(
     document.body.removeChild(downloadLink);
 
     setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
-
-    if (options?.onProgress) {
-      options.onProgress('done');
-    }
+    options?.onProgress?.('done');
   } catch (err) {
     console.warn('Canvas PDF export error, falling back to isolated vector print:', err);
     await printElementInIframe(element, filename);
   } finally {
-    // Always clean up offscreen clone
     if (cloneWrapper.parentNode) {
       document.body.removeChild(cloneWrapper);
     }
   }
 }
 
-/**
- * Triggers native browser print dialog for paper or system PDF printing
- */
 export function triggerNativePrint(element?: HTMLElement, title: string = 'Itinerary_Guidebook'): void {
   if (element) {
     printElementInIframe(element, title);

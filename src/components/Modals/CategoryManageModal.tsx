@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { X, Plus, Pencil, Trash2, Check, Tag } from 'lucide-react';
 
@@ -24,6 +24,20 @@ export const CategoryManageModal: React.FC<CategoryManageModalProps> = ({
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [deleteConfirmKey, setDeleteConfirmKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (editingKey) {
+          setEditingKey(null);
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [editingKey, onClose]);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,16 +85,13 @@ export const CategoryManageModal: React.FC<CategoryManageModalProps> = ({
               <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white truncate">
                 管理自訂記帳類別
               </h3>
-              <p className="text-[11px] text-slate-400 truncate">
-                自訂消費分類，行動端底部抽屜安全無破版
-              </p>
             </div>
           </div>
 
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0"
+            className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
             aria-label="關閉"
           >
             <X className="w-5 h-5" />
@@ -123,9 +134,6 @@ export const CategoryManageModal: React.FC<CategoryManageModalProps> = ({
               <div className="py-8 text-center text-xs text-slate-400 space-y-1">
                 <Tag className="w-7 h-7 mx-auto text-slate-300 dark:text-slate-600 mb-1" />
                 <p>目前尚無自訂類別</p>
-                <p className="text-[11px] text-slate-400">
-                  可於上方輸入名稱新增，例如「溫泉」、「扭蛋」、「模型玩具」
-                </p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -145,12 +153,12 @@ export const CategoryManageModal: React.FC<CategoryManageModalProps> = ({
                           value={editingName}
                           onChange={(e) => setEditingName(e.target.value)}
                           className="min-w-0 flex-1 px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-600 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100 outline-hidden"
-                          autoFocus
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
                               handleSaveEdit(key);
                             } else if (e.key === 'Escape') {
+                              e.stopPropagation();
                               setEditingKey(null);
                             }
                           }}
@@ -252,14 +260,11 @@ export const CategoryManageModal: React.FC<CategoryManageModalProps> = ({
         </div>
 
         {/* Drawer Footer with Mobile Safe Area */}
-        <div className="px-5 py-3.5 pb-6 sm:pb-3.5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 flex items-center justify-between">
-          <span className="text-[11px] text-slate-400">
-            變更將即時同步套用
-          </span>
+        <div className="px-5 py-3.5 pb-6 sm:pb-3.5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 flex items-center justify-end">
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 font-bold text-xs transition active:scale-95 shadow-xs"
+            className="px-5 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 font-bold text-xs transition active:scale-95 shadow-xs cursor-pointer"
           >
             完成
           </button>

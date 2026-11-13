@@ -122,7 +122,7 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
         </div>
 
         <div className="w-full overflow-x-auto print:overflow-visible">
-          <table className="w-full min-w-[580px] print:min-w-0 table-fixed text-left border-collapse text-[10px] leading-tight border border-slate-300 dark:border-slate-700">
+          <table className="w-full min-w-[580px] print:min-w-0 table-fixed text-left border-collapse text-[10px] leading-tight border border-slate-300 bg-white text-slate-900">
             <colgroup>
               <col style={{ width: '14%' }} />
               <col style={{ width: '22%' }} />
@@ -131,11 +131,11 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
               <col style={{ width: '15%' }} />
             </colgroup>
             <thead className="break-inside-avoid">
-              <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-b border-slate-300 dark:border-slate-700 font-bold">
-                <th className="py-2 px-2 border-r border-slate-300 dark:border-slate-700">日程</th>
-                <th className="py-2 px-2 border-r border-slate-300 dark:border-slate-700">主題 / 主要走向</th>
-                <th className="py-2 px-2 border-r border-slate-300 dark:border-slate-700">精華景點與重點行程</th>
-                <th className="py-2 px-2 border-r border-slate-300 dark:border-slate-700">交通 / 票券</th>
+              <tr className="bg-slate-100 text-slate-800 border-b border-slate-300 font-bold">
+                <th className="py-2 px-2 border-r border-slate-300">日程</th>
+                <th className="py-2 px-2 border-r border-slate-300">主題 / 主要走向</th>
+                <th className="py-2 px-2 border-r border-slate-300">精華景點與重點行程</th>
+                <th className="py-2 px-2 border-r border-slate-300">交通 / 票券</th>
                 <th className="py-2 px-2">當晚住宿</th>
               </tr>
             </thead>
@@ -149,23 +149,23 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                 return (
                   <tr
                     key={day.id}
-                    className={`border-b border-slate-200 dark:border-slate-800 break-inside-avoid ${idx % 2 === 1 ? 'bg-slate-50/70 dark:bg-slate-900/60' : 'bg-white dark:bg-slate-800/40'}`}
+                    className={`border-b border-slate-200 break-inside-avoid ${idx % 2 === 1 ? 'bg-slate-50/80' : 'bg-white'}`}
                   >
-                    <td className="py-2 px-2 align-top border-r border-slate-200 dark:border-slate-700/60 break-words">
-                      <div className="font-bold font-mono text-slate-950 dark:text-slate-100">Day {day.dayNumber}</div>
-                      <div className="text-[9.5px] text-slate-500 dark:text-slate-400 font-mono">
+                    <td className="py-2 px-2 align-top border-r border-slate-200 break-words">
+                      <div className="font-bold font-mono text-slate-950">Day {day.dayNumber}</div>
+                      <div className="text-[9.5px] text-slate-500 font-mono">
                         {formatMonthDaySlash(day.date)} ({weekday})
                       </div>
                     </td>
-                    <td className="py-2 px-2 align-top font-bold text-slate-900 dark:text-white border-r border-slate-200 dark:border-slate-700/60 break-words">
+                    <td className="py-2 px-2 align-top font-bold text-slate-900 border-r border-slate-200 break-words">
                       {day.theme || `第 ${day.dayNumber} 天行程`}
                     </td>
-                    <td className="py-2 px-2 align-top border-r border-slate-200 dark:border-slate-700/60 break-words">
+                    <td className="py-2 px-2 align-top border-r border-slate-200 break-words">
                       {spotTitles.length > 0 ? (
                         <div className="flex flex-wrap items-center gap-x-1 gap-y-0.5 leading-snug">
                           {spotTitles.map((title, sIdx) => (
                             <React.Fragment key={sIdx}>
-                              <span className="inline-block bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 px-1 py-0.2 rounded text-[9.5px] font-medium break-words">
+                              <span className="inline-block bg-slate-100 text-slate-800 px-1 py-0.2 rounded text-[9.5px] font-medium break-words">
                                 {title}
                               </span>
                               {sIdx < spotTitles.length - 1 && (
@@ -178,10 +178,10 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                         <span className="text-slate-400 italic text-[10px]">-</span>
                       )}
                     </td>
-                    <td className="py-2 px-2 align-top border-r border-slate-200 dark:border-slate-700/60 text-[9.5px] text-slate-700 dark:text-slate-300 break-words">
+                    <td className="py-2 px-2 align-top border-r border-slate-200 text-[9.5px] text-slate-700 break-words">
                       {transports.length > 0 ? transports.join('、') : '-'}
                     </td>
-                    <td className="py-2 px-2 align-top text-[9.5px] text-slate-700 dark:text-slate-300 break-words">
+                    <td className="py-2 px-2 align-top text-[9.5px] text-slate-700 break-words">
                       {lodging || '-'}
                     </td>
                   </tr>

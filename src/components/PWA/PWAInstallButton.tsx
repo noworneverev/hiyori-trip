@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { Download, Smartphone, X, CheckCircle2 } from 'lucide-react';
@@ -6,7 +6,20 @@ import { Download, Smartphone, X, CheckCircle2 } from 'lucide-react';
 export const PWAInstallButton: React.FC = () => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
-  useBodyScrollLock(showIOSGuide);
+  const [showOfflineTip, setShowOfflineTip] = useState(false);
+  useBodyScrollLock(showIOSGuide || showOfflineTip);
+
+  useEffect(() => {
+    if (!showIOSGuide && !showOfflineTip) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowIOSGuide(false);
+        setShowOfflineTip(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showIOSGuide, showOfflineTip]);
 
   // If already installed in standalone mode, show clean installed badge
   if (isInstalled) {
@@ -61,7 +74,7 @@ export const PWAInstallButton: React.FC = () => {
                 </div>
                 <button
                   onClick={() => setShowIOSGuide(false)}
-                  className="p-1 rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-200 transition"
+                  className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -96,12 +109,48 @@ export const PWAInstallButton: React.FC = () => {
   }
 
   return (
-    <button
-      onClick={() => alert('已可直接離線使用！若使用手機瀏覽器，可透過瀏覽器選單「加入主畫面」以獲得全螢幕隨身 App 體驗。')}
-      className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold transition"
-    >
-      <Smartphone className="w-3.5 h-3.5" />
-      <span>離線隨行模式</span>
-    </button>
+    <>
+      <button
+        onClick={() => setShowOfflineTip(true)}
+        className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold transition cursor-pointer"
+      >
+        <Smartphone className="w-3.5 h-3.5" />
+        <span>離線隨行模式</span>
+      </button>
+
+      {showOfflineTip && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4"
+          onClick={() => setShowOfflineTip(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-2xl border border-slate-100 dark:border-slate-800 text-slate-800 dark:text-slate-100 animate-in fade-in zoom-in-95 duration-200 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+                <h3 className="font-bold text-base text-slate-900 dark:text-white">離線隨行已就緒</h3>
+              </div>
+              <button
+                onClick={() => setShowOfflineTip(false)}
+                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-200 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              行程與記帳皆支援離線瀏覽與記錄；透過手機瀏覽器選單「加入主畫面」即可全螢幕啟動。
+            </p>
+            <button
+              onClick={() => setShowOfflineTip(false)}
+              className="w-full rounded-xl bg-teal-600 py-2.5 text-sm font-semibold text-white hover:bg-teal-700 transition cursor-pointer"
+            >
+              我知道了
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 };

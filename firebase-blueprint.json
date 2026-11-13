@@ -2,18 +2,24 @@
   "entities": {
     "Trip": {
       "title": "Trip",
-      "description": "A travel itinerary record containing days, items, expenses, packing list and notes.",
+      "description": "A travel itinerary record containing days, items, expenses, packing list, memories, tombstones and notes.",
       "type": "object",
       "properties": {
         "id": {
           "type": "string",
           "description": "Unique trip identifier.",
-          "maxLength": 128
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
         "ownerId": {
           "type": "string",
           "description": "The user UID who owns this trip.",
           "maxLength": 128
+        },
+        "ownerEmail": {
+          "type": "string",
+          "description": "The owner email address.",
+          "maxLength": 320
         },
         "title": {
           "type": "string",
@@ -47,12 +53,12 @@
         "coverGradient": {
           "type": "string",
           "description": "Tailwind gradient class for header.",
-          "maxLength": 100
+          "maxLength": 120
         },
         "notes": {
           "type": "string",
           "description": "General trip notes and reminders.",
-          "maxLength": 10000
+          "maxLength": 20000
         },
         "days": {
           "type": "array",
@@ -74,6 +80,14 @@
           "type": "array",
           "description": "List of emergency contacts."
         },
+        "memories": {
+          "type": "array",
+          "description": "List of travel memory metadata and media:// references."
+        },
+        "deletedItemIds": {
+          "type": "object",
+          "description": "Map of deleted sub-item IDs to deletion epoch timestamps."
+        },
         "isSplitEnabled": {
           "type": "boolean",
           "description": "Whether group bill splitting is enabled."
@@ -91,18 +105,122 @@
           "description": "Unique collaboration room ID.",
           "maxLength": 128
         },
+        "generalAccess": {
+          "type": "string",
+          "enum": ["restricted", "link_viewer", "link_editor"],
+          "description": "General link access policy for shared/collaborative trips."
+        },
+        "editorEmails": {
+          "type": "array",
+          "description": "Bounded list of lowercase verified emails granted editor access."
+        },
+        "collaborators": {
+          "type": "array",
+          "description": "Explicit collaborator member objects."
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Creation epoch timestamp."
+        },
         "updatedAt": {
           "type": "number",
           "description": "Last updated epoch timestamp."
         }
       },
       "required": ["id", "ownerId", "title", "destination", "startDate", "endDate", "currency", "days"]
+    },
+    "MediaAsset": {
+      "title": "MediaAsset",
+      "description": "Compressed JPEG dataUrl asset offloaded from parent Trip documents.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique media identifier.",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "tripId": {
+          "type": "string",
+          "description": "Parent trip ID.",
+          "maxLength": 128
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Owner or uploader UID.",
+          "maxLength": 128
+        },
+        "dataUrl": {
+          "type": "string",
+          "description": "Compressed image data URL (< 900KB).",
+          "maxLength": 900000
+        },
+        "mimeType": {
+          "type": "string",
+          "description": "MIME type of the stored image.",
+          "maxLength": 64
+        },
+        "byteSize": {
+          "type": "number",
+          "description": "Encoded string byte length."
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Creation epoch timestamp."
+        }
+      },
+      "required": ["id", "tripId", "ownerId", "dataUrl", "mimeType", "byteSize", "createdAt"]
+    },
+    "UserTombstones": {
+      "title": "UserTombstones",
+      "description": "Deletion tombstones map to prevent deleted trips from resurrecting across devices.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "User UID.",
+          "maxLength": 128
+        },
+        "deletedTrips": {
+          "type": "object",
+          "description": "Map of deleted tripId -> epoch timestamp."
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Last updated epoch timestamp."
+        }
+      },
+      "required": ["ownerId", "deletedTrips", "updatedAt"]
     }
   },
   "firestore": {
     "/users/{userId}/trips/{tripId}": {
-      "schema": "Trip",
+      "schema": { "$ref": "#/entities/Trip" },
       "description": "User private travel itinerary trips."
+    },
+    "/users/{userId}/trips/{tripId}/media/{mediaId}": {
+      "schema": { "$ref": "#/entities/MediaAsset" },
+      "description": "Compressed photo & receipt attachments for private user trips."
+    },
+    "/users/{userId}/meta/{metaId}": {
+      "schema": { "$ref": "#/entities/UserTombstones" },
+      "description": "User metadata including cross-device deletion tombstones."
+    },
+    "/shared_trips/{shareId}": {
+      "schema": { "$ref": "#/entities/Trip" },
+      "description": "Read-only public shared trip snapshots."
+    },
+    "/shared_trips/{shareId}/media/{mediaId}": {
+      "schema": { "$ref": "#/entities/MediaAsset" },
+      "description": "Media attachments for read-only public shared trip snapshots."
+    },
+    "/collab_trips/{collabId}": {
+      "schema": { "$ref": "#/entities/Trip" },
+      "description": "Real-time collaborative trip rooms."
+    },
+    "/collab_trips/{collabId}/media/{mediaId}": {
+      "schema": { "$ref": "#/entities/MediaAsset" },
+      "description": "Media attachments for collaborative trip rooms."
     }
   }
 }

@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { ItineraryItem, CategoryType } from '../../types/itinerary';
 import { searchLocationOSM } from '../../utils/geo';
-import { compressImageFile } from '../../utils/image';
+import { compressImageFile, storeImageAsMediaRef } from '../../utils/image';
 import { canUploadImages } from '../../utils/userPermissions';
 import { findInsertionPosition } from '../../utils/date';
+import { MediaImage } from '../UI/MediaImage';
 import {
   X,
   MapPin,
@@ -40,6 +41,10 @@ interface ItemEditModalProps {
   item?: ItineraryItem | null;
   dayNumber: number;
   currency: string;
+  tripId?: string;
+  ownerId?: string;
+  collabId?: string;
+  canEdit?: boolean;
   onSave: (itemData: Omit<ItineraryItem, 'id'>, existingId?: string) => void;
   onClose: () => void;
   onStartMapPick?: () => void;
@@ -68,6 +73,10 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   item,
   dayNumber,
   currency,
+  tripId,
+  ownerId,
+  collabId,
+  canEdit = true,
   onSave,
   onClose,
   onStartMapPick,
@@ -112,6 +121,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   const [memoryMood, setMemoryMood] = useState<string>(item?.memoryMood || '✨');
   const [googlePhotosUrl, setGooglePhotosUrl] = useState<string>(item?.googlePhotosUrl || '');
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   // Search OSM
@@ -163,21 +173,24 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 
   const handlePhotoFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (!files || files.length === 0) return;
+    if (!files || files.length === 0 || !canEdit) return;
     setIsUploadingPhoto(true);
+    setPhotoError(null);
     try {
       const remainingSlots = Math.max(0, 3 - memoryPhotos.length);
       if (remainingSlots <= 0) return;
 
-      const compressed: string[] = [];
+      const compressedRefs: string[] = [];
       const countToProcess = Math.min(files.length, remainingSlots);
       for (let i = 0; i < countToProcess; i++) {
         const url = await compressImageFile(files[i]);
-        compressed.push(url);
+        const mediaRef = await storeImageAsMediaRef(tripId || 'local', url);
+        compressedRefs.push(mediaRef);
       }
-      setMemoryPhotos((prev) => [...prev, ...compressed].slice(0, 3));
+      setMemoryPhotos((prev) => [...prev, ...compressedRefs].slice(0, 3));
     } catch (err) {
       console.error('Failed to compress photo:', err);
+      setPhotoError(err instanceof Error ? err.message : '照片上傳或壓縮失敗，請更換檔案重試');
     } finally {
       setIsUploadingPhoto(false);
       if (photoInputRef.current) photoInputRef.current.value = '';
@@ -185,6 +198,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   };
 
   const handleRemovePhoto = (idx: number) => {
+    if (!canEdit) return;
     setMemoryPhotos((prev) => prev.filter((_, i) => i !== idx));
   };
 
@@ -241,7 +255,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!canEdit || !title.trim()) return;
 
     onSave(
       {
@@ -300,7 +314,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+            className="min-w-[36px] min-h-[36px] rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -317,10 +331,9 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
               <input
                 type="text"
                 required
-                autoFocus={!item}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="輸入景點或餐廳，例如：兼六園、一蘭拉麵、金澤城..."
+                placeholder="輸入景點或餐廳名稱..."
                 className="w-full px-4 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/80 text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:bg-white dark:focus:bg-slate-800 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 outline-none transition"
               />
               {title.trim().length >= 2 && !address && (
@@ -344,7 +357,6 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-xs font-bold text-slate-700 dark:text-slate-200">類別</label>
-              <span className="text-[11px] text-slate-400">點選切換卡片顏色與圖標</span>
             </div>
             <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
               {CATEGORIES.map((cat) => {
@@ -409,10 +421,10 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                       setEndTime('');
                       setShowEndTimeInput(false);
                     }}
-                    className="p-1 text-slate-400 hover:text-slate-600"
+                    className="min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-slate-600 cursor-pointer"
                     title="移除結束時間"
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               ) : (
@@ -589,7 +601,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                           已就緒導航座標 ({lat.toFixed(4)}, {lng.toFixed(4)})
                         </span>
                       ) : (
-                        <span>尚未設定座標（亦可在地圖點擊快速標定）</span>
+                        <span>尚未設定座標</span>
                       )}
                     </div>
                     <button
@@ -682,6 +694,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                     <div className="flex items-center gap-2">
                       <input
                         type="number"
+                        inputMode="decimal"
                         value={cost}
                         onChange={(e) => setCost(e.target.value)}
                         placeholder="0"
@@ -742,7 +755,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                     ))}
                   </div>
 
-                  {canUploadImages() && (
+                  {canUploadImages({ canEdit }) && (
                     <>
                       <input
                         type="file"
@@ -763,10 +776,15 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                           {isUploadingPhoto
                             ? '照片處理中...'
                             : memoryPhotos.length >= 3
-                            ? '相片已滿 (可點下方垃圾桶刪除更換)'
+                            ? '已達上限 3 張'
                             : '選取相片'}
                         </span>
                       </button>
+                      {photoError && (
+                        <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                          {photoError}
+                        </p>
+                      )}
                     </>
                   )}
 
@@ -774,15 +792,24 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                     <div className="grid grid-cols-4 gap-2 pt-1">
                       {memoryPhotos.map((photo, idx) => (
                         <div key={idx} className="relative group rounded-xl overflow-hidden border border-rose-200 dark:border-rose-900/60 aspect-square">
-                          <img src={photo} alt={`Memory ${idx}`} className="w-full h-full object-cover" />
-                          <button
-                            type="button"
-                            onClick={() => handleRemovePhoto(idx)}
-                            className="absolute top-1 right-1 p-1 bg-black/75 hover:bg-rose-600 text-white rounded-full transition"
-                            title="移除此相片"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
+                          <MediaImage
+                            src={photo}
+                            tripId={tripId}
+                            ownerId={ownerId}
+                            collabId={collabId}
+                            alt={`Memory ${idx}`}
+                            className="w-full h-full object-cover"
+                          />
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemovePhoto(idx)}
+                              className="absolute top-1 right-1 w-7 h-7 flex items-center justify-center bg-black/75 hover:bg-rose-600 text-white rounded-full transition cursor-pointer"
+                              title="移除此相片"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -793,7 +820,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                         <ExternalLink className="w-3 h-3 text-rose-600" />
-                        <span>Google 相簿連結 (檢視 4K / 原始照片)</span>
+                        <span>Google 相簿連結（選填）</span>
                       </label>
                       {googlePhotosUrl && (
                         <a
@@ -811,12 +838,9 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                       type="url"
                       value={googlePhotosUrl}
                       onChange={(e) => setGooglePhotosUrl(e.target.value)}
-                      placeholder="貼上 Google 相簿分享連結 (如 https://photos.app.goo.gl/...)"
+                      placeholder="https://photos.app.goo.gl/..."
                       className="w-full px-3 py-1.5 rounded-xl border border-rose-200/90 dark:border-rose-900/60 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs outline-none focus:ring-2 focus:ring-rose-400 placeholder:text-slate-400"
                     />
-                    <p className="text-[10px] text-slate-400">
-                      填入後可於大圖燈箱一鍵開啟 Google 相簿無損原圖
-                    </p>
                   </div>
                 </div>
               </div>

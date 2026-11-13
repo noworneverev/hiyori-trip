@@ -7,6 +7,7 @@ import {
   exportTripToJSON,
   exportAllTripsToJSON,
   exportTripToMarkdown,
+  exportTripToCSV,
 } from '../../utils/storage';
 import { TRIP_TEMPLATES } from '../../data/presetTrips';
 import {
@@ -25,6 +26,7 @@ import {
   Loader2,
   Printer,
   Calendar,
+  Table,
 } from 'lucide-react';
 
 interface ImportExportModalProps {
@@ -53,6 +55,31 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiStatusStep, setAiStatusStep] = useState<string>('');
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportSingleJSON = async () => {
+    setErrorMessage(null);
+    setIsExporting(true);
+    try {
+      await exportTripToJSON(currentTrip);
+    } catch (err: any) {
+      setErrorMessage(`匯出 JSON 失敗: ${err?.message || '未知錯誤'}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportAllJSON = async () => {
+    setErrorMessage(null);
+    setIsExporting(true);
+    try {
+      await exportAllTripsToJSON(allTrips);
+    } catch (err: any) {
+      setErrorMessage(`整庫備份失敗: ${err?.message || '未知錯誤'}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // Handle local file read
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -200,12 +227,11 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-base text-slate-900 dark:text-white">行程檔案解析與匯出中心</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">支援 AI 智慧識別、跨裝置雲端備份與多格式匯出</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 transition"
+            className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -276,7 +302,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                 <div className="flex items-center justify-between">
                   <label className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
                     <FileText className="w-4 h-4 text-teal-600" />
-                    行程文字內容（或直接貼上旅行社行程、網誌攻略、自由行筆記）
+                    貼上行程文字或筆記
                   </label>
                   {pastedText && (
                     <button
@@ -310,7 +336,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                   rows={5}
                   value={pastedText}
                   onChange={(e) => setPastedText(e.target.value)}
-                  placeholder={`請貼上任意旅遊文字，例如：\nDay 1: 成田機場到上野放行李，下午淺草寺雷門拍照，傍晚晴空塔看夜景\nDay 2: 早上明治神宮，中午原宿竹下通吃可麗餅，下午涉谷十字路口與 SHIBUYA SKY 看夕陽\nDay 3: 新宿御苑漫步，下午去下北澤古著選品，晚上六本木之丘森美術館看東京鐵塔`}
+                  placeholder="Day 1: 淺草寺、晴空塔..."
                   className="w-full p-3 rounded-xl border border-slate-300 dark:border-slate-700 focus:border-teal-500 outline-none font-mono text-[11px] leading-relaxed bg-slate-50/50 dark:bg-slate-800/60 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
                 />
 
@@ -331,7 +357,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                     ) : (
                       <>
                         <Bot className="w-4 h-4 text-cyan-200" />
-                        <span>AI 智慧解析 (自動生成每日行程、精確座標與路線圖)</span>
+                        <span>AI 智慧解析</span>
                       </>
                     )}
                   </button>
@@ -441,9 +467,6 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
           {/* TAB 2: PRESET TRIPS (Templates) */}
           {activeTab === 'presets' && (
             <div className="space-y-3">
-              <p className="text-slate-600 dark:text-slate-300 text-xs">
-                精選行程範本庫（點選「載入為新行程」即可將範例存入您的個人行程庫中自由調整）：
-              </p>
               <div className="grid grid-cols-1 gap-3">
                 {TRIP_TEMPLATES.map((preset) => (
                   <div
@@ -490,7 +513,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                   共 {currentTrip.days.length} 天行程、{currentTrip.days.reduce((acc, d) => acc + d.items.length, 0)} 個景點安排、{currentTrip.expenses.length} 筆花費記錄
                 </p>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 mt-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-4">
                   {onOpenExportPDF && (
                     <button
                       type="button"
@@ -498,7 +521,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                         onClose();
                         onOpenExportPDF();
                       }}
-                      className="p-3 bg-teal-50/80 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800/80 hover:border-teal-500 rounded-xl text-left transition shadow-xs group"
+                      className="p-3 bg-teal-50/80 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800/80 hover:border-teal-500 rounded-xl text-left transition shadow-xs group cursor-pointer"
                     >
                       <div className="flex items-center gap-2 font-bold text-teal-950 dark:text-teal-200 text-xs">
                         <Printer className="w-4 h-4 text-teal-700 group-hover:scale-110 transition-transform" />
@@ -510,44 +533,62 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => exportTripToJSON(currentTrip)}
-                    className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:border-teal-500 hover:bg-teal-50/30 dark:hover:bg-teal-950/30 rounded-xl text-left transition shadow-xs group"
+                    disabled={isExporting}
+                    onClick={handleExportSingleJSON}
+                    className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:border-teal-500 hover:bg-teal-50/30 dark:hover:bg-teal-950/30 rounded-xl text-left transition shadow-xs group disabled:opacity-60 cursor-pointer"
                   >
                     <div className="flex items-center gap-2 font-bold text-teal-900 dark:text-teal-200 text-xs">
-                      <Download className="w-4 h-4 text-teal-600 group-hover:translate-y-0.5 transition-transform" />
+                      {isExporting ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-teal-600" />
+                      ) : (
+                        <Download className="w-4 h-4 text-teal-600 group-hover:translate-y-0.5 transition-transform" />
+                      )}
                       匯出單一旅程 JSON
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">包含所有景點、經緯度座標與花費，可在任何設備重新匯入。</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">完整還原包（含照片、座標與記帳），可在任何裝置匯入。</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => exportTripToCSV(currentTrip)}
+                    className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:border-teal-500 hover:bg-teal-50/30 dark:hover:bg-teal-950/30 rounded-xl text-left transition shadow-xs group cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 text-xs">
+                      <Table className="w-4 h-4 text-emerald-600 group-hover:translate-y-0.5 transition-transform" />
+                      匯出 Excel / CSV 表格
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">標準 UTF-8 BOM 格式，支援 Excel 與 Google 試算表直接開啟。</p>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => exportTripToMarkdown(currentTrip)}
-                    className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:border-teal-500 hover:bg-teal-50/30 dark:hover:bg-teal-950/30 rounded-xl text-left transition shadow-xs group"
+                    className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:border-teal-500 hover:bg-teal-50/30 dark:hover:bg-teal-950/30 rounded-xl text-left transition shadow-xs group cursor-pointer"
                   >
                     <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 text-xs">
                       <FileText className="w-4 h-4 text-slate-600 group-hover:translate-y-0.5 transition-transform" />
-                      匯出 Markdown / 備忘
+                      匯出 Markdown 完整筆記
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">純文字格式，適合複製到 Notion 或 Apple 備忘錄。</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">含日程、待辦、行李、花費與緊急聯絡，適合貼至 Notion。</p>
                   </button>
                 </div>
               </div>
 
               {/* Full database export */}
               <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <div>
                     <h5 className="font-bold text-slate-800 dark:text-slate-100 text-xs">整庫完整備份 (所有旅程)</h5>
-                    <p className="text-slate-500 dark:text-slate-400 text-[11px]">包含本地儲存的全部 {allTrips.length} 個旅程總資料庫。</p>
+                    <p className="text-slate-500 dark:text-slate-400 text-[11px]">包含本地儲存的全部 {allTrips.length} 個旅程與相片總資料庫。</p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => exportAllTripsToJSON(allTrips)}
-                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition"
+                    disabled={isExporting}
+                    onClick={handleExportAllJSON}
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-60 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shrink-0 cursor-pointer"
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    完整備份下載
+                    {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                    <span>完整備份下載</span>
                   </button>
                 </div>
               </div>

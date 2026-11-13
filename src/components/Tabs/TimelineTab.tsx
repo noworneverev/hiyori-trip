@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Trip, DayPlan, ItineraryItem } from '../../types/itinerary';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { LeafletMap, CATEGORY_COLORS } from '../Map/LeafletMap';
 import { calculateDistanceKm, formatDistance, estimateTravelTime, getGoogleMapsNavigationUrl } from '../../utils/geo';
 import {
@@ -8,6 +9,7 @@ import {
   formatMonthDaySlash,
   getDayOfWeek,
   isDateToday,
+  addDaysLocal,
   sortItineraryItemsByTime,
   getSuggestedNextStartTime,
   parseTimeToMinutes,
@@ -49,10 +51,12 @@ import {
   ChevronRight,
   Check,
 } from 'lucide-react';
+import { MediaImage } from '../UI/MediaImage';
 
 interface TimelineTabProps {
   trip: Trip;
   lang: Language;
+  canEdit?: boolean;
   onUpdateTrip: (updatedTrip: Trip) => void;
   onOpenAddItem: (dayNumber: number, suggestedStartTime?: string) => void;
   onOpenEditItem: (item: ItineraryItem, dayNumber: number) => void;
@@ -62,6 +66,7 @@ interface TimelineTabProps {
   onPickLocation: (lat: number, lng: number) => void;
   onOpenMemories?: (spotId?: string) => void;
   requireAuth?: (action: () => void, reason?: string) => boolean;
+  isNavHidden?: boolean;
 }
 
 const CATEGORY_MAP: Record<string, { labelKey: string; icon: React.ComponentType<{ className?: string }>; text: string }> = {
@@ -98,6 +103,7 @@ function debounce<T extends (...args: any[]) => void>(fn: T, delay: number) {
 export const TimelineTab: React.FC<TimelineTabProps> = ({
   trip,
   lang,
+  canEdit = true,
   onUpdateTrip,
   onOpenAddItem,
   onOpenEditItem,
@@ -107,6 +113,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   onPickLocation,
   onOpenMemories,
   requireAuth,
+  isNavHidden = false,
 }) => {
   const t = TRANSLATIONS[lang];
   const [timelineViewMode, setTimelineViewMode] = useState<'daily' | 'overview'>('daily');
@@ -314,6 +321,17 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   const [isEditingOverlayGoogleUrl, setIsEditingOverlayGoogleUrl] = useState(false);
   const [overlayEditUrl, setOverlayEditUrl] = useState('');
 
+  useBodyScrollLock(Boolean(overlaySpotPhoto));
+
+  useEffect(() => {
+    if (!overlaySpotPhoto) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOverlaySpotPhoto(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [overlaySpotPhoto]);
+
   useEffect(() => {
     setOverlayHighResFailed(false);
     setIsEditingOverlayGoogleUrl(false);
@@ -321,7 +339,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   }, [overlaySpotPhoto?.item.id, overlaySpotPhoto?.photoIndex]);
 
   const handleSaveOverlayGoogleUrl = () => {
-    if (!overlaySpotPhoto) return;
+    if (!canEdit || !overlaySpotPhoto) return;
     const finalUrl = overlayEditUrl.trim();
     const targetItemId = overlaySpotPhoto.item.id;
 
@@ -478,6 +496,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       e.preventDefault();
       e.stopPropagation();
     }
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleToggleComplete(itemId, e), lang === 'zh' ? '標記景點完成狀態' : 'Mark spot completed')) {
       return;
     }
@@ -489,9 +508,19 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   };
 
   const handleDeleteItem = (itemId: string) => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleDeleteItem(itemId), lang === 'zh' ? '刪除景點活動' : 'Delete spot')) {
       return;
     }
+    const now = Date.now();
+    const removedMemIds = (trip.memories || []).filter((m) => m.spotId === itemId).map((m) => m.id);
+    const deletedItemIds: Record<string, number> = {
+      ...(trip.deletedItemIds || {}),
+      [itemId]: now,
+    };
+    removedMemIds.forEach((id) => {
+      deletedItemIds[id] = now;
+    });
     const updatedDays = trip.days.map((day) => {
       if (day.dayNumber !== selectedDayNumber) return day;
       return {
@@ -500,10 +529,11 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       };
     });
     const updatedMemories = (trip.memories || []).filter((m) => m.spotId !== itemId);
-    onUpdateTrip({ ...trip, days: updatedDays, memories: updatedMemories, updatedAt: Date.now() });
+    onUpdateTrip({ ...trip, days: updatedDays, memories: updatedMemories, deletedItemIds, updatedAt: now });
   };
 
   const handleMoveItem = (index: number, direction: 'up' | 'down') => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleMoveItem(index, direction), lang === 'zh' ? '調整景點順序' : 'Reorder spots')) {
       return;
     }
@@ -537,6 +567,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   };
 
   const handleAddDay = () => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(handleAddDay, lang === 'zh' ? '增加行程天數' : 'Add day')) {
       return;
     }
@@ -544,9 +575,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     const lastDay = trip.days[trip.days.length - 1];
     let nextDate = trip.endDate;
     if (lastDay) {
-      const d = new Date(lastDay.date);
-      d.setDate(d.getDate() + 1);
-      nextDate = d.toISOString().slice(0, 10);
+      nextDate = addDaysLocal(lastDay.date, 1);
     }
 
     const newDay: DayPlan = {
@@ -570,7 +599,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     <div className="space-y-3.5">
       {/* 水平捲動日期/天數篩選列 (Horizontal Day & Date Filter Bar with Scroll Detection & Compact Mode) */}
       <div
-        className={`sticky top-14 z-20 group/filter bg-white/95 dark:bg-[#1c1c1e]/95 backdrop-blur-md rounded-2xl border border-slate-200/90 dark:border-white/10 transition-all duration-300 ease-in-out ${
+        className={`sticky ${isNavHidden ? 'max-sm:top-0 sm:top-14' : 'top-14'} z-20 group/filter bg-white/95 dark:bg-[#1c1c1e]/95 backdrop-blur-md rounded-2xl border border-slate-200/90 dark:border-white/10 transition-all duration-300 ease-in-out ${
           isCompact ? 'py-1 px-1.5 shadow-md' : 'p-2 shadow-2xs'
         }`}
         style={{ overflowAnchor: 'none' }}
@@ -607,7 +636,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             title={lang === 'zh' ? '快速捲動至今日行程' : 'Jump to Today'}
             aria-label="返回今日"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400" />
             <span>{lang === 'zh' ? '返回今日' : 'Today'}</span>
             {targetTodayDay && (
               <span className="text-[10px] font-mono opacity-80 font-normal">
@@ -743,7 +772,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                         D{day.dayNumber}
                       </span>
                       {isToday && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-xs animate-pulse" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-xs" />
                       )}
                     </div>
                     <div className="flex items-center gap-1 text-[10px] font-mono shrink-0">
@@ -800,7 +829,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                       </div>
                       {isToday && (
                         <span className="flex items-center gap-1 shrink-0">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-xs animate-pulse" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-xs" />
                           <span className={`text-[9px] font-bold ${isCurrent ? 'text-amber-300' : 'text-amber-600 dark:text-amber-400'}`}>
                             {lang === 'zh' ? '今日' : 'Today'}
                           </span>
@@ -814,23 +843,25 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           })}
 
           {/* Add Day button */}
-          <motion.button
-            type="button"
-            whileTap={{ scale: 1.05 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-            onClick={() => {
-              triggerHaptic(10);
-              handleAddDay();
-            }}
-            className={`rounded-xl border border-dashed border-teal-500/70 hover:border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center justify-center gap-1 shrink-0 snap-center transition-all cursor-pointer ${
-              isCompact ? 'h-9 px-2.5' : 'h-[52px] px-3'
-            }`}
-            title={lang === 'zh' ? '增加一天' : 'Add Day'}
-            aria-label="增加一天"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span className="text-[11px] whitespace-nowrap">{lang === 'zh' ? '加一天' : '+Day'}</span>
-          </motion.button>
+          {canEdit && (
+            <motion.button
+              type="button"
+              whileTap={{ scale: 1.05 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+              onClick={() => {
+                triggerHaptic(10);
+                handleAddDay();
+              }}
+              className={`rounded-xl border border-dashed border-teal-500/70 hover:border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center justify-center gap-1 shrink-0 snap-center transition-all cursor-pointer ${
+                isCompact ? 'h-9 px-2.5' : 'h-[52px] px-3'
+              }`}
+              title={lang === 'zh' ? '增加一天' : 'Add Day'}
+              aria-label="增加一天"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span className="text-[11px] whitespace-nowrap">{lang === 'zh' ? '加一天' : '+Day'}</span>
+            </motion.button>
+          )}
         </div>
 
         {/* Right scroll arrow button */}
@@ -876,7 +907,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold hover:underline cursor-pointer"
                   title={lang === 'zh' ? '點擊跳轉至今日' : 'Click to jump to today'}
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                   <span>
                     {lang === 'zh'
                       ? `今日位於 Day ${todayProgressInfo.todayDayNumber}`
@@ -1072,14 +1103,16 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               {lang === 'zh' ? '目前這趟旅程還沒有任何天數，立即建立第 1 天開始安排精彩景點！' : 'This trip has no days planned yet. Create Day 1 to start adding spots!'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleAddDay}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md shadow-teal-600/20 active:scale-95 transition"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{lang === 'zh' ? '建立第 1 天行程' : 'Create Day 1'}</span>
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={handleAddDay}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md shadow-teal-600/20 active:scale-95 transition"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{lang === 'zh' ? '建立第 1 天行程' : 'Create Day 1'}</span>
+            </button>
+          )}
         </div>
       ) : timelineViewMode === 'overview' ? (
         <ItineraryOverviewTable
@@ -1202,13 +1235,15 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     </div>
                   )}
 
-                  <button
-                    onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
-                    className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>{t.addSpot}</span>
-                  </button>
+                  {canEdit && (
+                    <button
+                      onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
+                      className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>{t.addSpot}</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1218,13 +1253,15 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           <p className="text-slate-500 dark:text-slate-400 text-xs">
             {lang === 'zh' ? '尚無行程安排' : 'No schedule yet.'}
           </p>
-          <button
-            onClick={() => onOpenAddItem(activeDay.dayNumber, '09:00')}
-            className="mt-3 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-1.5"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{t.addSpot}</span>
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => onOpenAddItem(activeDay.dayNumber, '09:00')}
+              className="mt-3 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{t.addSpot}</span>
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -1369,7 +1406,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                   className="relative group/thumb cursor-pointer transition hover:scale-105 active:scale-95 shrink-0"
                                   title="點擊開啟高畫質大圖檢視"
                                 >
-                                  <img
+                                  <MediaImage
+                                    tripId={trip.id}
+                                    ownerId={trip.ownerId}
+                                    collabId={trip.collabId}
                                     src={photo}
                                     alt="Spot memory"
                                     className="w-10 h-10 rounded-lg object-cover border border-rose-200 dark:border-rose-900/60 shadow-xs"
@@ -1421,62 +1461,72 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   </div>
 
                     {/* Right Control Actions */}
-                    <div className="flex items-center sm:flex-col gap-1.5 self-end sm:self-start shrink-0">
-                      {/* Check-in toggle (Icon only, clean and quiet) */}
-                      <button
-                        type="button"
-                        onClick={(e) => handleToggleComplete(item.id, e)}
-                        className={`p-2 rounded-xl transition cursor-pointer flex items-center justify-center ${
-                          item.completed
-                            ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400 border border-emerald-300/60 dark:border-emerald-800'
-                            : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 border border-slate-200/60 dark:border-slate-700'
-                        }`}
-                        title={item.completed ? (lang === 'zh' ? '已打勾（點擊取消）' : 'Completed') : (lang === 'zh' ? '點擊打勾' : 'Mark completed')}
-                        aria-label={item.completed ? '已打勾' : '未打勾'}
-                      >
-                        {item.completed ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 stroke-[2.4]" />
-                        ) : (
-                          <Circle className="w-4 h-4 text-slate-400" />
-                        )}
-                      </button>
-
-                      <div className="flex items-center gap-1">
+                    {canEdit ? (
+                      <div className="flex items-center sm:flex-col gap-1.5 self-end sm:self-start shrink-0">
+                        {/* Check-in toggle (Icon only, clean and quiet) */}
                         <button
-                          disabled={index === 0}
-                          onClick={() => handleMoveItem(index, 'up')}
-                          className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20"
-                          title={lang === 'zh' ? '上移' : 'Move up'}
+                          type="button"
+                          onClick={(e) => handleToggleComplete(item.id, e)}
+                          className={`p-2 rounded-xl transition cursor-pointer flex items-center justify-center ${
+                            item.completed
+                              ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400 border border-emerald-300/60 dark:border-emerald-800'
+                              : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 border border-slate-200/60 dark:border-slate-700'
+                          }`}
+                          title={item.completed ? (lang === 'zh' ? '已打勾（點擊取消）' : 'Completed') : (lang === 'zh' ? '點擊打勾' : 'Mark completed')}
+                          aria-label={item.completed ? '已打勾' : '未打勾'}
                         >
-                          <ArrowUp className="w-3.5 h-3.5" />
+                          {item.completed ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 stroke-[2.4]" />
+                          ) : (
+                            <Circle className="w-4 h-4 text-slate-400" />
+                          )}
                         </button>
 
-                        <button
-                          disabled={index === activeDay.items.length - 1}
-                          onClick={() => handleMoveItem(index, 'down')}
-                          className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20"
-                          title={lang === 'zh' ? '下移' : 'Move down'}
-                        >
-                          <ArrowDown className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={index === 0}
+                            onClick={() => handleMoveItem(index, 'up')}
+                            className="min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition cursor-pointer"
+                            title={lang === 'zh' ? '上移' : 'Move up'}
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
 
-                        <button
-                          onClick={() => onOpenEditItem(item, selectedDayNumber)}
-                          className="p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                          title={lang === 'zh' ? '編輯' : 'Edit'}
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
+                          <button
+                            type="button"
+                            disabled={index === activeDay.items.length - 1}
+                            onClick={() => handleMoveItem(index, 'down')}
+                            className="min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition cursor-pointer"
+                            title={lang === 'zh' ? '下移' : 'Move down'}
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
 
-                        <button
-                          onClick={() => handleDeleteItem(item.id)}
-                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
-                          title={lang === 'zh' ? '刪除' : 'Delete'}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => onOpenEditItem(item, selectedDayNumber)}
+                            className="min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                            title={lang === 'zh' ? '編輯' : 'Edit'}
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteItem(item.id)}
+                            className="min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                            title={lang === 'zh' ? '刪除' : 'Delete'}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    ) : item.completed ? (
+                      <div className="shrink-0 self-start p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400 border border-emerald-300/60 dark:border-emerald-800">
+                        <CheckCircle2 className="w-4 h-4 stroke-[2.4]" />
+                      </div>
+                    ) : null}
                   </div>
 
                   {/* Navigation and Location Bar */}
@@ -1538,15 +1588,17 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                         <span>{t.driveMin.replace('{m}', String(distanceInfo.transitMin))}</span>
                       </div>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => onOpenAddItem(activeDay.dayNumber, getBetweenTime(item, nextItem))}
-                      className="opacity-75 sm:opacity-0 sm:group-hover/connector:opacity-100 hover:opacity-100 transition-all duration-200 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100/90 hover:bg-teal-50 dark:bg-slate-800/80 dark:hover:bg-teal-950/60 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 border border-slate-200/80 dark:border-slate-700 hover:border-teal-400 dark:hover:border-teal-600 shadow-2xs active:scale-95 cursor-pointer"
-                      title={lang === 'zh' ? `在「${item.title}」與「${nextItem.title}」之間插入行程（依時間自動排入）` : 'Insert spot here'}
-                    >
-                      <Plus className="w-3 h-3 text-teal-600 dark:text-teal-400" />
-                      <span>{lang === 'zh' ? '在此處插入景點' : 'Insert spot here'}</span>
-                    </button>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenAddItem(activeDay.dayNumber, getBetweenTime(item, nextItem))}
+                        className="opacity-75 sm:opacity-0 sm:group-hover/connector:opacity-100 hover:opacity-100 transition-all duration-200 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100/90 hover:bg-teal-50 dark:bg-slate-800/80 dark:hover:bg-teal-950/60 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 border border-slate-200/80 dark:border-slate-700 hover:border-teal-400 dark:hover:border-teal-600 shadow-2xs active:scale-95 cursor-pointer"
+                        title={lang === 'zh' ? `在「${item.title}」與「${nextItem.title}」之間插入行程（依時間自動排入）` : 'Insert spot here'}
+                      >
+                        <Plus className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                        <span>{lang === 'zh' ? '在此處插入景點' : 'Insert spot here'}</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1554,16 +1606,18 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           })}
 
           {/* Quick Add Next Spot Button at Bottom of List */}
-          <div className="pt-2 text-center">
-            <button
-              type="button"
-              onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
-              className="w-full py-3 px-4 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-teal-400 dark:hover:border-teal-600 hover:bg-teal-50/40 dark:hover:bg-teal-950/20 text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 font-semibold text-xs flex items-center justify-center gap-2 transition active:scale-[0.99]"
-            >
-              <Plus className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-              <span>{lang === 'zh' ? `新增第 ${activeDay.items.length + 1} 站行程景點（自動依時間排入）` : 'Add next spot'}</span>
-            </button>
-          </div>
+          {canEdit && (
+            <div className="pt-2 text-center">
+              <button
+                type="button"
+                onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
+                className="w-full py-3 px-4 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-teal-400 dark:hover:border-teal-600 hover:bg-teal-50/40 dark:hover:bg-teal-950/20 text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 font-semibold text-xs flex items-center justify-center gap-2 transition active:scale-[0.99]"
+              >
+                <Plus className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                <span>{lang === 'zh' ? `新增第 ${activeDay.items.length + 1} 站` : 'Add next spot'}</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
             </motion.div>
@@ -1583,15 +1637,17 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       >
         {/* Top Close Button & Action Bar */}
         <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setIsEditingOverlayGoogleUrl(!isEditingOverlayGoogleUrl)}
-            className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/90 text-teal-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-white/20 shadow-sm"
-            title="編輯此景點的 Google 相簿連結"
-          >
-            <Edit2 className="w-3 h-3" />
-            <span className="hidden sm:inline">{isEditingOverlayGoogleUrl ? '收合編輯' : '修改原圖連結'}</span>
-          </button>
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setIsEditingOverlayGoogleUrl(!isEditingOverlayGoogleUrl)}
+              className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/90 text-teal-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-white/20 shadow-sm"
+              title="編輯此景點的 Google 相簿連結"
+            >
+              <Edit2 className="w-3 h-3" />
+              <span className="hidden sm:inline">{isEditingOverlayGoogleUrl ? '收合編輯' : '修改原圖連結'}</span>
+            </button>
+          )}
 
           {overlaySpotPhoto.item.googlePhotosUrl && (
             <a
@@ -1674,7 +1730,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
             return (
               <div className="relative flex items-center justify-center max-h-[65vh]">
-                <img
+                <MediaImage
+                  tripId={trip.id}
+                  ownerId={trip.ownerId}
+                  collabId={trip.collabId}
                   src={activeSrc}
                   alt={overlaySpotPhoto.item.title}
                   onError={() => {
@@ -1684,8 +1743,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 />
                 {canUseHighRes ? (
                   <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-bold text-teal-300 border border-teal-500/30 flex items-center gap-1.5 shadow-sm">
-                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400 animate-pulse" />
-                    <span>Google 相簿高解析度原圖</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
+                    <span>Google 相簿高畫質原圖</span>
                   </div>
                 ) : highResUrl ? (
                   <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-bold text-amber-300 border border-amber-500/30 flex items-center gap-1.5 shadow-sm">
@@ -1728,7 +1787,14 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     : 'border-transparent opacity-60 hover:opacity-100'
                 }`}
               >
-                <img src={photo} alt="" className="w-full h-full object-cover" />
+                <MediaImage
+                  tripId={trip.id}
+                  ownerId={trip.ownerId}
+                  collabId={trip.collabId}
+                  src={photo}
+                  alt=""
+                  className="w-full h-full object-cover"
+                />
               </button>
             ))}
           </div>

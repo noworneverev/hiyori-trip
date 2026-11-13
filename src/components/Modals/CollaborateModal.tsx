@@ -29,14 +29,18 @@ interface CollaborateModalProps {
   trip: Trip;
   currentUser: User | null;
   lang: Language;
+  onRequireAuth?: () => void;
   onUpdateTrip: (updatedTrip: Trip) => void;
   onClose: () => void;
 }
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const CollaborateModal: React.FC<CollaborateModalProps> = ({
   trip,
   currentUser,
   lang,
+  onRequireAuth,
   onUpdateTrip,
   onClose,
 }) => {
@@ -46,7 +50,9 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const [isActivating, setIsActivating] = useState(false);
+  const [memberError, setMemberError] = useState<string | null>(null);
 
+  const isOwner = !trip.ownerId || Boolean(currentUser && currentUser.uid === trip.ownerId);
   const ownerEmail = trip.ownerEmail || currentUser?.email || '建立者 (本機)';
   const currentMembers: CollaboratorMember[] = trip.collaborators || [
     {
@@ -64,18 +70,28 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
 
   // Initialize collaboration room if not yet collaborative
   const ensureCollaborative = async (): Promise<string> => {
+    if (!currentUser) {
+      onRequireAuth?.();
+      throw new Error(lang === 'zh' ? '請先登入 Google 帳號，再啟用或管理多人共編' : 'Please sign in first.');
+    }
+    if (!isOwner) {
+      throw new Error(lang === 'zh' ? '僅行程建立者可變更成員與權限設定' : 'Only the trip owner can manage permissions.');
+    }
     if (trip.collabId && trip.isCollaborative) return trip.collabId;
     setIsActivating(true);
     try {
-      const collabId = await enableTripCollaboration(trip, currentUser);
-      const updated: Trip = {
+      const normalizedTrip: Trip = {
         ...trip,
+        ownerId: trip.ownerId || currentUser.uid,
+        ownerEmail: trip.ownerEmail || currentUser.email || '',
+        collaborators: currentMembers,
+        generalAccess: trip.generalAccess || 'link_viewer',
+      };
+      const collabId = await enableTripCollaboration(normalizedTrip, currentUser);
+      const updated: Trip = {
+        ...normalizedTrip,
         collabId,
         isCollaborative: true,
-        ownerId: currentUser?.uid || 'guest',
-        ownerEmail: currentUser?.email || '',
-        collaborators: currentMembers,
-        generalAccess: trip.generalAccess || 'link_editor',
         updatedAt: Date.now(),
       };
       onUpdateTrip(updated);
@@ -88,40 +104,58 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
   // Add a new collaborator by email with selected role
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isOwner) {
+      setMemberError('僅行程建立者可新增或修改成員權限');
+      return;
+    }
     const cleanEmail = emailInput.trim().toLowerCase();
-    if (!cleanEmail) return;
-
-    // Check if already in list
-    if (currentMembers.some((m) => m.email.toLowerCase() === cleanEmail)) {
-      alert(lang === 'zh' ? '此帳號/Email 已在成員名單中！' : 'This member is already added.');
+    if (!cleanEmail || !EMAIL_REGEX.test(cleanEmail)) {
+      setMemberError(lang === 'zh' ? '請輸入有效的 Email 格式（例如 name@example.com）' : 'Invalid email address.');
       return;
     }
 
-    await ensureCollaborative();
+    // Check if already in list
+    if (currentMembers.some((m) => m.email.toLowerCase() === cleanEmail)) {
+      setMemberError(lang === 'zh' ? '此帳號已在成員名單中' : 'Member already added.');
+      return;
+    }
+    setMemberError(null);
 
-    const newMember: CollaboratorMember = {
-      id: `member-${Date.now()}`,
-      email: cleanEmail,
-      name: cleanEmail.split('@')[0],
-      role: roleInput,
-      addedAt: Date.now(),
-    };
+    try {
+      const cid = await ensureCollaborative();
+      const newMember: CollaboratorMember = {
+        id: `member-${Date.now()}`,
+        email: cleanEmail,
+        name: cleanEmail.split('@')[0],
+        role: roleInput,
+        addedAt: Date.now(),
+      };
 
-    const updatedMembers = [...currentMembers, newMember];
-    const updatedTrip: Trip = {
-      ...trip,
-      isCollaborative: true,
-      collabId: trip.collabId || `collab_${Date.now().toString(36)}`,
-      collaborators: updatedMembers,
-      updatedAt: Date.now(),
-    };
+      const updatedMembers = [...currentMembers, newMember];
+      const updatedTrip: Trip = {
+        ...trip,
+        isCollaborative: true,
+        collabId: cid,
+        ownerId: trip.ownerId || currentUser?.uid,
+        ownerEmail: trip.ownerEmail || currentUser?.email || '',
+        generalAccess: trip.generalAccess || 'link_viewer',
+        collaborators: updatedMembers,
+        updatedAt: Date.now(),
+      };
 
-    onUpdateTrip(updatedTrip);
-    setEmailInput('');
+      onUpdateTrip(updatedTrip);
+      setEmailInput('');
+    } catch (err) {
+      setMemberError(err instanceof Error ? err.message : '無法新增成員，請稍後重試');
+    }
   };
 
   // Change existing member's role
   const handleChangeRole = (memberEmail: string, newRole: CollaboratorRole) => {
+    if (!isOwner) {
+      setMemberError('僅行程建立者可調整成員角色');
+      return;
+    }
     const updatedMembers = currentMembers.map((m) =>
       m.email === memberEmail ? { ...m, role: newRole } : m
     );
@@ -134,6 +168,10 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
 
   // Remove collaborator
   const handleRemoveMember = (memberEmail: string) => {
+    if (!isOwner) {
+      setMemberError('僅行程建立者可移除成員');
+      return;
+    }
     const updatedMembers = currentMembers.filter((m) => m.email !== memberEmail);
     onUpdateTrip({
       ...trip,
@@ -144,36 +182,56 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
 
   // Update general access policy
   const handleChangeGeneralAccess = async (newAccess: GeneralAccessType) => {
-    await ensureCollaborative();
-    onUpdateTrip({
-      ...trip,
-      isCollaborative: true,
-      generalAccess: newAccess,
-      updatedAt: Date.now(),
-    });
+    setMemberError(null);
+    try {
+      const cid = await ensureCollaborative();
+      onUpdateTrip({
+        ...trip,
+        collabId: cid,
+        isCollaborative: true,
+        generalAccess: newAccess,
+        updatedAt: Date.now(),
+      });
+    } catch (err) {
+      setMemberError(err instanceof Error ? err.message : '無法更新連結權限');
+    }
   };
 
   const handleCopyLink = async () => {
-    const cid = await ensureCollaborative();
-    const url = `${getPublicShareBaseUrl()}?collab=${cid}`;
-    navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    setMemberError(null);
+    try {
+      const cid = collabUrl && trip.collabId ? trip.collabId : await ensureCollaborative();
+      const url = `${getPublicShareBaseUrl()}?collab=${cid}`;
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch (err) {
+      setMemberError(err instanceof Error ? err.message : '無法產生並複製共編連結');
+    }
   };
 
   const handleNativeShare = async () => {
-    const cid = await ensureCollaborative();
-    const url = `${getPublicShareBaseUrl()}?collab=${cid}`;
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `共同編輯【${trip.title}】旅遊行程`,
-          text: `嗨！已為您開通【${trip.destination}】旅遊行程共編權限，點開即可一起加入編輯規劃：`,
-          url,
-        });
-      } catch (e) {}
-    } else {
-      handleCopyLink();
+    setMemberError(null);
+    try {
+      const cid = collabUrl && trip.collabId ? trip.collabId : await ensureCollaborative();
+      const url = `${getPublicShareBaseUrl()}?collab=${cid}`;
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: `共同編輯【${trip.title}】旅遊行程`,
+            text: `嗨！已為您開通【${trip.destination}】旅遊行程共編權限，點開即可一起加入編輯規劃：`,
+            url,
+          });
+        } catch {
+          // User cancelled share
+        }
+      } else {
+        await navigator.clipboard.writeText(url);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+      }
+    } catch (err) {
+      setMemberError(err instanceof Error ? err.message : '無法分享共編邀請');
     }
   };
 
@@ -208,7 +266,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-700 transition"
+            className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-700 transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -234,27 +292,39 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
 
           {/* Form: Add Collaborator Member by Email */}
           <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-              <UserPlus className="w-3.5 h-3.5 text-teal-600" />
-              <span>新增成員：</span>
+            <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between gap-1.5">
+              <span className="flex items-center gap-1.5">
+                <UserPlus className="w-3.5 h-3.5 text-teal-600" />
+                <span>新增成員：</span>
+              </span>
+              {!isOwner && (
+                <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                  僅建立者可調整權限
+                </span>
+              )}
             </label>
 
             <form onSubmit={handleAddMember} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
               <input
                 type="email"
                 required
+                disabled={!isOwner}
                 value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
+                onChange={(e) => {
+                  setEmailInput(e.target.value);
+                  if (memberError) setMemberError(null);
+                }}
                 placeholder={lang === 'zh' ? '輸入旅伴 Email...' : 'Enter collaborator email'}
-                className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500 focus:outline-hidden"
+                className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-xs focus:ring-2 focus:ring-teal-500 focus:outline-hidden disabled:opacity-50"
               />
 
               <div className="flex items-center gap-2">
                 <div className="relative flex items-center">
                   <select
                     value={roleInput}
+                    disabled={!isOwner}
                     onChange={(e) => setRoleInput(e.target.value as CollaboratorRole)}
-                    className="appearance-none pl-3 pr-8 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-hidden cursor-pointer"
+                    className="appearance-none pl-3 pr-8 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-hidden cursor-pointer disabled:opacity-50"
                   >
                     <option value="editor">可編輯</option>
                     <option value="viewer">僅檢視</option>
@@ -264,14 +334,19 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
 
                 <button
                   type="submit"
-                  disabled={isActivating || !emailInput.trim()}
-                  className="px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-bold text-xs transition active:scale-95 shrink-0 flex items-center gap-1.5 shadow-xs"
+                  disabled={!isOwner || isActivating || !emailInput.trim()}
+                  className="px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-bold text-xs transition active:scale-95 shrink-0 flex items-center gap-1.5 shadow-xs cursor-pointer"
                 >
                   {isActivating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
                   <span>新增</span>
                 </button>
               </div>
             </form>
+            {memberError && (
+              <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                {memberError}
+              </p>
+            )}
           </div>
 
           {/* Member List with Permissions */}
@@ -308,8 +383,10 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
 
                     {/* Role Control */}
                     <div className="flex items-center gap-2 shrink-0">
-                      {isOwner ? (
-                        <span className="px-2.5 py-1 text-slate-500 text-xs font-semibold">擁有者</span>
+                      {isOwner || member.role === 'owner' ? (
+                        <span className="px-2.5 py-1 text-slate-500 text-xs font-semibold">
+                          {member.role === 'owner' ? '擁有者' : member.role === 'editor' ? '可編輯' : '僅檢視'}
+                        </span>
                       ) : (
                         <>
                           <div className="relative flex items-center">
@@ -327,7 +404,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                           <button
                             type="button"
                             onClick={() => handleRemoveMember(member.email)}
-                            className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                            className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
                             title="移除成員權限"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -353,9 +430,10 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
 
               <div className="relative flex items-center">
                 <select
-                  value={trip.generalAccess || 'link_editor'}
+                  value={trip.generalAccess || 'link_viewer'}
+                  disabled={!isOwner}
                   onChange={(e) => handleChangeGeneralAccess(e.target.value as GeneralAccessType)}
-                  className="appearance-none pl-3 pr-8 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-hidden cursor-pointer shadow-2xs"
+                  className="appearance-none pl-3 pr-8 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs font-semibold focus:outline-hidden cursor-pointer shadow-2xs disabled:opacity-50"
                 >
                   <option value="restricted">僅限受邀成員</option>
                   <option value="link_editor">知道連結的人皆可編輯</option>
@@ -367,7 +445,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
               {trip.generalAccess === 'restricted'
                 ? '僅名單內的 Email 可存取此行程。'
-                : trip.generalAccess === 'link_viewer'
+                : (trip.generalAccess || 'link_viewer') === 'link_viewer'
                 ? '取得連結者可瀏覽，僅編輯者可修改。'
                 : '取得連結者皆可即時共同編輯。'}
             </p>
@@ -427,7 +505,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                   />
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  同行朋友拿出手機相機掃描，即可立刻開啟並依權限檢視或共編！
+                  掃描 QR Code 立即加入行程
                 </p>
               </div>
             )}
@@ -435,14 +513,11 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex items-center justify-between">
-          <span className="text-[11px] text-slate-400">
-            日和手帳 Hiyori 權限型多人協同編輯
-          </span>
+        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex items-center justify-end">
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs transition"
+            className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs transition cursor-pointer"
           >
             完成
           </button>

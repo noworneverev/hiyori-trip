@@ -39,17 +39,41 @@ export function getDayOfWeek(dateStr?: string, lang: string = 'zh'): string {
 }
 
 /**
+ * Return today's date string in local timezone (YYYY-MM-DD)
+ */
+export function getTodayLocal(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Add or subtract days to a YYYY-MM-DD date string safely in local timezone
+ */
+export function addDaysLocal(baseDateStr: string, offsetDays: number): string {
+  const clean = (baseDateStr || '').slice(0, 10).replace(/\//g, '-');
+  const match = clean.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const base = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + offsetDays)
+    : new Date();
+  if (!match) {
+    base.setDate(base.getDate() + offsetDays);
+  }
+  const year = base.getFullYear();
+  const month = String(base.getMonth() + 1).padStart(2, '0');
+  const day = String(base.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * Check if a date string matches today's local date (YYYY-MM-DD or YYYY/MM/DD)
  */
 export function isDateToday(dateStr?: string): boolean {
   if (!dateStr) return false;
   const clean = dateStr.slice(0, 10).replace(/\//g, '-');
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const todayStr = `${year}-${month}-${day}`;
-  return clean === todayStr;
+  return clean === getTodayLocal();
 }
 
 /**

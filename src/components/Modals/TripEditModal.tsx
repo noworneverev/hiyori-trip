@@ -5,6 +5,7 @@ import { PRESET_TRIPS } from '../../data/presetTrips';
 import { generateAiTrip, universalParseItinerary } from '../../utils/aiClient';
 import { HiyoriLogo } from '../UI/HiyoriLogo';
 import { resolveDestinationTimezone } from '../../utils/timezone';
+import { getTodayLocal, addDaysLocal } from '../../utils/date';
 import {
   X,
   Calendar,
@@ -46,8 +47,8 @@ const CURRENCIES = [
 export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onClose }) => {
   useBodyScrollLock(true);
   const isEditing = Boolean(trip);
-  const today = new Date().toISOString().slice(0, 10);
-  const defaultEnd = new Date(Date.now() + 86400000 * 4).toISOString().slice(0, 10);
+  const today = getTodayLocal();
+  const defaultEnd = addDaysLocal(today, 4);
 
   // 1. Core Minimal Fields (Apple / Notion Single-Page)
   const [title, setTitle] = useState(trip?.title || '');
@@ -133,9 +134,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onCl
     const dayList = [];
     const actualDays = isPhotoMemoryOnly ? 1 : daysCount;
     for (let i = 1; i <= actualDays; i++) {
-      const dayDate = new Date(new Date(startDate).getTime() + 86400000 * (i - 1))
-        .toISOString()
-        .slice(0, 10);
+      const dayDate = addDaysLocal(startDate, i - 1);
       dayList.push({
         id: `day-${i}-${Date.now()}`,
         dayNumber: i,
@@ -253,9 +252,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onCl
       id: `trip-preset-${Date.now()}`,
       title: title.trim() || preset.title,
       startDate,
-      endDate: new Date(new Date(startDate).getTime() + 86400000 * (preset.days.length - 1))
-        .toISOString()
-        .slice(0, 10),
+      endDate: addDaysLocal(startDate, Math.max(0, preset.days.length - 1)),
       isSoloTrip,
       isSplitEnabled: !isSoloTrip,
       createdAt: Date.now(),
@@ -294,7 +291,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onCl
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-200/50 dark:hover:bg-zinc-800 transition cursor-pointer"
+            className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-200/50 dark:hover:bg-zinc-800 transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -311,9 +308,8 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onCl
               </label>
               <input
                 type="text"
-                autoFocus
                 required
-                placeholder="例如：2024 東京秋季賞楓、京都老街回憶"
+                placeholder="例如：2026 東京賞櫻之旅"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 className="w-full px-3.5 py-3 rounded-2xl bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400 dark:placeholder:text-zinc-500 transition"
@@ -359,7 +355,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onCl
                 />
                 <span className="text-xs text-slate-600 dark:text-zinc-300 flex items-center gap-1">
                   <ImageIcon className="w-3.5 h-3.5 text-amber-500" />
-                  <span>歷史遊記相簿 / 暫無固定日程 (僅記錄與上傳照片)</span>
+                  <span>歷史相簿 / 不設固定天數</span>
                 </span>
               </label>
 
@@ -417,7 +413,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onCl
                     )}
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                    完全隱藏朋友分帳、代墊與成員分擔設定
+                    隱藏分帳與旅伴設定
                   </p>
                 </div>
               </div>
@@ -459,14 +455,11 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({ trip, onSave, onCl
               </label>
               <input
                 type="url"
-                placeholder="例如：https://photos.app.goo.gl/... 整趟共用相簿"
+                placeholder="https://photos.app.goo.gl/..."
                 value={googlePhotosAlbumUrl}
                 onChange={(e) => setGooglePhotosAlbumUrl(e.target.value)}
                 className="w-full px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
               />
-              <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                貼上 Google 相簿分享連結，隨行夥伴皆可一鍵檢視 4K / 原畫質雲端相簿。
-              </p>
             </div>
 
             {/* Gradient Theme Picker */}

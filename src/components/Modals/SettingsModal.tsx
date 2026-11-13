@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { getCustomGeminiKey, setCustomGeminiKey } from '../../utils/aiClient';
-import { getStorageUsage, exportAllTripsToJSON } from '../../utils/storage';
+import { getStorageUsage, getStorageUsageAsync, exportAllTripsToJSON } from '../../utils/storage';
 import { auth, loginWithGoogle, logoutFirebase, saveTripToCloud } from '../../utils/firebase';
 import { Trip } from '../../types/itinerary';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
@@ -52,13 +52,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [syncDone, setSyncDone] = useState(false);
   const [scale, setScale] = useState<AccessibilityScale>(getSavedAccessibilityScale);
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle' });
-  const storageInfo = getStorageUsage();
+  const [storageInfo, setStorageInfo] = useState(getStorageUsage);
 
   useEffect(() => {
+    let active = true;
+    getStorageUsageAsync().then((info) => {
+      if (active) setStorageInfo(info);
+    });
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
     });
-    return () => unsubscribe();
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   const handleSaveKey = (e: React.FormEvent) => {
@@ -131,7 +138,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
             <button
               onClick={onClose}
-              className="p-1.5 rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition"
+              className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -201,10 +208,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <button
                     onClick={() => logoutFirebase()}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                    className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
                     title={lang === 'zh' ? '登出' : 'Sign out'}
                   >
-                    <LogOut className="w-3.5 h-3.5" />
+                    <LogOut className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -277,8 +284,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => exportAllTripsToJSON(trips)}
-                className="py-2 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-teal-500 rounded-xl font-semibold text-slate-700 dark:text-slate-300 hover:text-teal-700 text-xs flex items-center justify-center gap-1.5 transition"
+                onClick={() => void exportAllTripsToJSON(trips)}
+                className="py-2 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-teal-500 rounded-xl font-semibold text-slate-700 dark:text-slate-300 hover:text-teal-700 text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>{lang === 'zh' ? '下載完整備份' : 'Export All JSON'}</span>
@@ -325,12 +332,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {scale === 'senior' ? '特大 130%' : scale === 'comfortable' ? '放大 115%' : '標準 100%'}
               </span>
             </div>
-
-            <p className="text-slate-600 dark:text-zinc-300 text-[11px] leading-relaxed">
-              {lang === 'zh'
-                ? '自由調整介面字體大小，特大模式提供更高對比度與寬敞排版，閱覽更輕鬆。'
-                : 'Adjust interface typography size. Extra large mode provides enhanced contrast and spacious layout.'}
-            </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {ACCESSIBILITY_OPTIONS.map((opt) => (
@@ -412,8 +413,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
             <p className="text-slate-500 dark:text-slate-400 text-[11px] leading-relaxed">
               {lang === 'zh'
-                ? '系統已內建免設定的 AI 行程解析服務。若您希望使用個人配額，可填入個人的 Google Gemini API Key。'
-                : 'System includes free AI parsing by default. You can optionally use your personal Google Gemini API key.'}
+                ? '預設已啟用雲端解析，個人配額可選填。'
+                : 'Free cloud parsing is enabled by default.'}
             </p>
 
             <form onSubmit={handleSaveKey} className="space-y-1.5">

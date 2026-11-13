@@ -1,5 +1,6 @@
 import { Trip } from '../types/itinerary';
 import { parseTextItinerary } from './storage';
+import { getTodayLocal, addDaysLocal } from './date';
 
 const STORAGE_KEY_USER_GEMINI_KEY = 'hiyori_user_gemini_key';
 const LEGACY_STORAGE_KEY_USER_GEMINI_KEY = 'wayfarer_user_gemini_key';
@@ -59,7 +60,7 @@ export async function universalParseItinerary(
   const clientKey = getCustomGeminiKey();
   if (clientKey) {
     try {
-      const todayStr = startDate || new Date().toISOString().slice(0, 10);
+      const todayStr = startDate || getTodayLocal();
       const prompt = `你是一位專業旅遊規劃專家。請解析以下旅遊內容為合法 JSON。
 重要：每個景點必須提供真實經緯度數值 (lat, lng)。時間格式為 HH:MM。
 類別 category 只能是: spot, food, transport, hotel, shopping, activity。
@@ -208,7 +209,7 @@ export async function generateAiTrip(params: {
     const prompt = `請為我規劃以下旅遊行程：
 - 目的地：${params.destination}
 - 天數：${params.daysCount} 天
-- 出發日期：${params.startDate || new Date().toISOString().slice(0, 10)}
+- 出發日期：${params.startDate || getTodayLocal()}
 - 偏好風格：${params.style || '經典必去、美食探索'}
 - 特別願望或指定景點：${params.preferences || '無'}
 - 幣別：${params.currency || 'JPY'}`;
@@ -218,17 +219,14 @@ export async function generateAiTrip(params: {
   }
 
   // 3. Fallback to basic template
-  const todayStr = params.startDate || new Date().toISOString().slice(0, 10);
+  const todayStr = params.startDate || getTodayLocal();
   const days: any[] = [];
-  const start = new Date(todayStr);
 
   for (let i = 0; i < params.daysCount; i++) {
-    const d = new Date(start);
-    d.setDate(d.getDate() + i);
     days.push({
       id: `day-${Date.now()}-${i + 1}`,
       dayNumber: i + 1,
-      date: d.toISOString().slice(0, 10),
+      date: addDaysLocal(todayStr, i),
       theme: `第 ${i + 1} 天精選行程`,
       notes: '',
       items: [

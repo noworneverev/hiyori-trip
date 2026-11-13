@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { X, Calendar, Filter, Receipt, RotateCcw, Check, Tag, Coins } from 'lucide-react';
 import { Language } from '../../utils/i18n';
@@ -40,6 +40,15 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
 }) => {
   useBodyScrollLock(isOpen);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const isFiltered = selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all';
@@ -68,9 +77,6 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
               <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
                 {lang === 'zh' ? '篩選記帳明細' : 'Filter Expenses'}
               </h3>
-              <p className="text-[11px] text-slate-400">
-                {lang === 'zh' ? '點選欲檢視的日期或類別條件' : 'Select dates or categories'}
-              </p>
             </div>
           </div>
 
@@ -79,7 +85,7 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
               <button
                 type="button"
                 onClick={onResetAll}
-                className="px-2.5 py-1 text-xs font-bold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/60 rounded-lg transition flex items-center gap-1"
+                className="px-2.5 py-1.5 text-xs font-bold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/60 rounded-lg transition flex items-center gap-1 cursor-pointer"
               >
                 <RotateCcw className="w-3 h-3" />
                 <span>{lang === 'zh' ? '重設' : 'Reset'}</span>
@@ -88,7 +94,7 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               aria-label="關閉"
             >
               <X className="w-4 h-4" />

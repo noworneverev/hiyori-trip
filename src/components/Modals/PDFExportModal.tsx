@@ -3,11 +3,14 @@ import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { Trip } from '../../types/itinerary';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
 import { formatDateSlash, formatMonthDaySlash } from '../../utils/date';
-import { triggerNativePrint } from '../../utils/pdfExport';
+import { triggerNativePrint, exportElementToPDF } from '../../utils/pdfExport';
+import { convertAmount } from '../../utils/currency';
 import { ItineraryOverviewTable } from '../Itinerary/ItineraryOverviewTable';
 import {
   X,
   Printer,
+  Download,
+  Loader2,
   Calendar,
   MapPin,
   Route,
@@ -50,14 +53,38 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
   const [includeNotes, setIncludeNotes] = useState(false);
   const [includeExpenses, setIncludeExpenses] = useState(false);
 
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  const baseCurrency = trip.currency || 'JPY';
   const totalSpots = trip.days.reduce((sum, d) => sum + d.items.length, 0);
-  const totalSpent = trip.expenses?.reduce((sum, e) => sum + e.amount, 0) || 0;
+  const totalSpent =
+    trip.expenses?.reduce(
+      (sum, e) =>
+        sum + convertAmount(e.amount, e.currency || baseCurrency, baseCurrency, trip.customExchangeRates),
+      0
+    ) || 0;
 
   const handlePrint = () => {
+    setPdfError(null);
     if (printRef.current) {
       triggerNativePrint(printRef.current, trip.title);
     } else {
       triggerNativePrint();
+    }
+  };
+
+  const handleDownloadPDF = async () => {
+    if (!printRef.current || isExportingPdf) return;
+    setPdfError(null);
+    setIsExportingPdf(true);
+    try {
+      const safeTitle = (trip.title || 'hiyori-itinerary').replace(/[\\/:*?"<>|]/g, '_');
+      await exportElementToPDF(printRef.current, `${safeTitle}.pdf`);
+    } catch (err: any) {
+      setPdfError(err?.message || (lang === 'zh' ? 'PDF 匯出失敗，請改用列印另存 PDF' : 'PDF export failed, try Print instead.'));
+    } finally {
+      setIsExportingPdf(false);
     }
   };
 
@@ -157,27 +184,55 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
             </h3>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Primary Export / Print Button */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Direct Download PDF Button */}
             <button
-              onClick={handlePrint}
-              className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs flex items-center gap-2 shadow-sm transition active:scale-95 cursor-pointer"
-              title="列印或另存為 PDF"
+              type="button"
+              onClick={handleDownloadPDF}
+              disabled={isExportingPdf}
+              className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-semibold text-xs flex items-center gap-2 shadow-sm transition active:scale-95 cursor-pointer"
+              title="直接產生並下載 A4 PDF 檔案"
             >
-              <Printer className="w-4 h-4 text-white shrink-0" />
-              <span>{lang === 'zh' ? '列印 / 存為 PDF' : 'Print / Save PDF'}</span>
+              {isExportingPdf ? (
+                <Loader2 className="w-4 h-4 animate-spin text-white shrink-0" />
+              ) : (
+                <Download className="w-4 h-4 text-white shrink-0" />
+              )}
+              <span>
+                {isExportingPdf
+                  ? (lang === 'zh' ? '產生 PDF 中...' : 'Generating PDF...')
+                  : (lang === 'zh' ? '下載 PDF 檔' : 'Download PDF')}
+              </span>
+            </button>
+
+            {/* Native Print Button */}
+            <button
+              type="button"
+              onClick={handlePrint}
+              disabled={isExportingPdf}
+              className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
+              title="列印或透過系統另存為 PDF"
+            >
+              <Printer className="w-4 h-4 shrink-0" />
+              <span>{lang === 'zh' ? '列印' : 'Print'}</span>
             </button>
 
             {/* Close Button */}
             <button
+              type="button"
               onClick={onClose}
-              className="p-2 rounded-full text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition"
+              className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
               title="關閉"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
+        {pdfError && (
+          <div className="px-4 py-2 bg-rose-50 dark:bg-rose-950/60 border-b border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs font-medium shrink-0">
+            {pdfError}
+          </div>
+        )}
 
         {/* Options Bar & Quick Presets */}
         <div className="px-4 sm:px-5 py-2.5 bg-slate-100/90 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300 flex-wrap shrink-0">
@@ -293,59 +348,59 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
           </div>
         </div>
 
-        {/* Document Preview Scroll Area (Seamless clean canvas, no weird floating box) */}
-        <div className="flex-1 min-h-0 overflow-y-auto bg-white dark:bg-slate-900 p-4 sm:p-8 overscroll-contain">
+        {/* Document Preview Scroll Area (Always crisp white paper canvas for PDF consistency) */}
+        <div className="flex-1 min-h-0 overflow-y-auto bg-slate-100 dark:bg-slate-950 p-3 sm:p-6 overscroll-contain">
           {/* Printable Document Paper Sheet Container */}
           <div
             id="printable-itinerary-booklet"
             ref={printRef}
-            className="w-full max-w-4xl mx-auto space-y-7 text-xs leading-relaxed text-slate-900 dark:text-slate-100 transition-all overflow-visible print:bg-white print:text-black print:p-0"
+            className="w-full max-w-4xl mx-auto space-y-7 text-xs leading-relaxed bg-white text-slate-900 p-5 sm:p-8 rounded-2xl shadow-sm overflow-visible print:shadow-none print:rounded-none print:bg-white print:text-black print:p-0"
             style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
           >
             {/* Cover / Header Section */}
-            <div className="border-b-2 border-slate-900 dark:border-slate-700 pb-5 space-y-2.5">
-              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 uppercase tracking-widest font-mono">
+            <div className="border-b-2 border-slate-900 pb-5 space-y-2.5">
+              <div className="flex items-center justify-between text-[11px] text-slate-500 uppercase tracking-widest font-mono">
                 <span>Hiyori Travel Guidebook (日和手帳)</span>
                 <span>Offline Edition</span>
               </div>
 
-              <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-950 dark:text-white tracking-tight break-words">
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-slate-950 tracking-tight break-words">
                 {trip.title}
               </h1>
 
-              <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-700 dark:text-slate-300">
+              <div className="flex flex-wrap items-center gap-3 text-xs font-semibold text-slate-700">
                 <span className="flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+                  <MapPin className="w-3.5 h-3.5 text-teal-700 shrink-0" />
                   <span>{trip.destination}</span>
                 </span>
-                <span className="text-slate-300 dark:text-slate-700">•</span>
+                <span className="text-slate-300">•</span>
                 <span className="flex items-center gap-1.5 font-mono">
-                  <Calendar className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+                  <Calendar className="w-3.5 h-3.5 text-teal-700 shrink-0" />
                   <span>{formatDateSlash(trip.startDate)} ~ {formatDateSlash(trip.endDate)}</span>
                 </span>
-                <span className="text-slate-300 dark:text-slate-700">•</span>
-                <span className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 px-2 py-0.5 rounded font-mono text-[11px]">
+                <span className="text-slate-300">•</span>
+                <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded font-mono text-[11px]">
                   {trip.days.length} Days / {Math.max(1, trip.days.length - 1)} Nights · {totalSpots} Spots
                 </span>
               </div>
             </div>
 
-            {/* Section 1: Trip Master Overview Table (行程總覽大表 - flow naturally on Page 1 without empty gap) */}
+            {/* Section 1: Trip Master Overview Table */}
             {includeOverviewTable && (
               <div className="space-y-3">
                 <ItineraryOverviewTable trip={trip} lang={lang} isPrintMode={true} />
               </div>
             )}
 
-            {/* Section: To-Do & Tickets Checklist (行前待辦與票券提醒) */}
+            {/* Section: To-Do & Tickets Checklist */}
             {includeTodos && trip.todos && trip.todos.length > 0 && (
-              <div className="space-y-3 border-t-2 border-slate-200 dark:border-slate-800 pt-5">
-                <h2 className="text-base font-black text-slate-950 dark:text-white uppercase tracking-wider flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2 break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
+              <div className="space-y-3 border-t-2 border-slate-200 pt-5">
+                <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center justify-between border-b border-slate-200 pb-2 break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
                   <div className="flex items-center gap-2">
-                    <ListTodo className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                    <ListTodo className="w-4 h-4 text-teal-700" />
                     <span>重要行前待辦與票券提醒 (Tickets & To-Do Checklist)</span>
                   </div>
-                  <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400 font-normal">
+                  <span className="text-[10px] font-mono text-slate-500 font-normal">
                     {trip.todos.filter((t) => t.completed).length}/{trip.todos.length} 已備妥
                   </span>
                 </h2>
@@ -354,13 +409,13 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
                   {trip.todos.map((todo) => (
                     <div
                       key={todo.id}
-                      className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex items-start gap-2.5 break-inside-avoid"
+                      className="p-2.5 rounded-xl border border-slate-200 bg-slate-50/70 flex items-start gap-2.5 break-inside-avoid"
                     >
                       <div
                         className={`w-4 h-4 rounded-md shrink-0 flex items-center justify-center border mt-0.5 ${
                           todo.completed
-                            ? 'bg-teal-600 border-teal-600 text-white shadow-2xs'
-                            : 'border-slate-300 dark:border-slate-700 bg-transparent'
+                            ? 'bg-teal-600 border-teal-600 text-white'
+                            : 'border-slate-300 bg-white'
                         }`}
                       >
                         {todo.completed && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
@@ -369,19 +424,19 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span
                             className={`font-bold text-xs ${
-                              todo.completed ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-900 dark:text-slate-100'
+                              todo.completed ? 'line-through text-slate-400' : 'text-slate-900'
                             }`}
                           >
                             {todo.title}
                           </span>
                           {todo.dueDate && (
-                            <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+                            <span className="text-[10px] text-slate-400 font-mono">
                               ({formatDateSlash(todo.dueDate)})
                             </span>
                           )}
                         </div>
                         {todo.notes && (
-                          <p className="text-[10px] text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                          <p className="text-[10px] text-slate-600 mt-1 leading-relaxed">
                             {todo.notes}
                           </p>
                         )}
@@ -395,15 +450,15 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
             {/* Section 2: Day-by-Day Section */}
             {includeDailyDetails && (
               <div className="space-y-6">
-                <h2 className="text-base font-black text-slate-950 dark:text-white uppercase tracking-wider flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
-                  <Route className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center gap-2 border-b border-slate-200 pb-2 break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
+                  <Route className="w-4 h-4 text-teal-700" />
                   <span>每日詳細行程 (Daily Itinerary Schedule)</span>
                 </h2>
 
                 {trip.days.map((day) => (
                   <div key={day.id} className="space-y-3">
                     {/* Day Banner */}
-                    <div className="bg-slate-900 dark:bg-slate-800 text-white px-4 py-2 rounded-xl flex items-center justify-between break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
+                    <div className="bg-slate-900 text-white px-4 py-2 rounded-xl flex items-center justify-between break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
                       <div className="flex items-center gap-2">
                         <span className="font-bold font-mono text-sm">
                           Day {day.dayNumber}
@@ -425,7 +480,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
                     </div>
 
                     {day.notes && (
-                      <p className="text-[11px] text-slate-600 dark:text-slate-400 italic px-2">
+                      <p className="text-[11px] text-slate-600 italic px-2">
                         {day.notes}
                       </p>
                     )}
@@ -442,33 +497,33 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
                           return (
                             <div
                               key={item.id}
-                              className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/70 space-y-1.5 break-inside-avoid"
+                              className="p-3 rounded-xl border border-slate-200 bg-white space-y-1.5 break-inside-avoid"
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <div className="space-y-0.5 flex-1">
-                                  <div className="flex items-center gap-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                                    <span className="font-bold text-slate-900 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 px-1.5 py-0.2 rounded">
+                                  <div className="flex items-center gap-2 font-mono text-[11px] text-slate-500">
+                                    <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.2 rounded">
                                       #{itemIdx + 1}
                                     </span>
-                                    <span className="font-semibold text-teal-800 dark:text-teal-300">
+                                    <span className="font-semibold text-teal-800">
                                       {item.startTime}{item.endTime ? ` - ${item.endTime}` : ''}
                                     </span>
                                     <span>·</span>
-                                    <span className="text-slate-600 dark:text-slate-400">{catLabel}</span>
+                                    <span className="text-slate-600">{catLabel}</span>
                                     {item.bookingCode && (
                                       <>
                                         <span>·</span>
-                                        <span className="text-amber-800 dark:text-amber-400 font-bold">預約代碼 #{item.bookingCode}</span>
+                                        <span className="text-amber-800 font-bold">預約代碼 #{item.bookingCode}</span>
                                       </>
                                     )}
                                   </div>
 
-                                  <h3 className="font-bold text-slate-950 dark:text-white text-sm">
+                                  <h3 className="font-bold text-slate-950 text-sm">
                                     {item.title}
                                   </h3>
 
                                   {(item.locationName || item.address) && (
-                                    <p className="text-[11px] text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                                    <p className="text-[11px] text-slate-600 flex items-center gap-1">
                                       <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
                                       <span>{item.locationName || item.address}</span>
                                     </p>
@@ -478,7 +533,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
                                 {/* Price / Cost */}
                                 {typeof item.cost === 'number' && item.cost > 0 && (
                                   <div className="text-right shrink-0 font-mono text-[11px]">
-                                    <span className="font-bold text-slate-900 dark:text-slate-100">
+                                    <span className="font-bold text-slate-900">
                                       {trip.currency || 'JPY'} {item.cost.toLocaleString()}
                                     </span>
                                     <span className="block text-[10px] text-slate-400">
@@ -490,15 +545,15 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
 
                               {/* Transport / Walk Note */}
                               {item.transportNote && (
-                                <p className="text-[11px] text-teal-900 dark:text-teal-200 bg-teal-50/70 dark:bg-teal-950/40 p-2 rounded-lg border border-teal-100 dark:border-teal-900/50">
-                                  <span className="font-semibold text-teal-800 dark:text-teal-300">[交通方式]</span> {item.transportNote}
+                                <p className="text-[11px] text-teal-900 bg-teal-50/70 p-2 rounded-lg border border-teal-100">
+                                  <span className="font-semibold text-teal-800">[交通方式]</span> {item.transportNote}
                                 </p>
                               )}
 
                               {/* Item Notes */}
                               {item.notes && (
-                                <p className="text-[11px] text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/60 p-2 rounded-lg border border-slate-100 dark:border-slate-800">
-                                  <span className="font-semibold text-slate-700 dark:text-slate-300">[備忘提醒]</span> {item.notes}
+                                <p className="text-[11px] text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                  <span className="font-semibold text-slate-700">[備忘提醒]</span> {item.notes}
                                 </p>
                               )}
                             </div>
@@ -513,9 +568,9 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
 
             {/* Essential Packing Checklist Section */}
             {includePacking && trip.packingList && trip.packingList.length > 0 && (
-              <div className="space-y-3 border-t-2 border-slate-200 dark:border-slate-800 pt-5">
-                <h2 className="text-base font-black text-slate-950 dark:text-white uppercase tracking-wider flex items-center gap-2 break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
-                  <Luggage className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+              <div className="space-y-3 border-t-2 border-slate-200 pt-5">
+                <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center gap-2 break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
+                  <Luggage className="w-4 h-4 text-teal-700" />
                   <span>行李打包準備清單 (Packing Checklist)</span>
                 </h2>
 
@@ -523,18 +578,18 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
                   {trip.packingList.map((item) => (
                     <div
                       key={item.id}
-                      className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 flex items-center gap-2 bg-slate-50/50 dark:bg-slate-800/40 break-inside-avoid"
+                      className="p-2 rounded-lg border border-slate-200 flex items-center gap-2 bg-slate-50/60 break-inside-avoid"
                     >
                       <div
                         className={`w-4 h-4 rounded-md border shrink-0 flex items-center justify-center ${
                           item.packed
-                            ? 'bg-teal-600 border-teal-600 text-white shadow-2xs'
-                            : 'border-slate-300 dark:border-slate-700 bg-transparent'
+                            ? 'bg-teal-600 border-teal-600 text-white'
+                            : 'border-slate-300 bg-white'
                         }`}
                       >
                         {item.packed && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
                       </div>
-                      <span className="truncate text-[11px] font-medium text-slate-800 dark:text-slate-200">
+                      <span className="truncate text-[11px] font-medium text-slate-800">
                         {item.name}
                       </span>
                     </div>
@@ -545,8 +600,8 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
 
             {/* Emergency Contacts Section */}
             {includeEmergency && trip.emergencyContacts && trip.emergencyContacts.length > 0 && (
-              <div className="space-y-3 border-t-2 border-slate-200 dark:border-slate-800 pt-5">
-                <h2 className="text-base font-black text-slate-950 dark:text-white uppercase tracking-wider flex items-center gap-2 break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
+              <div className="space-y-3 border-t-2 border-slate-200 pt-5">
+                <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center gap-2 break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
                   <Phone className="w-4 h-4 text-rose-600" />
                   <span>緊急聯絡電話與救助資訊 (Emergency Contacts)</span>
                 </h2>
@@ -555,15 +610,15 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
                   {trip.emergencyContacts.map((contact) => (
                     <div
                       key={contact.id}
-                      className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-rose-50/20 dark:bg-rose-950/20 flex items-center justify-between break-inside-avoid"
+                      className="p-2.5 rounded-xl border border-slate-200 bg-rose-50/30 flex items-center justify-between break-inside-avoid"
                     >
                       <div>
-                        <span className="font-bold text-slate-900 dark:text-slate-100 block text-xs">{contact.name}</span>
+                        <span className="font-bold text-slate-900 block text-xs">{contact.name}</span>
                         {contact.address && (
-                          <span className="text-[10px] text-slate-500 dark:text-slate-400 block truncate">{contact.address}</span>
+                          <span className="text-[10px] text-slate-500 block truncate">{contact.address}</span>
                         )}
                       </div>
-                      <span className="font-mono font-bold text-sm text-rose-700 dark:text-rose-400 bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-rose-200 dark:border-rose-900/60">
+                      <span className="font-mono font-bold text-sm text-rose-700 bg-white px-2 py-0.5 rounded border border-rose-200">
                         {contact.phone}
                       </span>
                     </div>
@@ -572,16 +627,16 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
               </div>
             )}
 
-            {/* Expense Breakdown Summary (消費支出摘要 - if selected) */}
+            {/* Expense Breakdown Summary */}
             {includeExpenses && trip.expenses && trip.expenses.length > 0 && (
-              <div className="space-y-3 break-inside-avoid border-t-2 border-slate-200 dark:border-slate-800 pt-5">
-                <h2 className="text-base font-black text-slate-950 dark:text-white uppercase tracking-wider flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-2">
+              <div className="space-y-3 break-inside-avoid border-t-2 border-slate-200 pt-5">
+                <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center justify-between border-b border-slate-200 pb-2">
                   <div className="flex items-center gap-2">
-                    <DollarSign className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                    <DollarSign className="w-4 h-4 text-teal-700" />
                     <span>旅程消費記帳摘要 (Expense Summary)</span>
                   </div>
-                  <span className="text-xs font-mono font-bold text-slate-900 dark:text-slate-100">
-                    總記帳支出: {trip.currency || 'JPY'} {totalSpent.toLocaleString()}
+                  <span className="text-xs font-mono font-bold text-slate-900">
+                    總記帳支出: {baseCurrency} {Math.round(totalSpent).toLocaleString()}
                   </span>
                 </h2>
 
@@ -589,17 +644,25 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
                   {Object.entries(
                     trip.expenses.reduce((acc, exp) => {
                       const cat = exp.category || 'other';
-                      acc[cat] = (acc[cat] || 0) + exp.amount;
+                      const converted = convertAmount(
+                        exp.amount,
+                        exp.currency || baseCurrency,
+                        baseCurrency,
+                        trip.customExchangeRates
+                      );
+                      acc[cat] = (acc[cat] || 0) + converted;
                       return acc;
                     }, {} as Record<string, number>)
                   ).map(([catKey, sum]) => {
-                    const catInfo = CATEGORY_NAMES[catKey] || CATEGORY_NAMES.other;
-                    const label = catInfo[lang] || catInfo.en;
+                    const catInfo = CATEGORY_NAMES[catKey];
+                    const label =
+                      trip.customCategoryLabels?.[catKey] ||
+                      (catInfo ? catInfo[lang] || catInfo.en : catKey);
                     return (
-                      <div key={catKey} className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800">
-                        <span className="text-[10px] text-slate-500 dark:text-slate-400 block uppercase font-medium">{label}</span>
-                        <span className="font-bold text-xs text-slate-900 dark:text-slate-100 font-mono mt-0.5 block">
-                          {trip.currency || 'JPY'} {sum.toLocaleString()}
+                      <div key={catKey} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                        <span className="text-[10px] text-slate-500 block uppercase font-medium">{label}</span>
+                        <span className="font-bold text-xs text-slate-900 font-mono mt-0.5 block">
+                          {baseCurrency} {Math.round(sum).toLocaleString()}
                         </span>
                       </div>
                     );
@@ -608,21 +671,21 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
               </div>
             )}
 
-            {/* Trip Notes & Booking Memo Appendix (附錄：隨行備忘筆記) */}
+            {/* Trip Notes & Booking Memo Appendix */}
             {includeNotes && trip.notes && (
-              <div className="space-y-3 break-inside-avoid border-t-2 border-slate-200 dark:border-slate-800 pt-5">
-                <h2 className="text-base font-black text-slate-950 dark:text-white uppercase tracking-wider flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+              <div className="space-y-3 break-inside-avoid border-t-2 border-slate-200 pt-5">
+                <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-teal-700" />
                   <span>附錄：隨行備忘筆記與票券指引 (Trip Notes & Booking Guidelines)</span>
                 </h2>
-                <div className="p-4 bg-slate-50/80 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-800 text-xs leading-relaxed text-slate-800 dark:text-slate-200 whitespace-pre-line font-mono">
+                <div className="p-4 bg-slate-50/90 rounded-xl border border-slate-200 text-xs leading-relaxed text-slate-800 whitespace-pre-line font-mono">
                   {trip.notes}
                 </div>
               </div>
             )}
 
             {/* Document Footer */}
-            <div className="border-t border-slate-200 dark:border-slate-800 pt-4 flex items-center justify-between text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+            <div className="border-t border-slate-200 pt-4 flex items-center justify-between text-[10px] text-slate-400 font-mono">
               <span>日和手帳 Hiyori · 隨行手帖 · Offline Printable Guidebook</span>
               <span>Generated on {new Date().toLocaleDateString()}</span>
             </div>

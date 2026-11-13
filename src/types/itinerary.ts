@@ -134,8 +134,12 @@ export interface Trip {
   ownerId?: string;
   ownerEmail?: string;
   collaborators?: CollaboratorMember[];
+  editorEmails?: string[];
+  viewerEmails?: string[];
   generalAccess?: GeneralAccessType;
   lastUpdatedBy?: string;
+  lastSyncedAt?: number;
+  deletedItemIds?: Record<string, number>;
   isSoloTrip?: boolean;
   isSplitEnabled?: boolean;
   splitMembers?: string[];
