@@ -70,12 +70,12 @@ interface TimelineTabProps {
 }
 
 const CATEGORY_MAP: Record<string, { labelKey: string; icon: React.ComponentType<{ className?: string }>; text: string }> = {
-  spot: { labelKey: 'cat_spot', icon: Landmark, text: 'text-teal-700 dark:text-teal-300' },
-  food: { labelKey: 'cat_food', icon: Utensils, text: 'text-orange-700 dark:text-orange-300' },
-  transport: { labelKey: 'cat_transport', icon: Train, text: 'text-sky-700 dark:text-sky-300' },
-  hotel: { labelKey: 'cat_hotel', icon: Hotel, text: 'text-violet-700 dark:text-violet-300' },
-  shopping: { labelKey: 'cat_shopping', icon: ShoppingBag, text: 'text-pink-700 dark:text-pink-300' },
-  activity: { labelKey: 'cat_activity', icon: Sparkles, text: 'text-rose-700 dark:text-rose-300' },
+  spot: { labelKey: 'cat_spot', icon: Landmark, text: 'text-teal-700 dark:text-teal-400' },
+  food: { labelKey: 'cat_food', icon: Utensils, text: 'text-slate-600 dark:text-slate-400' },
+  transport: { labelKey: 'cat_transport', icon: Train, text: 'text-slate-600 dark:text-slate-400' },
+  hotel: { labelKey: 'cat_hotel', icon: Hotel, text: 'text-slate-600 dark:text-slate-400' },
+  shopping: { labelKey: 'cat_shopping', icon: ShoppingBag, text: 'text-slate-600 dark:text-slate-400' },
+  activity: { labelKey: 'cat_activity', icon: Sparkles, text: 'text-teal-700 dark:text-teal-400' },
 };
 
 /**
@@ -599,12 +599,12 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     <div className="space-y-3.5">
       {/* 水平捲動日期/天數篩選列 (Horizontal Day & Date Filter Bar with Scroll Detection & Compact Mode) */}
       <div
-        className={`sticky ${isNavHidden ? 'max-sm:top-0 sm:top-14' : 'top-14'} z-20 group/filter bg-white/95 dark:bg-[#1c1c1e]/95 backdrop-blur-md rounded-2xl border border-slate-200/90 dark:border-white/10 transition-all duration-300 ease-in-out ${
+        className={`sticky ${isNavHidden ? 'max-sm:top-0 sm:top-14' : 'top-14'} z-20 group/filter bg-white/95 dark:bg-[#111827]/95 backdrop-blur-md rounded-2xl border border-[#E5E2DC] dark:border-slate-800 transition-all duration-300 ease-in-out ${
           isCompact ? 'py-1 px-1.5 shadow-md' : 'p-2 shadow-2xs'
         }`}
         style={{ overflowAnchor: 'none' }}
       >
-        {/* Header bar with Section Label & Floating 'Return to Today' button (collapses smoothly when scrolling down) */}
+        {/* Header bar with Section Label & Return to Today button */}
         <div
           className={`flex items-center justify-between px-1 transition-all duration-300 ease-in-out overflow-hidden ${
             isCompact
@@ -613,34 +613,32 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           }`}
         >
           <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+            <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
               <span>{lang === 'zh' ? '行程日程' : 'Itinerary Days'}</span>
             </span>
-            <span className="text-[10px] font-mono text-slate-400">
+            <span className="text-[11px] font-mono tabular-nums text-slate-400">
               · {trip.days.length} 天
             </span>
           </div>
 
-          {/* 返回今日浮動小按鈕 (Floating Jump to Today Button) */}
+          {/* 返回今日小按鈕 */}
           <motion.button
             type="button"
-            whileTap={{ scale: 0.95 }}
-            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.96 }}
             onClick={handleJumpToToday}
-            className={`px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer ${
+            className={`px-3 py-1 min-h-[30px] rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
               isCurrentToday
-                ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 ring-2 ring-amber-400/30'
-                : 'bg-slate-50 dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-amber-400/80 shadow-2xs'
+                ? 'bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 border border-teal-300/80 dark:border-teal-700/60'
+                : 'bg-[#FAF9F6] dark:bg-slate-800 hover:bg-teal-50/70 dark:hover:bg-teal-950/40 text-slate-700 dark:text-slate-200 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-500/60'
             }`}
             title={lang === 'zh' ? '快速捲動至今日行程' : 'Jump to Today'}
             aria-label="返回今日"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400" />
             <span>{lang === 'zh' ? '返回今日' : 'Today'}</span>
             {targetTodayDay && (
-              <span className="text-[10px] font-mono opacity-80 font-normal">
-                (Day {targetTodayDay.dayNumber})
+              <span className="text-[10px] font-mono tabular-nums opacity-80 font-normal">
+                · D{targetTodayDay.dayNumber}
               </span>
             )}
           </motion.button>
@@ -651,8 +649,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           <button
             type="button"
             onClick={() => handleScrollDays('left')}
-            className={`absolute left-1.5 top-1/2 -translate-y-1/2 z-10 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer ${
-              isCompact ? 'w-6 h-6' : 'w-7 h-7'
+            className={`absolute left-1.5 top-1/2 -translate-y-1/2 z-10 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-[#E5E2DC] dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer ${
+              isCompact ? 'w-7 h-7' : 'w-8 h-8'
             }`}
             aria-label="往左捲動天數"
           >
@@ -660,7 +658,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           </button>
         )}
 
-        {/* Scrollable Container with Scroll Snap (removed CSS scroll-smooth to prevent fighting scroll-snap) */}
+        {/* Scrollable Container with Scroll Snap */}
         <div
           ref={scrollContainerRef}
           className={`flex items-center gap-2 overflow-x-auto scrollbar-none snap-x snap-mandatory scroll-px-4 sm:scroll-px-6 transition-all duration-300 ${
@@ -671,10 +669,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           <motion.button
             type="button"
             id="day-filter-chip-overview"
-            whileTap={{ scale: 1.05 }}
+            whileTap={{ scale: 0.98 }}
             animate={
               timelineViewMode === 'overview'
-                ? { scale: 1.03, y: -2 }
+                ? { scale: 1.02, y: -1 }
                 : { scale: 1, y: 0 }
             }
             transition={{ type: 'spring', stiffness: 420, damping: 24 }}
@@ -689,8 +687,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 : 'min-w-[84px] px-3.5 py-2.5 h-[56px] flex flex-col justify-between'
             } ${
               timelineViewMode === 'overview'
-                ? 'bg-teal-700 text-white shadow-md ring-2 ring-teal-500/40 z-1'
-                : 'bg-slate-50 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
+                ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-sm z-1'
+                : 'bg-[#FAF9F6] dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700/80'
             }`}
           >
             {isCompact ? (
@@ -699,7 +697,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 <span className="text-[11px] font-bold whitespace-nowrap">
                   {lang === 'zh' ? '總覽' : 'All'}
                 </span>
-                <span className="text-[10px] opacity-75 font-mono whitespace-nowrap">
+                <span className="text-[10px] opacity-75 font-mono tabular-nums whitespace-nowrap">
                   ({trip.days.length})
                 </span>
               </>
@@ -709,7 +707,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   <Calendar className="w-3.5 h-3.5" />
                   {lang === 'zh' ? '行程總覽' : 'Overview'}
                 </span>
-                <span className="text-[10px] opacity-75 font-mono mt-0.5">
+                <span className="text-[10px] opacity-75 font-mono tabular-nums mt-0.5">
                   {trip.days.length} 天日程
                 </span>
               </>
@@ -731,10 +729,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 key={day.id}
                 id={`day-filter-chip-${day.dayNumber}`}
                 type="button"
-                whileTap={{ scale: 1.05 }}
+                whileTap={{ scale: 0.98 }}
                 animate={
                   isCurrent
-                    ? { scale: 1.03, y: -2 }
+                    ? { scale: 1.02, y: -1 }
                     : { scale: 1, y: 0 }
                 }
                 transition={{ type: 'spring', stiffness: 420, damping: 24 }}
@@ -756,83 +754,72 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     : 'min-w-[110px] px-3.5 py-2.5 h-[56px] flex flex-col justify-between'
                 } ${
                   isCurrent
-                    ? `bg-teal-700 text-white shadow-md ring-2 ring-teal-500/40 z-1 ${isToday ? 'border-amber-400/80' : ''}`
+                    ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-sm z-1'
                     : isToday
-                    ? 'bg-amber-50/50 dark:bg-amber-950/20 hover:bg-amber-100/60 dark:hover:bg-amber-900/30 text-slate-800 dark:text-slate-200 border border-amber-300 dark:border-amber-500/60 ring-1.5 ring-amber-400/80 shadow-xs'
+                    ? 'bg-teal-50/70 dark:bg-teal-950/30 hover:bg-teal-100/70 dark:hover:bg-teal-900/40 text-slate-900 dark:text-slate-100 border border-teal-500/70 dark:border-teal-500/60 shadow-2xs'
                     : isEmpty
-                    ? 'bg-slate-50/40 dark:bg-slate-900/30 hover:bg-amber-50/30 dark:hover:bg-amber-950/20 text-slate-500 dark:text-slate-400 border border-dashed border-amber-300/60 dark:border-amber-800/50 opacity-80 hover:opacity-100'
-                    : 'bg-slate-50 dark:bg-slate-800/60 hover:bg-teal-50/60 dark:hover:bg-teal-950/30 text-slate-700 dark:text-slate-300 border border-slate-200/60 dark:border-white/5'
+                    ? 'bg-[#FAF9F6]/60 dark:bg-slate-900/30 hover:bg-[#FAF9F6] dark:hover:bg-slate-800/60 text-slate-500 dark:text-slate-400 border border-dashed border-[#E5E2DC] dark:border-slate-700 opacity-85 hover:opacity-100'
+                    : 'bg-[#FAF9F6] dark:bg-slate-800/60 hover:bg-teal-50/50 dark:hover:bg-teal-950/30 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700/80'
                 }`}
               >
                 {isCompact ? (
-                  /* Compact Single-line Layout */
                   <>
                     <div className="flex items-center gap-1 shrink-0">
-                      <span className={`text-xs font-black ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                      <span className={`text-xs font-black font-mono tabular-nums ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
                         D{day.dayNumber}
                       </span>
                       {isToday && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-xs" />
+                        <span className={`text-[9px] font-bold ${isCurrent ? 'text-teal-200' : 'text-teal-700 dark:text-teal-400'}`}>
+                          ·今
+                        </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 text-[10px] font-mono shrink-0">
+                    <div className="flex items-center gap-1 text-[10px] font-mono tabular-nums shrink-0">
                       <span className={isCurrent ? 'text-teal-100' : 'text-slate-500 dark:text-slate-400'}>
                         {dateStr}
                       </span>
-                      {isEmpty ? (
-                        <span className={`text-[9px] ${isCurrent ? 'text-amber-200' : 'text-amber-500 dark:text-amber-400'}`}>
-                          (空)
-                        </span>
-                      ) : (
-                        <span className={`text-[10px] ${isCurrent ? 'text-teal-100 font-bold' : 'opacity-70'}`}>
-                          ·{totalCount}
-                        </span>
-                      )}
+                      <span className={isCurrent ? 'text-teal-100 font-bold' : 'text-slate-400'}>
+                        {isEmpty ? '(空)' : `·${totalCount}`}
+                      </span>
                     </div>
                   </>
                 ) : (
-                  /* Full Two-Row Layout */
                   <>
                     <div className="flex items-center justify-between gap-1.5">
-                      <span className={`text-xs font-black ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                      <span className={`text-xs font-black font-mono tabular-nums ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
                         Day {day.dayNumber}
                       </span>
                       {totalCount > 0 ? (
                         <span
-                          className={`text-[10px] font-mono px-1.5 py-0.5 rounded-full ${
+                          className={`text-[10px] font-mono tabular-nums font-semibold ${
                             isCurrent
-                              ? 'bg-teal-900/60 text-teal-100 font-bold'
+                              ? 'text-teal-100'
                               : completedCount === totalCount
-                              ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 font-bold'
-                              : 'bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                              ? 'text-teal-700 dark:text-teal-400'
+                              : 'text-slate-500 dark:text-slate-400'
                           }`}
                         >
-                          {completedCount > 0 ? `✓ ${completedCount}/${totalCount}` : `${totalCount}`}
+                          {completedCount > 0 ? `✓ ${completedCount}/${totalCount}` : `${totalCount}站`}
                         </span>
                       ) : (
                         <span
-                          className={`text-[9px] font-mono px-1.5 py-0.2 rounded-md ${
-                            isCurrent
-                              ? 'bg-teal-900/70 text-amber-200/90 border border-teal-600/50'
-                              : 'bg-amber-100/70 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/40'
+                          className={`text-[10px] font-mono ${
+                            isCurrent ? 'text-teal-200' : 'text-slate-400 dark:text-slate-500'
                           }`}
                         >
-                          {lang === 'zh' ? '空行程' : 'Empty'}
+                          {lang === 'zh' ? '空' : 'Empty'}
                         </span>
                       )}
                     </div>
 
-                    <div className="flex items-center justify-between mt-1 text-[10px] font-mono opacity-85">
+                    <div className="flex items-center justify-between mt-1 text-[10px] font-mono tabular-nums opacity-85">
                       <div className="flex items-center gap-1">
                         <span>{dateStr}</span>
                         {weekday && <span>({weekday})</span>}
                       </div>
                       {isToday && (
-                        <span className="flex items-center gap-1 shrink-0">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-xs" />
-                          <span className={`text-[9px] font-bold ${isCurrent ? 'text-amber-300' : 'text-amber-600 dark:text-amber-400'}`}>
-                            {lang === 'zh' ? '今日' : 'Today'}
-                          </span>
+                        <span className={`text-[9px] font-bold shrink-0 ${isCurrent ? 'text-teal-200' : 'text-teal-700 dark:text-teal-400'}`}>
+                          {lang === 'zh' ? '今日' : 'Today'}
                         </span>
                       )}
                     </div>
@@ -846,14 +833,14 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           {canEdit && (
             <motion.button
               type="button"
-              whileTap={{ scale: 1.05 }}
+              whileTap={{ scale: 0.98 }}
               transition={{ type: 'spring', stiffness: 420, damping: 24 }}
               onClick={() => {
                 triggerHaptic(10);
                 handleAddDay();
               }}
-              className={`rounded-xl border border-dashed border-teal-500/70 hover:border-teal-500 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center justify-center gap-1 shrink-0 snap-center transition-all cursor-pointer ${
-                isCompact ? 'h-9 px-2.5' : 'h-[52px] px-3'
+              className={`rounded-xl border border-dashed border-teal-600/60 hover:border-teal-600 text-teal-700 dark:text-teal-400 hover:bg-teal-50/70 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center justify-center gap-1 shrink-0 snap-center transition-all cursor-pointer ${
+                isCompact ? 'h-9 px-2.5' : 'h-[56px] px-3'
               }`}
               title={lang === 'zh' ? '增加一天' : 'Add Day'}
               aria-label="增加一天"
@@ -869,8 +856,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           <button
             type="button"
             onClick={() => handleScrollDays('right')}
-            className={`absolute right-1.5 top-1/2 -translate-y-1/2 z-10 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer ${
-              isCompact ? 'w-6 h-6' : 'w-7 h-7'
+            className={`absolute right-1.5 top-1/2 -translate-y-1/2 z-10 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-[#E5E2DC] dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer ${
+              isCompact ? 'w-7 h-7' : 'w-8 h-8'
             }`}
             aria-label="往右捲動天數"
           >
@@ -881,9 +868,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
         {/* 細長水平進度條 (Slim Horizontal Travel Progress Bar with Today Micro Marker) */}
         {trip.days.length > 0 && (
           <div className={`transition-all duration-300 ${isCompact ? 'mt-1 px-1 pb-0.5' : 'mt-1.5 px-1.5 pb-0.5'}`}>
-            {/* Header label row for progress (collapses smoothly in compact mode) */}
             <div
-              className={`flex items-center justify-between text-[10px] font-mono text-slate-400 dark:text-slate-500 overflow-hidden transition-all duration-300 ${
+              className={`flex items-center justify-between text-[10px] font-mono tabular-nums text-slate-400 dark:text-slate-500 overflow-hidden transition-all duration-300 ${
                 isCompact
                   ? 'max-h-0 opacity-0 mb-0 pointer-events-none'
                   : 'max-h-6 opacity-100 mb-1'
@@ -893,7 +879,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 <span className="font-semibold text-slate-600 dark:text-slate-300">
                   {lang === 'zh' ? '行程進度' : 'Progress'}
                 </span>
-                <span className="text-teal-600 dark:text-teal-400 font-bold">
+                <span className="text-teal-700 dark:text-teal-400 font-bold">
                   {timelineViewMode === 'overview'
                     ? (lang === 'zh' ? '全景總覽 (100%)' : 'All Days (100%)')
                     : `${Math.round(todayProgressInfo?.selectedPercent ?? 0)}% (Day ${selectedDayNumber}/${trip.days.length})`}
@@ -904,14 +890,13 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 <button
                   type="button"
                   onClick={handleJumpToToday}
-                  className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold hover:underline cursor-pointer"
+                  className="flex items-center gap-1 text-teal-700 dark:text-teal-400 font-semibold hover:underline cursor-pointer"
                   title={lang === 'zh' ? '點擊跳轉至今日' : 'Click to jump to today'}
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                   <span>
                     {lang === 'zh'
-                      ? `今日位於 Day ${todayProgressInfo.todayDayNumber}`
-                      : `Today: Day ${todayProgressInfo.todayDayNumber}`}
+                      ? `今日 · Day ${todayProgressInfo.todayDayNumber}`
+                      : `Today · Day ${todayProgressInfo.todayDayNumber}`}
                   </span>
                 </button>
               )}
@@ -919,32 +904,29 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
             {/* The progress track container */}
             <div
-              className="relative w-full h-1.5 bg-slate-100 dark:bg-white/10 rounded-full overflow-visible select-none"
+              className="relative w-full h-1.5 bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC]/60 dark:border-slate-700/60 rounded-full overflow-visible select-none"
               title={
                 lang === 'zh'
                   ? `當前進度：${Math.round(todayProgressInfo?.selectedPercent ?? 0)}%`
                   : `Progress: ${Math.round(todayProgressInfo?.selectedPercent ?? 0)}%`
               }
             >
-              {/* Filled progress bar with smooth transition */}
               <motion.div
-                className="absolute left-0 top-0 bottom-0 bg-gradient-to-r from-teal-500 via-teal-600 to-emerald-500 rounded-full shadow-xs"
+                className="absolute left-0 top-0 bottom-0 bg-teal-700 dark:bg-teal-500 rounded-full"
                 initial={false}
                 animate={{ width: `${todayProgressInfo?.selectedPercent ?? 0}%` }}
                 transition={{ type: 'spring', stiffness: 320, damping: 28 }}
               />
 
-              {/* Day segment dividers */}
               {trip.days.length > 1 &&
                 Array.from({ length: trip.days.length - 1 }).map((_, idx) => (
                   <div
                     key={idx}
-                    className="absolute top-0 bottom-0 w-[1.5px] -ml-[0.75px] bg-white/70 dark:bg-[#1c1c1e]/80 z-1 pointer-events-none"
+                    className="absolute top-0 bottom-0 w-[1.5px] -ml-[0.75px] bg-white/80 dark:bg-[#111827]/80 z-1 pointer-events-none"
                     style={{ left: `${((idx + 1) / trip.days.length) * 100}%` }}
                   />
                 ))}
 
-              {/* Today micro marker / glowing dot */}
               {todayProgressInfo && todayProgressInfo.todayPercent !== null && (
                 <button
                   type="button"
@@ -952,7 +934,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     e.stopPropagation();
                     handleJumpToToday();
                   }}
-                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 flex flex-col items-center group cursor-pointer p-0.5 bg-transparent border-none"
+                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 flex items-center justify-center group cursor-pointer p-1 bg-transparent border-none"
                   style={{ left: `${todayProgressInfo.todayPercent}%` }}
                   title={
                     lang === 'zh'
@@ -961,10 +943,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   }
                   aria-label="今日位置"
                 >
-                  <span className="relative flex h-3.5 w-3.5 items-center justify-center">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-400 ring-2 ring-white dark:ring-[#1c1c1e] shadow-sm group-hover:scale-125 transition-transform" />
-                  </span>
+                  <span className="inline-flex rounded-full h-2.5 w-2.5 bg-teal-600 dark:bg-teal-400 ring-2 ring-white dark:ring-[#111827] shadow-xs group-hover:scale-125 transition-transform" />
                 </button>
               )}
             </div>
@@ -974,7 +953,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
       {/* 行程全景點即時搜尋列 (Instant Spot & Place Search) */}
       <div className="relative">
-        <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-white dark:bg-[#1c1c1e] border border-slate-200/80 dark:border-white/10 shadow-2xs focus-within:ring-2 focus-within:ring-teal-500/50 focus-within:border-teal-500 transition">
+        <div className="flex items-center gap-2 px-3.5 py-2.5 min-h-[44px] rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs focus-within:ring-2 focus-within:ring-teal-500/40 focus-within:border-teal-600 transition">
           <Search className="w-4 h-4 text-slate-400 shrink-0" />
           <input
             type="text"
@@ -987,7 +966,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             <button
               type="button"
               onClick={() => setSpotSearchQuery('')}
-              className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0"
+              className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
               aria-label="清除搜尋"
             >
               <X className="w-3.5 h-3.5" />
@@ -997,9 +976,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
         {/* 即時搜尋結果浮層 (Search Dropdown / Results Preview) */}
         {spotSearchQuery.trim() && (
-          <div className="absolute top-full left-0 right-0 mt-1.5 z-30 max-h-80 overflow-y-auto rounded-2xl bg-white dark:bg-[#1c1c1e] border border-slate-200/90 dark:border-white/10 shadow-xl p-2 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
-            <div className="px-2.5 py-1 text-[11px] font-bold text-slate-400 flex items-center justify-between border-b border-slate-100 dark:border-white/5 pb-1.5">
-              <span>搜尋結果 ({matchingSpots.length})</span>
+          <div className="absolute top-full left-0 right-0 mt-1.5 z-30 max-h-80 overflow-y-auto rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-xl p-2 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
+            <div className="px-2.5 py-1 text-[11px] font-bold text-slate-400 flex items-center justify-between border-b border-[#E5E2DC] dark:border-slate-800 pb-1.5">
+              <span className="font-mono tabular-nums">搜尋結果 ({matchingSpots.length})</span>
             </div>
 
             {matchingSpots.length === 0 ? (
@@ -1015,10 +994,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     key={`${dayNumber}-${item.id}`}
                     type="button"
                     onClick={() => handleJumpToSpot(dayNumber, item.id)}
-                    className="w-full text-left p-2.5 rounded-xl hover:bg-teal-50/80 dark:hover:bg-teal-950/40 flex items-center justify-between gap-3 transition group"
+                    className="w-full text-left p-2.5 rounded-xl hover:bg-teal-50/80 dark:hover:bg-teal-950/40 flex items-center justify-between gap-3 transition group cursor-pointer"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0 text-slate-600 dark:text-slate-300 group-hover:bg-teal-100 dark:group-hover:bg-teal-900/60 group-hover:text-teal-700 dark:group-hover:text-teal-300 transition">
+                      <div className="w-8 h-8 rounded-lg bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 flex items-center justify-center shrink-0 text-slate-600 dark:text-slate-300 group-hover:bg-teal-100 dark:group-hover:bg-teal-900/60 group-hover:text-teal-700 dark:group-hover:text-teal-300 transition">
                         <CatIcon className="w-4 h-4" />
                       </div>
                       <div className="min-w-0">
@@ -1026,7 +1005,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                           <span className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-teal-700 dark:group-hover:text-teal-300">
                             {item.title}
                           </span>
-                          <span className="text-[10px] font-mono font-medium text-slate-500 dark:text-slate-400">
+                          <span className="text-[10px] font-mono tabular-nums font-medium text-slate-500 dark:text-slate-400">
                             Day {dayNumber} · {item.startTime || '未定時間'}
                           </span>
                         </div>
@@ -1037,7 +1016,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                         )}
                       </div>
                     </div>
-                    <span className="text-[11px] font-bold text-teal-600 dark:text-teal-400 shrink-0 opacity-0 group-hover:opacity-100 transition">
+                    <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400 shrink-0 opacity-0 group-hover:opacity-100 transition">
                       跳轉 →
                     </span>
                   </button>
@@ -1050,13 +1029,13 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
       {/* View Mode Switcher: 每日時序 vs 全程總覽大表 */}
       <div className="flex items-center justify-between gap-2 pb-1">
-        <div className="inline-flex p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 text-xs font-semibold">
+        <div className="inline-flex p-1 bg-[#FAF9F6] dark:bg-slate-900 rounded-2xl border border-[#E5E2DC] dark:border-slate-800 text-xs font-semibold">
           <button
             type="button"
             onClick={() => setTimelineViewMode('daily')}
-            className={`px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 ${
+            className={`min-h-[36px] px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer ${
               timelineViewMode === 'daily'
-                ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 font-bold shadow-2xs'
+                ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
@@ -1066,9 +1045,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           <button
             type="button"
             onClick={() => setTimelineViewMode('overview')}
-            className={`px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 ${
+            className={`min-h-[36px] px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer ${
               timelineViewMode === 'overview'
-                ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 font-bold shadow-2xs'
+                ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
@@ -1079,10 +1058,11 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
         {timelineViewMode === 'daily' && (
           <button
+            type="button"
             onClick={() => setIsMapExpanded(!isMapExpanded)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold shrink-0 transition"
+            className="min-h-[40px] flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-[#111827] hover:bg-[#FAF9F6] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold shrink-0 transition cursor-pointer"
           >
-            <MapIcon className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+            <MapIcon className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
             <span>{isMapExpanded ? (lang === 'zh' ? '收合' : 'Hide') : (lang === 'zh' ? '地圖' : 'Map')}</span>
             {isMapExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
@@ -1091,8 +1071,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
       {/* If zero days: show inviting empty state */}
       {trip.days.length === 0 ? (
-        <div className="py-14 px-6 text-center rounded-3xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 shadow-sm max-w-md mx-auto my-6 space-y-4">
-          <div className="w-14 h-14 rounded-2xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center mx-auto shadow-2xs">
+        <div className="py-14 px-6 text-center rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs max-w-md mx-auto my-6 space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center mx-auto">
             <Calendar className="w-7 h-7" />
           </div>
           <div className="space-y-1">
@@ -1107,7 +1087,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             <button
               type="button"
               onClick={handleAddDay}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md shadow-teal-600/20 active:scale-95 transition"
+              className="min-h-[44px] inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs shadow-sm active:scale-95 transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>{lang === 'zh' ? '建立第 1 天行程' : 'Create Day 1'}</span>
@@ -1162,15 +1142,15 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 return (
                   <div
                     onClick={() => onOpenMemories?.()}
-                    className="rounded-2xl p-3 bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200/80 dark:border-rose-900/40 flex items-center justify-between cursor-pointer hover:bg-rose-50 transition shadow-2xs group"
+                    className="rounded-2xl p-3.5 bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between cursor-pointer hover:border-teal-600/50 dark:hover:border-teal-500/50 transition shadow-2xs group"
                   >
                     <div className="flex items-center gap-2 text-xs">
-                      <Camera className="w-4 h-4 text-rose-500" />
-                      <span className="font-bold text-rose-900 dark:text-rose-200">
+                      <Camera className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                      <span className="font-bold text-slate-900 dark:text-slate-100 font-mono tabular-nums">
                         Day {activeDay.dayNumber} 相片 ({dayMems.length})
                       </span>
                     </div>
-                    <span className="text-xs font-semibold text-rose-600 dark:text-rose-400 group-hover:translate-x-0.5 transition flex items-center gap-1">
+                    <span className="text-xs font-semibold text-teal-700 dark:text-teal-400 group-hover:translate-x-0.5 transition flex items-center gap-1">
                       <span>相簿</span>
                       <span>→</span>
                     </span>
@@ -1179,14 +1159,14 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               })()}
 
               {/* Active Day Header Bar */}
-              <div id="day-schedule-section" className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/90 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 scroll-mt-20">
+              <div id="day-schedule-section" className="bg-white dark:bg-[#111827] rounded-2xl p-4 sm:p-5 border border-[#E5E2DC] dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 scroll-mt-20">
                 <div>
                   <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="font-bold text-teal-700 dark:text-teal-300">
+                    <span className="font-bold font-mono tabular-nums text-teal-700 dark:text-teal-400">
                       {t.day.replace('{n}', String(activeDay.dayNumber))}
                     </span>
                     <span>·</span>
-                    <span className="flex items-center gap-1 font-mono">
+                    <span className="flex items-center gap-1 font-mono tabular-nums">
                       <Calendar className="w-3.5 h-3.5" />
                       {formatDateSlash(activeDay.date)}
                     </span>
@@ -1208,18 +1188,18 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
                 <div className="flex items-center gap-2 shrink-0">
                   {trip.days.length > 1 && (
-                    <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 rounded-xl p-1 border border-slate-200/80 dark:border-slate-700/80">
+                    <div className="flex items-center gap-1 bg-[#FAF9F6] dark:bg-slate-900 rounded-xl p-1 border border-[#E5E2DC] dark:border-slate-800">
                       <button
                         type="button"
                         disabled={selectedDayNumber <= 1}
                         onClick={handlePrevDay}
                         aria-label="前一天"
                         title="前一天"
-                        className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        className="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
                       >
                         <ChevronLeft className="w-4 h-4" />
                       </button>
-                      <span className="text-xs font-semibold px-1 text-slate-600 dark:text-slate-400 select-none">
+                      <span className="text-xs font-mono tabular-nums font-semibold px-1.5 text-slate-600 dark:text-slate-400 select-none">
                         {activeDay.dayNumber} / {trip.days.length}
                       </span>
                       <button
@@ -1228,7 +1208,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                         onClick={handleNextDay}
                         aria-label="後一天"
                         title="後一天"
-                        className="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition"
+                        className="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
                       >
                         <ChevronRight className="w-4 h-4" />
                       </button>
@@ -1237,8 +1217,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
                   {canEdit && (
                     <button
+                      type="button"
                       onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
-                      className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0"
+                      className="min-h-[44px] sm:min-h-[38px] px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0 cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
                       <span>{t.addSpot}</span>
@@ -1249,14 +1230,15 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
       {/* Timeline Items List */}
       {activeDay.items.length === 0 ? (
-        <div className="p-8 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-center">
+        <div className="p-8 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 text-center">
           <p className="text-slate-500 dark:text-slate-400 text-xs">
             {lang === 'zh' ? '尚無行程安排' : 'No schedule yet.'}
           </p>
           {canEdit && (
             <button
+              type="button"
               onClick={() => onOpenAddItem(activeDay.dayNumber, '09:00')}
-              className="mt-3 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-1.5"
+              className="mt-3 min-h-[44px] px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>{t.addSpot}</span>
@@ -1295,10 +1277,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   onClick={() => setSelectedItemId(item.id)}
                   className={`rounded-2xl p-4 sm:p-5 transition shadow-2xs border cursor-pointer ${
                     isSelected
-                      ? 'border-teal-500 ring-2 ring-teal-500/20 shadow-md bg-white dark:bg-slate-900'
+                      ? 'border-teal-600 ring-2 ring-teal-500/20 shadow-md bg-white dark:bg-[#111827]'
                       : item.completed
-                      ? 'border-emerald-300 dark:border-emerald-800/80 bg-emerald-50/20 dark:bg-emerald-950/20 shadow-xs'
-                      : 'border-slate-200/80 dark:border-slate-800 bg-white/75 dark:bg-slate-900/60 opacity-85 hover:opacity-100 hover:border-slate-300 dark:hover:border-slate-700'
+                      ? 'border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/50'
+                      : 'border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-[#111827] hover:border-teal-600/50 dark:hover:border-teal-500/50'
                   }`}
                 >
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3.5">
@@ -1337,7 +1319,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                       <div className="space-y-1.5 flex-1 min-w-0">
                         {/* Quiet unboxed metadata */}
                         <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-medium flex-wrap">
-                          <span className="flex items-center gap-1 font-mono text-teal-700 dark:text-teal-400 font-semibold bg-teal-50/80 dark:bg-teal-950/40 px-2 py-0.5 rounded-md">
+                          <span className="flex items-center gap-1 font-mono tabular-nums text-teal-700 dark:text-teal-400 font-semibold">
                             <Clock className="w-3.5 h-3.5" />
                             {item.startTime}
                             {item.endTime ? ` - ${item.endTime}` : ''}
@@ -1350,19 +1332,19 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                           {item.bookingCode && (
                             <>
                               <span aria-hidden="true">·</span>
-                              <span className="font-mono text-amber-700 dark:text-amber-400 font-semibold">
+                              <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 font-semibold">
                                 #{item.bookingCode}
                               </span>
                             </>
                           )}
                         </div>
 
-                        {/* Spot Title (No line-through, elegant contrast) */}
+                        {/* Spot Title */}
                         <h4
                           className={`text-base sm:text-lg font-bold tracking-tight ${
                             item.completed
-                              ? 'text-slate-900 dark:text-white'
-                              : 'text-slate-700 dark:text-slate-300'
+                              ? 'text-slate-500 dark:text-slate-400'
+                              : 'text-slate-900 dark:text-white'
                           }`}
                         >
                           {item.title}
@@ -1378,14 +1360,14 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
                       {/* Notes / Transport info */}
                       {item.transportNote && (
-                        <p className="text-xs text-teal-800 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/40 p-2.5 rounded-xl border border-teal-100 dark:border-teal-900/60 flex items-start gap-1.5">
-                          <Bus className="w-3.5 h-3.5 shrink-0 mt-0.5 text-teal-600 dark:text-teal-400" />
+                        <p className="text-xs text-teal-800 dark:text-teal-300 bg-teal-50/70 dark:bg-teal-950/30 p-2.5 rounded-xl border border-teal-200/60 dark:border-teal-900/50 flex items-start gap-1.5">
+                          <Bus className="w-3.5 h-3.5 shrink-0 mt-0.5 text-teal-700 dark:text-teal-400" />
                           <span>{item.transportNote}</span>
                         </p>
                       )}
 
                       {item.notes && (
-                        <p className="text-xs text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <p className="text-xs text-slate-600 dark:text-slate-300 bg-[#FAF9F6] dark:bg-slate-900/60 p-2.5 rounded-xl border border-[#E5E2DC] dark:border-slate-800">
                           {item.notes}
                         </p>
                       )}
@@ -1412,7 +1394,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                     collabId={trip.collabId}
                                     src={photo}
                                     alt="Spot memory"
-                                    className="w-10 h-10 rounded-lg object-cover border border-rose-200 dark:border-rose-900/60 shadow-xs"
+                                    className="w-10 h-10 rounded-lg object-cover border border-[#E5E2DC] dark:border-slate-700 shadow-xs"
                                   />
                                 </button>
                               ))}
@@ -1422,7 +1404,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                   e.stopPropagation();
                                   setOverlaySpotPhoto({ item, photoIndex: 0 });
                                 }}
-                                className="text-[10px] text-rose-600 dark:text-rose-400 font-bold shrink-0 flex items-center gap-1 bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 dark:hover:bg-rose-900/60 px-2 py-1 rounded-lg transition active:scale-95 cursor-pointer"
+                                className="text-[11px] font-mono tabular-nums text-teal-700 dark:text-teal-400 font-bold shrink-0 flex items-center gap-1 bg-[#FAF9F6] dark:bg-slate-800 hover:bg-teal-50 dark:hover:bg-teal-950/60 border border-[#E5E2DC] dark:border-slate-700 px-2.5 py-1.5 rounded-lg transition active:scale-95 cursor-pointer"
                                 title="點擊開啟相片檢視大圖"
                               >
                                 <Camera className="w-3 h-3" />
@@ -1438,10 +1420,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                 e.stopPropagation();
                                 setOverlaySpotPhoto({ item, photoIndex: 0 });
                               }}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 text-[11px] font-bold transition shadow-2xs active:scale-95 cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 text-[11px] font-bold transition shadow-2xs active:scale-95 cursor-pointer"
                               title="點擊開啟 Google 相簿原始高畫質照片"
                             >
-                              <ExternalLink className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                              <ExternalLink className="w-3 h-3 text-teal-700 dark:text-teal-400" />
                               <span>Google 相簿原圖</span>
                             </button>
                           )}
@@ -1449,11 +1431,11 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                       )}
 
                       {typeof item.cost === 'number' && item.cost > 0 && (
-                        <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 font-mono pt-0.5">
-                          <DollarSign className="w-3.5 h-3.5 text-teal-600" />
+                        <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 font-mono tabular-nums pt-0.5">
+                          <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                           <span>{trip.currency} {item.cost.toLocaleString()}</span>
                           <span className="text-[10px] text-slate-400">
-                            ({item.costPaid ? (lang === 'zh' ? '已付款' : 'Paid') : (lang === 'zh' ? '現場付' : 'Unpaid')})
+                            · {item.costPaid ? (lang === 'zh' ? '已付款' : 'Paid') : (lang === 'zh' ? '現場付' : 'Unpaid')}
                           </span>
                         </div>
                       )}
@@ -1463,20 +1445,19 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     {/* Right Control Actions */}
                     {canEdit ? (
                       <div className="flex items-center sm:flex-col gap-1.5 self-end sm:self-start shrink-0">
-                        {/* Check-in toggle (Icon only, clean and quiet) */}
                         <button
                           type="button"
                           onClick={(e) => handleToggleComplete(item.id, e)}
-                          className={`p-2 rounded-xl transition cursor-pointer flex items-center justify-center ${
+                          className={`w-10 h-10 sm:w-9 sm:h-9 rounded-xl transition cursor-pointer flex items-center justify-center ${
                             item.completed
-                              ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400 border border-emerald-300/60 dark:border-emerald-800'
-                              : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 border border-slate-200/60 dark:border-slate-700'
+                              ? 'bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-400 border border-teal-300/70 dark:border-teal-800'
+                              : 'bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 border border-[#E5E2DC] dark:border-slate-700'
                           }`}
                           title={item.completed ? (lang === 'zh' ? '已打勾（點擊取消）' : 'Completed') : (lang === 'zh' ? '點擊打勾' : 'Mark completed')}
                           aria-label={item.completed ? '已打勾' : '未打勾'}
                         >
                           {item.completed ? (
-                            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 stroke-[2.4]" />
+                            <CheckCircle2 className="w-4 h-4 text-teal-700 dark:text-teal-400 stroke-[2.4]" />
                           ) : (
                             <Circle className="w-4 h-4 text-slate-400" />
                           )}
@@ -1487,7 +1468,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                             type="button"
                             disabled={index === 0}
                             onClick={() => handleMoveItem(index, 'up')}
-                            className="min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition cursor-pointer"
+                            className="min-w-[40px] min-h-[40px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition cursor-pointer"
                             title={lang === 'zh' ? '上移' : 'Move up'}
                           >
                             <ArrowUp className="w-3.5 h-3.5" />
@@ -1497,7 +1478,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                             type="button"
                             disabled={index === activeDay.items.length - 1}
                             onClick={() => handleMoveItem(index, 'down')}
-                            className="min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition cursor-pointer"
+                            className="min-w-[40px] min-h-[40px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition cursor-pointer"
                             title={lang === 'zh' ? '下移' : 'Move down'}
                           >
                             <ArrowDown className="w-3.5 h-3.5" />
@@ -1506,7 +1487,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                           <button
                             type="button"
                             onClick={() => onOpenEditItem(item, selectedDayNumber)}
-                            className="min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                            className="min-w-[40px] min-h-[40px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                             title={lang === 'zh' ? '編輯' : 'Edit'}
                           >
                             <Edit2 className="w-3.5 h-3.5" />
@@ -1515,7 +1496,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                           <button
                             type="button"
                             onClick={() => handleDeleteItem(item.id)}
-                            className="min-w-[36px] min-h-[36px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                            className="min-w-[40px] min-h-[40px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
                             title={lang === 'zh' ? '刪除' : 'Delete'}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1523,20 +1504,20 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                         </div>
                       </div>
                     ) : item.completed ? (
-                      <div className="shrink-0 self-start p-2 rounded-xl bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400 border border-emerald-300/60 dark:border-emerald-800">
+                      <div className="shrink-0 self-start p-2 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800">
                         <CheckCircle2 className="w-4 h-4 stroke-[2.4]" />
                       </div>
                     ) : null}
                   </div>
 
                   {/* Navigation and Location Bar */}
-                  <div className="mt-3.5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                  <div className="mt-3.5 pt-3 border-t border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
                       <a
                         href={getGoogleMapsNavigationUrl(item)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition active:scale-95"
+                        className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition active:scale-95"
                       >
                         <Navigation className="w-3.5 h-3.5" />
                         <span>{t.navGoogle}</span>
@@ -1549,7 +1530,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                             e.stopPropagation();
                             onOpenMemories(item.id);
                           }}
-                          className="px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 font-semibold text-xs flex items-center gap-1.5 hover:bg-rose-100 dark:hover:bg-rose-900/60 transition active:scale-95 border border-rose-200/80 dark:border-rose-800/60"
+                          className="min-h-[40px] px-3 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 text-teal-700 dark:text-teal-400 font-semibold text-xs flex items-center gap-1.5 hover:bg-teal-50 dark:hover:bg-teal-950/50 transition active:scale-95 border border-[#E5E2DC] dark:border-slate-700 cursor-pointer"
                           title="上傳或查看此景點回憶照片"
                         >
                           <Camera className="w-3.5 h-3.5" />
@@ -1563,13 +1544,14 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     </div>
 
                     <button
+                      type="button"
                       onClick={() => {
                         setSelectedItemId(item.id);
                         setIsMapExpanded(true);
                       }}
-                      className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition"
+                      className="min-h-[40px] px-3 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-800 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
                     >
-                      <MapPin className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                      <MapPin className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                       <span>{t.locateMap}</span>
                     </button>
                   </div>
@@ -1577,10 +1559,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
                 {/* Transit Step Connector & Inline Spot Insertion between cards */}
                 {index < activeDay.items.length - 1 && (
-                  <div className="py-1 px-4 flex flex-col items-center justify-center gap-1.5 group/connector">
+                  <div className="py-1.5 px-4 flex flex-col items-center justify-center gap-1.5 group/connector">
                     {distanceInfo && (
-                      <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 font-medium bg-slate-100/80 dark:bg-slate-800/80 px-3 py-1 rounded-full border border-slate-200/60 dark:border-slate-700/60">
-                        <Footprints className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                      <div className="flex items-center gap-2 text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 font-medium">
+                        <Footprints className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                         <span>{t.distToNext} {distanceInfo.distStr}</span>
                         <span aria-hidden="true">·</span>
                         <span>{t.walkMin.replace('{m}', String(distanceInfo.walkingMin))}</span>
@@ -1592,10 +1574,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                       <button
                         type="button"
                         onClick={() => onOpenAddItem(activeDay.dayNumber, getBetweenTime(item, nextItem))}
-                        className="opacity-75 sm:opacity-0 sm:group-hover/connector:opacity-100 hover:opacity-100 transition-all duration-200 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100/90 hover:bg-teal-50 dark:bg-slate-800/80 dark:hover:bg-teal-950/60 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 border border-slate-200/80 dark:border-slate-700 hover:border-teal-400 dark:hover:border-teal-600 shadow-2xs active:scale-95 cursor-pointer"
+                        className="opacity-75 sm:opacity-0 sm:group-hover/connector:opacity-100 hover:opacity-100 transition-all duration-200 inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-[#FAF9F6] hover:bg-teal-50 dark:bg-slate-800/80 dark:hover:bg-teal-950/60 text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-500 shadow-2xs active:scale-95 cursor-pointer"
                         title={lang === 'zh' ? `在「${item.title}」與「${nextItem.title}」之間插入行程（依時間自動排入）` : 'Insert spot here'}
                       >
-                        <Plus className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                        <Plus className="w-3 h-3 text-teal-700 dark:text-teal-400" />
                         <span>{lang === 'zh' ? '在此處插入景點' : 'Insert spot here'}</span>
                       </button>
                     )}
@@ -1611,9 +1593,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               <button
                 type="button"
                 onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
-                className="w-full py-3 px-4 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-teal-400 dark:hover:border-teal-600 hover:bg-teal-50/40 dark:hover:bg-teal-950/20 text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 font-semibold text-xs flex items-center justify-center gap-2 transition active:scale-[0.99]"
+                className="w-full min-h-[44px] py-3 px-4 rounded-2xl border-2 border-dashed border-[#E5E2DC] dark:border-slate-800 hover:border-teal-500 dark:hover:border-teal-600 hover:bg-teal-50/40 dark:hover:bg-teal-950/20 text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 font-semibold text-xs flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer"
               >
-                <Plus className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                <Plus className="w-4 h-4 text-teal-700 dark:text-teal-400" />
                 <span>{lang === 'zh' ? `新增第 ${activeDay.items.length + 1} 站` : 'Add next spot'}</span>
               </button>
             </div>
@@ -1632,7 +1614,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       onClick={() => setOverlaySpotPhoto(null)}
     >
       <div
-        className="max-w-4xl w-full bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-700/80 flex flex-col max-h-[95vh] relative"
+        className="max-w-4xl w-full bg-[#111827] rounded-3xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-[95vh] relative"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Close Button & Action Bar */}
@@ -1641,7 +1623,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             <button
               type="button"
               onClick={() => setIsEditingOverlayGoogleUrl(!isEditingOverlayGoogleUrl)}
-              className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/90 text-teal-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-white/20 shadow-sm"
+              className="min-h-[40px] px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/90 text-teal-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-white/20 shadow-sm cursor-pointer"
               title="編輯此景點的 Google 相簿連結"
             >
               <Edit2 className="w-3 h-3" />
@@ -1654,7 +1636,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               href={overlaySpotPhoto.item.googlePhotosUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-1.5 rounded-full bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center gap-1.5 border border-white/20 shadow-md backdrop-blur-md active:scale-95"
+              className="min-h-[40px] px-3 py-1.5 rounded-full bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold transition flex items-center gap-1.5 border border-white/20 shadow-md backdrop-blur-md active:scale-95"
               title="開啟 Google 相簿檢視 4K / 原始超高畫質相片"
             >
               <ExternalLink className="w-3.5 h-3.5 text-white" />
@@ -1666,7 +1648,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           <button
             type="button"
             onClick={() => setOverlaySpotPhoto(null)}
-            className="p-2 rounded-full bg-black/60 text-white hover:bg-black/90 transition shadow-sm"
+            className="w-10 h-10 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/90 transition shadow-sm cursor-pointer"
             title="關閉"
           >
             <X className="w-5 h-5" />
@@ -1675,19 +1657,19 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
         {/* Quick Inline Edit Bar for Google Photos URL */}
         {isEditingOverlayGoogleUrl && (
-          <div className="p-3 bg-slate-800/95 border-b border-slate-700 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 z-20 mt-12 sm:mt-14">
+          <div className="p-3 bg-slate-900 border-b border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 z-20 mt-14">
             <input
               type="url"
               value={overlayEditUrl}
               onChange={(e) => setOverlayEditUrl(e.target.value)}
               placeholder="貼上 Google 相簿分享或原始照片連結 (如 https://photos.app.goo.gl/...)"
-              className="flex-1 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-600 text-white text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-500"
+              className="flex-1 min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-500"
             />
             <div className="flex items-center gap-2 justify-end">
               <button
                 type="button"
                 onClick={handleSaveOverlayGoogleUrl}
-                className="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center gap-1"
+                className="min-h-[40px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>儲存連結</span>
@@ -1695,7 +1677,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               <button
                 type="button"
                 onClick={() => setIsEditingOverlayGoogleUrl(false)}
-                className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition"
+                className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition cursor-pointer"
               >
                 取消
               </button>
@@ -1705,7 +1687,6 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
         {/* Main Image Area with High-Resolution Source */}
         <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden min-h-[300px] select-none p-2 sm:p-4">
-          {/* Prev Button if multiple photos */}
           {overlaySpotPhoto.item.memoryPhotos && overlaySpotPhoto.item.memoryPhotos.length > 1 && (
             <button
               type="button"
@@ -1714,14 +1695,13 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 const nextIdx = (overlaySpotPhoto.photoIndex - 1 + photos.length) % photos.length;
                 setOverlaySpotPhoto({ ...overlaySpotPhoto, photoIndex: nextIdx });
               }}
-              className="absolute left-2 sm:left-4 z-10 w-10 h-10 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition active:scale-90 border border-white/10"
+              className="absolute left-2 sm:left-4 z-10 w-11 h-11 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition active:scale-90 border border-white/10 cursor-pointer"
               title="上一張"
             >
               <ChevronLeft className="w-6 h-6" />
             </button>
           )}
 
-          {/* High-Resolution Image Display */}
           {(() => {
             const currentLocal = overlaySpotPhoto.item.memoryPhotos?.[overlaySpotPhoto.photoIndex];
             const highResUrl = overlaySpotPhoto.item.googlePhotosUrl;
@@ -1742,21 +1722,19 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl"
                 />
                 {canUseHighRes ? (
-                  <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-bold text-teal-300 border border-teal-500/30 flex items-center gap-1.5 shadow-sm">
-                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
-                    <span>Google 相簿高畫質原圖</span>
+                  <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-md text-[11px] font-bold text-teal-300 border border-teal-500/30 shadow-sm">
+                    Google 相簿高畫質原圖
                   </div>
                 ) : highResUrl ? (
-                  <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-bold text-amber-300 border border-amber-500/30 flex items-center gap-1.5 shadow-sm">
-                    <ExternalLink className="w-3 h-3 text-amber-400" />
-                    <span>已連結 Google 相簿相簿</span>
+                  <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-md text-[11px] font-bold text-slate-200 border border-white/20 flex items-center gap-1.5 shadow-sm">
+                    <ExternalLink className="w-3 h-3 text-teal-400" />
+                    <span>已連結 Google 相簿</span>
                   </div>
                 ) : null}
               </div>
             );
           })()}
 
-          {/* Next Button if multiple photos */}
           {overlaySpotPhoto.item.memoryPhotos && overlaySpotPhoto.item.memoryPhotos.length > 1 && (
             <button
               type="button"
@@ -1765,7 +1743,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 const nextIdx = (overlaySpotPhoto.photoIndex + 1) % photos.length;
                 setOverlaySpotPhoto({ ...overlaySpotPhoto, photoIndex: nextIdx });
               }}
-              className="absolute right-2 sm:right-4 z-10 w-10 h-10 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition active:scale-90 border border-white/10"
+              className="absolute right-2 sm:right-4 z-10 w-11 h-11 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition active:scale-90 border border-white/10 cursor-pointer"
               title="下一張"
             >
               <ChevronRight className="w-6 h-6" />
@@ -1775,13 +1753,13 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
         {/* Thumbnail Strip if multiple photos */}
         {overlaySpotPhoto.item.memoryPhotos && overlaySpotPhoto.item.memoryPhotos.length > 1 && (
-          <div className="px-4 py-2 bg-slate-950/80 border-t border-slate-800 flex items-center justify-center gap-2 overflow-x-auto">
+          <div className="px-4 py-2 bg-slate-950/90 border-t border-slate-800 flex items-center justify-center gap-2 overflow-x-auto">
             {overlaySpotPhoto.item.memoryPhotos.map((photo, pIdx) => (
               <button
                 key={pIdx}
                 type="button"
                 onClick={() => setOverlaySpotPhoto({ ...overlaySpotPhoto, photoIndex: pIdx })}
-                className={`relative w-12 h-12 rounded-xl overflow-hidden shrink-0 transition border-2 ${
+                className={`relative w-12 h-12 rounded-xl overflow-hidden shrink-0 transition border-2 cursor-pointer ${
                   pIdx === overlaySpotPhoto.photoIndex
                     ? 'border-teal-400 scale-105 shadow-md'
                     : 'border-transparent opacity-60 hover:opacity-100'
@@ -1801,16 +1779,21 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
         )}
 
         {/* Bottom Info Bar */}
-        <div className="p-3.5 sm:p-4 bg-slate-900 text-white flex items-center justify-between gap-3 border-t border-slate-800">
+        <div className="p-3.5 sm:p-4 bg-[#111827] text-white flex items-center justify-between gap-3 border-t border-slate-800">
           <div className="space-y-0.5 min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-base">{overlaySpotPhoto.item.memoryMood || '✨'}</span>
               <h4 className="font-bold text-sm text-white truncate">
                 {overlaySpotPhoto.item.title}
               </h4>
-              <span className="text-[10px] font-mono bg-teal-900/80 text-teal-200 px-2 py-0.5 rounded-full shrink-0">
-                {overlaySpotPhoto.item.startTime}
-              </span>
+              {overlaySpotPhoto.item.startTime && (
+                <>
+                  <span aria-hidden="true" className="text-slate-600">·</span>
+                  <span className="text-xs font-mono tabular-nums text-teal-400 shrink-0">
+                    {overlaySpotPhoto.item.startTime}
+                  </span>
+                </>
+              )}
             </div>
             {(overlaySpotPhoto.item.notes || overlaySpotPhoto.item.memoryNotes) && (
               <p className="text-xs text-slate-300 italic truncate">
@@ -1828,16 +1811,16 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   setOverlaySpotPhoto(null);
                   onOpenMemories(id);
                 }}
-                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold shrink-0 transition flex items-center gap-1"
+                className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold shrink-0 transition flex items-center gap-1.5 cursor-pointer"
               >
-                <Camera className="w-3.5 h-3.5 text-rose-400" />
+                <Camera className="w-3.5 h-3.5 text-teal-400" />
                 <span>相簿專區</span>
               </button>
             )}
             <button
               type="button"
               onClick={() => setOverlaySpotPhoto(null)}
-              className="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-xs font-bold shrink-0 transition shadow-xs"
+              className="min-h-[40px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-600 text-xs font-bold shrink-0 transition shadow-xs cursor-pointer"
             >
               關閉
             </button>

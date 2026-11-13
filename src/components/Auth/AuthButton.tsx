@@ -76,7 +76,7 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
     return (
       <button
         onClick={handleLogin}
-        className="h-9 px-2.5 rounded-xl border border-teal-300 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 text-xs font-bold text-teal-800 dark:text-teal-200 flex items-center justify-center gap-1.5 transition shadow-2xs active:scale-95 shrink-0 cursor-pointer"
+        className="h-10 sm:h-9 px-2.5 sm:px-3 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0 whitespace-nowrap cursor-pointer"
         title={lang === 'zh' ? 'Google 登入同步' : 'Sign in with Google'}
         aria-label="Google 登入同步"
       >
@@ -98,7 +98,7 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
             d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
           />
         </svg>
-        <span className="hidden sm:inline text-[11px] font-bold">{lang === 'zh' ? '登入' : 'Sign In'}</span>
+        <span className="hidden sm:inline text-xs font-semibold">{lang === 'zh' ? '登入' : 'Sign In'}</span>
       </button>
     );
   }
@@ -107,62 +107,62 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
     <div className="relative" ref={authDropdownRef}>
       <button
         onClick={() => setShowDropdown(!showDropdown)}
-        className="flex items-center gap-1.5 h-9 px-2 sm:px-2.5 rounded-xl border border-teal-200 dark:border-teal-900 bg-teal-50/60 dark:bg-teal-950/40 hover:bg-teal-100 text-xs font-semibold text-teal-950 dark:text-teal-200 transition active:scale-95"
+        className="flex items-center gap-1.5 h-10 sm:h-9 px-2 sm:px-2.5 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 transition active:scale-95 cursor-pointer"
         title={user.displayName || activeEmail || '使用者帳號'}
       >
         {user.photoURL ? (
           <img
             src={user.photoURL}
             alt={user.displayName || 'User'}
-            className="w-5 h-5 rounded-full object-cover border border-teal-600/30 shrink-0"
+            className="w-5 h-5 rounded-full object-cover border border-teal-700/30 shrink-0"
           />
         ) : (
           <div className="w-5 h-5 rounded-full bg-teal-700 text-white flex items-center justify-center text-[10px] shrink-0">
             <UserIcon className="w-3 h-3" />
           </div>
         )}
-        <span className="hidden sm:inline-block max-w-[85px] truncate text-[11px] font-bold">
+        <span className="hidden sm:inline-block max-w-[85px] truncate text-xs font-semibold">
           {user.displayName?.split(' ')[0] || (lang === 'zh' ? '已登入' : 'Account')}
         </span>
-        <CloudCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+        <CloudCheck className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
       </button>
 
       {showDropdown && (
-        <div className="absolute right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-200 dark:border-slate-800 p-2.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 space-y-1.5">
-          <div className="px-2 py-1.5 border-b border-slate-100 dark:border-slate-800 space-y-1">
+        <div className="absolute right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-[#111827] rounded-2xl shadow-xl border border-[#E5E2DC] dark:border-slate-800 p-2.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 space-y-1.5">
+          <div className="px-2 py-1.5 border-b border-[#E5E2DC] dark:border-slate-800 space-y-1">
             <div className="flex items-center justify-between gap-2">
-              <p className="font-bold text-slate-800 dark:text-slate-100 truncate">
+              <p className="font-bold text-slate-900 dark:text-slate-100 truncate">
                 {user.displayName || (lang === 'zh' ? '已登入用戶' : 'Signed In')}
               </p>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 shrink-0">
+              <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 shrink-0">
                 {lang === 'zh' ? '雲端同步' : 'Synced'}
               </span>
             </div>
             {activeEmail && (
-              <p className="text-[10px] text-slate-400 truncate font-mono">{activeEmail}</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate font-mono">{activeEmail}</p>
             )}
           </div>
 
           <button
             onClick={handleUploadAllLocalToCloud}
             disabled={isSyncing}
-            className="w-full min-h-[40px] text-left px-2.5 py-1.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-between transition"
+            className="w-full min-h-[44px] text-left px-2.5 py-1.5 rounded-xl hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-between transition cursor-pointer"
           >
             <div className="flex items-center gap-2">
-              <UploadCloud className="w-3.5 h-3.5 text-teal-600" />
+              <UploadCloud className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
               <span>{lang === 'zh' ? '同步全部旅程至雲端' : 'Sync All Trips'}</span>
             </div>
             {syncDone ? (
-              <Check className="w-3.5 h-3.5 text-emerald-600" />
+              <Check className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
             ) : isSyncing ? (
-              <span className="text-[10px] text-teal-600">...</span>
+              <span className="text-[11px] text-teal-700 dark:text-teal-400 font-mono">...</span>
             ) : null}
           </button>
 
-          <div className="pt-1 border-t border-slate-100 dark:border-slate-800">
+          <div className="pt-1 border-t border-[#E5E2DC] dark:border-slate-800">
             <button
               onClick={handleLogout}
-              className="w-full min-h-[40px] text-left px-2.5 py-1.5 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 flex items-center gap-2 transition"
+              className="w-full min-h-[44px] text-left px-2.5 py-1.5 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-700 dark:text-rose-400 flex items-center gap-2 transition cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
               <span>{lang === 'zh' ? '登出帳號' : 'Sign Out'}</span>

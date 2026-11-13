@@ -196,14 +196,14 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
 
   // Interactive In-App View
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-xs overflow-hidden transition-all duration-200">
+    <div className="bg-white dark:bg-[#111827] rounded-2xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xs overflow-hidden transition-all duration-200">
       {/* Header bar */}
       <div
-        className="px-4 py-3 sm:px-5 sm:py-3.5 bg-gradient-to-r from-teal-50/80 via-white to-slate-50 dark:from-slate-900 dark:via-slate-900 dark:to-teal-950/20 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between cursor-pointer select-none group"
+        className="px-4 py-3.5 sm:px-5 sm:py-4 bg-[#FAF9F6] dark:bg-slate-900/60 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between gap-3 cursor-pointer select-none group"
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-teal-600 dark:bg-teal-700 text-white flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition">
+          <div className="w-8 h-8 rounded-xl bg-teal-700 dark:bg-teal-600 text-white flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition">
             <TableProperties className="w-4 h-4" />
           </div>
           <div className="min-w-0">
@@ -211,16 +211,16 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
               <h2 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white tracking-tight">
                 {lang === 'zh' ? '行程總覽大表' : 'Itinerary Master Schedule'}
               </h2>
-              <span className="text-[10px] font-semibold text-teal-800 dark:text-teal-300 bg-teal-100/70 dark:bg-teal-950/70 px-2 py-0.5 rounded-full border border-teal-200/60 dark:border-teal-800/60">
-                {trip.days.length} {lang === 'zh' ? '天' : 'Days'} / {Math.max(1, trip.days.length - 1)} {lang === 'zh' ? '夜' : 'Nights'}
+              <span className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
+                · {trip.days.length} {lang === 'zh' ? '天' : 'Days'} / {Math.max(1, trip.days.length - 1)} {lang === 'zh' ? '夜' : 'Nights'}
               </span>
               {selectedDayNumber && (
-                <span className="hidden sm:inline-block text-[11px] font-mono text-slate-500 dark:text-slate-400">
-                  {lang === 'zh' ? `當前檢視：第 ${selectedDayNumber} 天` : `Viewing: Day ${selectedDayNumber}`}
+                <span className="hidden sm:inline-block text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
+                  · {lang === 'zh' ? `當前檢視：第 ${selectedDayNumber} 天` : `Viewing: Day ${selectedDayNumber}`}
                 </span>
               )}
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
               {lang === 'zh'
                 ? '全程動線與重點景點一覽 · 點選任一日程即可快速切換'
                 : 'At-a-glance trip route & highlights · Tap any day to jump directly'}
@@ -236,16 +236,16 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
               setIsExpanded(true);
               setViewMode(viewMode === 'map' && isExpanded ? 'table' : 'map');
             }}
-            className={`px-2.5 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs ${
+            className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer ${
               isExpanded && viewMode === 'map'
-                ? 'bg-teal-700 text-white'
-                : 'bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 hover:bg-teal-100 dark:hover:bg-teal-900/60'
+                ? 'bg-teal-700 dark:bg-teal-600 text-white'
+                : 'bg-white dark:bg-[#111827] text-teal-800 dark:text-teal-300 border border-[#E5E2DC] dark:border-slate-700 hover:bg-teal-50/70 dark:hover:bg-teal-950/40'
             }`}
             title="開啟全程景點概覽地圖"
           >
             <MapIcon className="w-3.5 h-3.5" />
             <span className="hidden xs:inline">概覽地圖</span>
-            <span className="text-[10px] font-mono opacity-85">({totalMarkedSpotsCount})</span>
+            <span className="text-[11px] font-mono tabular-nums opacity-85">({totalMarkedSpotsCount})</span>
           </button>
 
           <span className="text-xs font-semibold text-teal-700 dark:text-teal-400 group-hover:underline hidden sm:inline">
@@ -253,7 +253,7 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
           </span>
           <button
             type="button"
-            className="p-1.5 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition"
+            className="p-1.5 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition cursor-pointer"
             aria-label="Toggle Table"
           >
             {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -263,41 +263,35 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
 
       {/* Expanded Content */}
       {isExpanded && (
-        <div className="p-2 sm:p-4 animate-in fade-in duration-150 space-y-3">
-          {/* Sub-bar with View Mode Tabs: [📋 路線大表] [🗺️ 全程景點概覽地圖 (X 處)] */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-slate-100 dark:border-slate-800">
-            <div className="inline-flex rounded-xl p-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs">
+        <div className="p-3 sm:p-4 animate-in fade-in duration-150 space-y-3">
+          {/* Sub-bar with View Mode Tabs */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#E5E2DC] dark:border-slate-800">
+            <div className="inline-flex rounded-xl p-1 bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 text-xs">
               <button
                 type="button"
                 onClick={() => setViewMode('table')}
-                className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                className={`min-h-[36px] px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
                   viewMode === 'table'
-                    ? 'bg-white dark:bg-slate-700 text-teal-800 dark:text-teal-200 shadow-2xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-800 text-teal-700 dark:text-teal-300 shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <TableProperties className="w-3.5 h-3.5" />
-                <span>{lang === 'zh' ? '路線大表 (表格)' : 'Schedule Table'}</span>
+                <span>{lang === 'zh' ? '路線大表' : 'Schedule Table'}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode('map')}
-                className={`px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                className={`min-h-[36px] px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
                   viewMode === 'map'
-                    ? 'bg-teal-600 text-white shadow-2xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <MapPin className="w-3.5 h-3.5" />
                 <span>{lang === 'zh' ? '全程景點概覽地圖' : 'Attractions Map'}</span>
-                <span
-                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                    viewMode === 'map'
-                      ? 'bg-teal-700 text-white'
-                      : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-                  }`}
-                >
-                  {totalMarkedSpotsCount}
+                <span className="text-[11px] font-mono tabular-nums opacity-80">
+                  ({totalMarkedSpotsCount})
                 </span>
               </button>
             </div>
@@ -325,10 +319,10 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
           {viewMode === 'table' && (
             <>
               {/* Desktop & Tablet Table */}
-              <div className="hidden md:block overflow-x-auto rounded-xl border border-slate-200/80 dark:border-slate-800">
+              <div className="hidden md:block overflow-x-auto rounded-xl border border-[#E5E2DC] dark:border-slate-800">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
-                    <tr className="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-800">
+                    <tr className="bg-[#FAF9F6] dark:bg-slate-900/80 text-slate-600 dark:text-slate-300 font-bold border-b border-[#E5E2DC] dark:border-slate-800">
                       <th className="py-2.5 px-3 w-28 font-mono">天數 / 日期</th>
                       <th className="py-2.5 px-3 w-48">主題 / 城市路線</th>
                       <th className="py-2.5 px-3">景點串聯 (順序亮點)</th>
@@ -337,7 +331,7 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                       <th className="py-2.5 px-3 w-28 text-right">動作</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                  <tbody className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800/60">
                     {trip.days.map((day) => {
                       const isSelected = day.dayNumber === selectedDayNumber;
                       const weekday = getDayOfWeek(day.date, lang);
@@ -351,18 +345,18 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                           onClick={() => handleRowClick(day.dayNumber)}
                           className={`cursor-pointer transition group ${
                             isSelected
-                              ? 'bg-teal-50/90 dark:bg-teal-950/40 text-slate-900 dark:text-white font-medium'
-                              : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300'
+                              ? 'bg-teal-50/80 dark:bg-teal-950/30 text-slate-900 dark:text-white font-medium'
+                              : 'hover:bg-[#FAF9F6] dark:hover:bg-slate-900/50 text-slate-700 dark:text-slate-300'
                           }`}
                         >
                           {/* Day & Date */}
-                          <td className="py-3 px-3 align-top font-mono">
+                          <td className="py-3 px-3 align-top font-mono tabular-nums">
                             <div className="flex items-center gap-1.5">
                               <span
                                 className={`w-6 h-6 rounded-md flex items-center justify-center font-bold text-xs ${
                                   isSelected
                                     ? 'bg-teal-700 text-white'
-                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 group-hover:bg-teal-100 dark:group-hover:bg-teal-900/60 group-hover:text-teal-800 dark:group-hover:text-teal-200 transition'
+                                    : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-[#E5E2DC] dark:border-slate-700 group-hover:border-teal-500/50 transition'
                                 }`}
                               >
                                 D{day.dayNumber}
@@ -414,14 +408,14 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                                         }}
                                         className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition cursor-pointer flex items-center gap-1 ${
                                           isSelected
-                                            ? 'bg-teal-100 dark:bg-teal-900/60 text-teal-900 dark:text-teal-200'
-                                            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 group-hover:bg-white dark:group-hover:bg-slate-700 hover:text-teal-700 hover:border-teal-300'
+                                            ? 'bg-teal-100/80 dark:bg-teal-900/60 text-teal-900 dark:text-teal-200'
+                                            : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-[#E5E2DC]/70 dark:border-slate-700/60 hover:text-teal-700 dark:hover:text-teal-300'
                                         }`}
                                         title={hasCoords ? '點擊在地圖定位此景點' : title}
                                       >
                                         <span>{title}</span>
                                         {hasCoords && (
-                                          <MapPin className="w-2.5 h-2.5 text-teal-600 opacity-70" />
+                                          <MapPin className="w-2.5 h-2.5 text-teal-700 dark:text-teal-400 opacity-75" />
                                         )}
                                       </button>
                                       {sIdx < spotTitles.length - 1 && (
@@ -442,7 +436,7 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                           <td className="py-3 px-3 align-top text-[11px]">
                             {transports.length > 0 ? (
                               <div className="flex items-start gap-1 text-slate-600 dark:text-slate-300">
-                                <Train className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0 mt-0.5" />
+                                <Train className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
                                 <span className="line-clamp-2">{transports.join('、')}</span>
                               </div>
                             ) : (
@@ -454,7 +448,7 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                           <td className="py-3 px-3 align-top text-[11px]">
                             {lodging ? (
                               <div className="flex items-start gap-1 text-slate-600 dark:text-slate-300">
-                                <Hotel className="w-3.5 h-3.5 text-violet-600 dark:text-violet-400 shrink-0 mt-0.5" />
+                                <Hotel className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
                                 <span className="line-clamp-2">{lodging}</span>
                               </div>
                             ) : (
@@ -471,17 +465,17 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                                   e.stopPropagation();
                                   setViewMode('map');
                                 }}
-                                className="p-1 rounded-lg text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-teal-700 dark:hover:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
                                 title="於概覽地圖檢視"
                               >
                                 <MapPin className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 type="button"
-                                className={`px-2 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition ${
+                                className={`px-2.5 py-1 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition cursor-pointer ${
                                   isSelected
-                                    ? 'bg-teal-600 text-white'
-                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 group-hover:bg-teal-600 group-hover:text-white'
+                                    ? 'bg-teal-700 dark:bg-teal-600 text-white'
+                                    : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700 group-hover:bg-teal-700 group-hover:text-white group-hover:border-teal-700'
                                 }`}
                               >
                                 <span>
@@ -505,7 +499,7 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
               </div>
 
               {/* Mobile Card-style Overview */}
-              <div className="md:hidden space-y-2">
+              <div className="md:hidden space-y-2.5">
                 {trip.days.map((day) => {
                   const isSelected = day.dayNumber === selectedDayNumber;
                   const weekday = getDayOfWeek(day.date, lang);
@@ -517,24 +511,24 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                     <div
                       key={day.id}
                       onClick={() => handleRowClick(day.dayNumber)}
-                      className={`p-3 rounded-xl border transition cursor-pointer ${
+                      className={`p-3.5 rounded-xl border transition cursor-pointer ${
                         isSelected
-                          ? 'border-teal-500 bg-teal-50/70 dark:bg-teal-950/40 shadow-xs'
-                          : 'border-slate-200/80 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          ? 'border-teal-600 dark:border-teal-500 bg-teal-50/60 dark:bg-teal-950/30 shadow-2xs'
+                          : 'border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/50 hover:bg-slate-100/70 dark:hover:bg-slate-800'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2 mb-1.5">
                         <div className="flex items-center gap-2">
                           <span
-                            className={`px-2 py-0.5 rounded-md font-mono font-bold text-xs ${
+                            className={`px-2 py-0.5 rounded-md font-mono tabular-nums font-bold text-xs ${
                               isSelected
                                 ? 'bg-teal-700 text-white'
-                                : 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
+                                : 'bg-white dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-200'
                             }`}
                           >
                             Day {day.dayNumber}
                           </span>
-                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 font-mono">
+                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 font-mono tabular-nums">
                             {formatMonthDaySlash(day.date)} ({weekday})
                           </span>
                         </div>
@@ -546,12 +540,12 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                               e.stopPropagation();
                               setViewMode('map');
                             }}
-                            className="p-1 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950 rounded-lg flex items-center gap-0.5 text-[10px] font-bold"
+                            className="p-1.5 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950 rounded-lg flex items-center gap-0.5 text-[11px] font-bold"
                           >
                             <MapPin className="w-3 h-3" />
                             <span>地圖</span>
                           </button>
-                          <div className="flex items-center gap-1 text-[11px] text-teal-700 dark:text-teal-400 font-semibold">
+                          <div className="flex items-center gap-1 text-[11px] text-teal-700 dark:text-teal-400 font-semibold tabular-nums">
                             <span>{day.items.length} 景點</span>
                             <ArrowRight className="w-3 h-3" />
                           </div>
@@ -567,7 +561,7 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                         <div className="flex flex-wrap items-center gap-1 my-1.5">
                           {spotTitles.map((title, sIdx) => (
                             <React.Fragment key={sIdx}>
-                              <span className="px-1.5 py-0.5 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 rounded text-[10px] border border-slate-200 dark:border-slate-700 font-medium max-w-[130px] truncate">
+                              <span className="px-1.5 py-0.5 bg-white dark:bg-[#111827] text-slate-700 dark:text-slate-300 rounded text-[10px] border border-[#E5E2DC] dark:border-slate-700 font-medium max-w-[130px] truncate">
                                 {title}
                               </span>
                               {sIdx < spotTitles.length - 1 && (
@@ -578,18 +572,18 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                         </div>
                       )}
 
-                      {/* Lodging & Transport Badges on Mobile */}
+                      {/* Lodging & Transport Metadata on Mobile */}
                       {(lodging || transports.length > 0) && (
-                        <div className="flex flex-wrap items-center gap-2 mt-2 pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60 text-[10px] text-slate-500 dark:text-slate-400">
+                        <div className="flex flex-wrap items-center gap-2 mt-2 pt-1.5 border-t border-[#E5E2DC]/70 dark:border-slate-800 text-[10px] text-slate-500 dark:text-slate-400">
                           {transports.length > 0 && (
                             <span className="flex items-center gap-1">
-                              <Train className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                              <Train className="w-3 h-3 text-teal-700 dark:text-teal-400" />
                               <span className="truncate max-w-[140px]">{transports[0]}</span>
                             </span>
                           )}
                           {lodging && (
                             <span className="flex items-center gap-1">
-                              <Hotel className="w-3 h-3 text-violet-600 dark:text-violet-400" />
+                              <Hotel className="w-3 h-3 text-teal-700 dark:text-teal-400" />
                               <span className="truncate max-w-[140px]">{lodging}</span>
                             </span>
                           )}

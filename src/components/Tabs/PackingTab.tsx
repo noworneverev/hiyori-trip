@@ -274,85 +274,83 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
   };
 
   return (
-    <div className="relative pb-24 max-w-3xl mx-auto space-y-4">
-      {/* Top Header Card: Title, Progress & Quiet Luggage Tool Button */}
-      <div className="bg-white dark:bg-[#1C1C1E] rounded-3xl p-4 sm:p-5 border border-slate-200/90 dark:border-zinc-800 shadow-2xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center">
-                <CheckSquare className="w-4 h-4" />
-              </div>
-              <h3 className="font-bold text-slate-900 dark:text-white text-base sm:text-lg">
-                {lang === 'zh' ? '待辦清單' : 'To-Do Checklist'}
-              </h3>
+    <div className="relative pb-24 grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+      {/* Left Rail (Desktop Workbench Summary, Progress & Quick Actions) */}
+      <div className="lg:col-span-4 lg:sticky lg:top-24 bg-white dark:bg-[#111827] rounded-3xl p-4 sm:p-5 border border-[#E5E2DC] dark:border-slate-800 shadow-2xs space-y-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center shrink-0">
+              <CheckSquare className="w-4 h-4" />
             </div>
-            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-zinc-400 mt-1.5">
-              <span>
-                {completedTodos.length} / {todos.length} {lang === 'zh' ? '已完成' : 'Completed'} ({progressPercent}%)
-              </span>
-            </div>
+            <h3 className="font-bold text-slate-900 dark:text-white text-base sm:text-lg">
+              {lang === 'zh' ? '待辦清單' : 'To-Do Checklist'}
+            </h3>
           </div>
-
-          {/* Quick Actions (Quiet Luggage Button & Recommended Templates) */}
-          <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
-            {canEdit && (
-              <button
-                type="button"
-                onClick={handleLoadRecommendedTodos}
-                className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800/60 hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-2xs active:scale-95"
-                title="載入常用行前待辦範本"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                <span>載入推薦</span>
-              </button>
-            )}
-
-            {/* Quiet Luggage Button: opens packing modal without cluttering the main screen */}
-            <button
-              type="button"
-              onClick={() => setIsPackingModalOpen(true)}
-              className="px-3 py-1.5 rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-950/50 hover:bg-teal-100/60 dark:hover:bg-teal-900/40 text-teal-800 dark:text-teal-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-2xs active:scale-95"
-              title="開啟出發前行李打包清單"
-            >
-              <Luggage className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-              <span>行李裝備</span>
-              <span className="text-[10px] font-mono opacity-80">
-                ({pendingPacking.length})
-              </span>
-            </button>
+          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-2 font-mono tabular-nums">
+            <span>
+              {completedTodos.length} / {todos.length} {lang === 'zh' ? '已完成' : 'Completed'} ({progressPercent}%)
+            </span>
           </div>
         </div>
 
         {/* Progress Bar */}
         {todos.length > 0 && (
-          <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden mt-3.5">
+          <div className="w-full bg-[#FAF9F6] dark:bg-slate-800 h-1.5 rounded-full overflow-hidden border border-[#E5E2DC]/60 dark:border-slate-700/50">
             <div
-              className="bg-teal-600 h-full rounded-full transition-all duration-300"
+              className="bg-teal-700 dark:bg-teal-500 h-full rounded-full transition-all duration-300"
               style={{ width: `${progressPercent}%` }}
             />
           </div>
         )}
 
+        {/* Quick Actions (Quiet Luggage Button & Recommended Templates) */}
+        <div className="flex flex-wrap lg:flex-col items-stretch gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() => setIsPackingModalOpen(true)}
+            className="min-h-[44px] px-3.5 py-2 rounded-xl border border-teal-200 dark:border-teal-800/80 bg-teal-50/70 dark:bg-teal-950/50 hover:bg-teal-100/60 dark:hover:bg-teal-900/40 text-teal-800 dark:text-teal-300 text-xs font-semibold flex items-center justify-between gap-2 transition cursor-pointer shadow-2xs active:scale-98"
+            title="開啟出發前行李打包清單"
+          >
+            <span className="flex items-center gap-2">
+              <Luggage className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+              <span>行李裝備打包</span>
+            </span>
+            <span className="text-[11px] font-mono tabular-nums text-teal-700 dark:text-teal-300">
+              {pendingPacking.length} 待打包
+            </span>
+          </button>
+
+          {canEdit && (
+            <button
+              type="button"
+              onClick={handleLoadRecommendedTodos}
+              className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-900/70 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-2 transition cursor-pointer shadow-2xs active:scale-98"
+              title="載入常用行前待辦範本"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+              <span>載入推薦待辦範本</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Main Checklist Card Container */}
-      <div className="rounded-3xl bg-white dark:bg-[#1C1C1E] border border-slate-200/90 dark:border-zinc-800 shadow-sm overflow-hidden">
-        {/* Apple Reminders-style Inline Quick Add Input */}
+      {/* Right Main Checklist Card Container */}
+      <div className="lg:col-span-8 rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs overflow-hidden">
+        {/* Inline Quick Add Input */}
         {canEdit && (
           <form
             onSubmit={handleInlineAdd}
-            className="p-3 sm:p-3.5 border-b border-slate-100 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/40 flex items-center gap-2.5 transition"
+            className="p-3 sm:p-4 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/50 flex items-center gap-2.5 transition"
           >
-            <div className="w-5 h-5 rounded-full border border-dashed border-slate-300 dark:border-zinc-600 flex items-center justify-center shrink-0">
-              <Plus className="w-3 h-3 text-slate-400 dark:text-zinc-500" />
+            <div className="w-5 h-5 rounded-full border border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center shrink-0">
+              <Plus className="w-3 h-3 text-slate-400 dark:text-slate-500" />
             </div>
             <input
               type="text"
               value={inlineTitle}
               onChange={(e) => setInlineTitle(e.target.value)}
               placeholder="新增待辦事項..."
-              className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-hidden"
+              className="flex-1 min-h-[36px] bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden"
             />
             <div className="flex items-center gap-1.5 shrink-0">
               <button
@@ -363,7 +361,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                   }
                   setIsAddSheetOpen(true);
                 }}
-                className="px-2.5 py-1.5 rounded-lg text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition cursor-pointer text-xs font-medium"
+                className="min-h-[36px] px-2.5 py-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer text-xs font-medium"
                 title="設定日期與詳細項目"
               >
                 詳細
@@ -371,7 +369,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
               {inlineTitle.trim() && (
                 <button
                   type="submit"
-                  className="px-3 py-1 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold cursor-pointer transition shadow-xs"
+                  className="min-h-[36px] px-3.5 py-1 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-xs font-semibold cursor-pointer transition shadow-2xs"
                 >
                   新增
                 </button>
@@ -383,44 +381,44 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
         {/* Active Todos List */}
         {displayedTodos.length === 0 ? (
           <div className="py-16 text-center px-4">
-            <div className="w-12 h-12 rounded-full bg-teal-50 dark:bg-zinc-800 text-teal-600 dark:text-teal-400 flex items-center justify-center mx-auto mb-3">
+            <div className="w-12 h-12 rounded-2xl bg-teal-50 dark:bg-slate-800 text-teal-700 dark:text-teal-400 flex items-center justify-center mx-auto mb-3">
               <Check className="w-6 h-6 stroke-[2.5]" />
             </div>
-            <p className="text-sm font-medium text-slate-700 dark:text-zinc-300">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
               尚無待辦事項
             </p>
-            <p className="text-xs text-slate-400 dark:text-zinc-500 mt-1">
-              可從上方新增，或「載入推薦」常用清單
+            <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+              可從上方新增，或載入推薦待辦範本
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-slate-100 dark:divide-zinc-800/80">
+          <div className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800/80">
             {displayedTodos.map((todo) => {
               return (
                 <div
                   key={todo.id}
-                  className="flex items-center justify-between p-3.5 sm:p-4 hover:bg-slate-50/70 dark:hover:bg-white/5 transition group"
+                  className="flex items-center justify-between p-3.5 sm:p-4 hover:bg-[#FAF9F6] dark:hover:bg-slate-900/50 transition group"
                 >
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    {/* Apple Round Checkbox with 36px touch wrapper */}
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    {/* Touch Checkbox with >=44px mobile hitbox */}
                     <button
                       type="button"
                       onClick={() => handleToggleTodo(todo.id)}
-                      className="w-9 h-9 -ml-1.5 flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 group/chk"
+                      className="w-11 h-11 sm:w-9 sm:h-9 -ml-2 flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 group/chk"
                       title="標記完成"
                       aria-label="標記完成"
                     >
-                      <span className="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-zinc-600 group-hover/chk:border-teal-500 dark:group-hover/chk:border-teal-400 flex items-center justify-center transition">
-                        {todo.completed && <Check className="w-3 h-3 text-teal-600" />}
+                      <span className="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-slate-600 group-hover/chk:border-teal-600 dark:group-hover/chk:border-teal-400 flex items-center justify-center transition">
+                        {todo.completed && <Check className="w-3 h-3 text-teal-700 dark:text-teal-400" />}
                       </span>
                     </button>
 
                     <div className="min-w-0 flex-1">
-                      <span className="text-sm text-slate-900 dark:text-zinc-100 font-medium block leading-snug break-words">
+                      <span className="text-sm text-slate-900 dark:text-slate-100 font-medium block leading-snug break-words">
                         {todo.title}
                       </span>
                       {todo.dueDate && (
-                        <div className="flex items-center gap-1.5 text-slate-500 dark:text-zinc-400 font-mono text-[11px] mt-1">
+                        <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 font-mono tabular-nums text-[11px] mt-1">
                           <Calendar className="w-3 h-3 text-slate-400" />
                           <span>{todo.dueDate}</span>
                         </div>
@@ -432,7 +430,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                     <button
                       type="button"
                       onClick={() => handleDeleteTodo(todo.id)}
-                      className="w-9 h-9 flex items-center justify-center rounded-xl text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer opacity-80 sm:opacity-0 group-hover:opacity-100 ml-1 shrink-0"
+                      className="w-11 h-11 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer opacity-80 sm:opacity-0 group-hover:opacity-100 ml-1 shrink-0"
                       title="刪除"
                       aria-label="刪除"
                     >
@@ -445,15 +443,15 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
           </div>
         )}
 
-        {/* Apple-style Collapsible Completed Section */}
+        {/* Collapsible Completed Section */}
         {completedTodos.length > 0 && (
-          <div className="border-t border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/40">
+          <div className="border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/40">
             <button
               type="button"
               onClick={() => setShowCompleted(!showCompleted)}
-              className="w-full px-4 py-3 flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 transition cursor-pointer select-none"
+              className="w-full min-h-[44px] px-4 py-3 flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition cursor-pointer select-none"
             >
-              <span>已完成項目 ({completedTodos.length})</span>
+              <span className="tabular-nums">已完成項目 ({completedTodos.length})</span>
               <div className="flex items-center gap-1 text-[11px] text-slate-400">
                 <span>{showCompleted ? '收起' : '展開'}</span>
                 {showCompleted ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -461,22 +459,22 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
             </button>
 
             {showCompleted && (
-              <div className="divide-y divide-slate-100 dark:divide-zinc-800/60 px-2 pb-2">
+              <div className="divide-y divide-[#E5E2DC]/60 dark:divide-slate-800/60 px-2 pb-2">
                 {completedTodos.map((todo) => (
                   <div
                     key={todo.id}
-                    className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100/50 dark:hover:bg-zinc-800/40 transition group opacity-75"
+                    className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100/60 dark:hover:bg-slate-800/40 transition group opacity-75"
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <button
                         type="button"
                         onClick={() => handleToggleTodo(todo.id)}
-                        className="w-5 h-5 rounded-full bg-teal-600 dark:bg-teal-500 text-white flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
+                        className="w-5 h-5 rounded-full bg-teal-700 dark:bg-teal-500 text-white flex items-center justify-center shrink-0 cursor-pointer shadow-2xs"
                         title="恢復待辦"
                       >
                         <Check className="w-3 h-3 stroke-[2.5]" />
                       </button>
-                      <span className="text-sm line-through text-slate-400 dark:text-zinc-500 truncate flex-1">
+                      <span className="text-sm line-through text-slate-400 dark:text-slate-500 truncate flex-1">
                         {todo.title}
                       </span>
                     </div>
@@ -484,7 +482,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                       <button
                         type="button"
                         onClick={() => handleDeleteTodo(todo.id)}
-                        className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
+                        className="p-1.5 text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
                         title="刪除"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -498,27 +496,27 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
         )}
       </div>
 
-      {/* On-Demand Luggage Packing Modal (Apple Sheet Style, clean, no emojis) */}
+      {/* On-Demand Luggage Packing Modal */}
       {isPackingModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150"
           onClick={() => setIsPackingModalOpen(false)}
         >
           <div
-            className="w-full max-w-lg bg-white dark:bg-[#1C1C1E] rounded-3xl border border-slate-200 dark:border-zinc-800 shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200"
+            className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-3xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-zinc-800 flex items-center justify-between shrink-0">
+            <div className="p-4 sm:p-5 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center">
                   <Luggage className="w-4 h-4" />
                 </div>
                 <div>
                   <h4 className="font-bold text-base text-slate-900 dark:text-white">
                     行李裝備打包清單
                   </h4>
-                  <p className="text-xs text-slate-500 dark:text-zinc-400">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
                     {completedPacking.length} / {packingList.length} 已打包
                   </p>
                 </div>
@@ -528,17 +526,17 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                   <button
                     type="button"
                     onClick={handleLoadRecommendedPacking}
-                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 hover:bg-slate-100 text-xs text-slate-600 dark:text-zinc-300 font-semibold flex items-center gap-1 transition cursor-pointer"
+                    className="min-h-[36px] px-2.5 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs text-slate-700 dark:text-slate-200 font-semibold flex items-center gap-1 transition cursor-pointer"
                     title="載入行李打包範本"
                   >
-                    <Sparkles className="w-3 h-3 text-teal-600 dark:text-teal-400" />
+                    <Sparkles className="w-3 h-3 text-teal-700 dark:text-teal-400" />
                     <span>載入範本</span>
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={() => setIsPackingModalOpen(false)}
-                  className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+                  className="w-10 h-10 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -549,7 +547,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
             {canEdit && (
               <form
                 onSubmit={handleInlineAddPacking}
-                className="p-3 border-b border-slate-100 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/40 flex items-center gap-2 shrink-0"
+                className="p-3 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/50 flex items-center gap-2 shrink-0"
               >
                 <Plus className="w-4 h-4 text-slate-400 shrink-0" />
                 <input
@@ -557,12 +555,12 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                   value={inlinePackingTitle}
                   onChange={(e) => setInlinePackingTitle(e.target.value)}
                   placeholder="新增隨身或託運行李物品..."
-                  className="flex-1 bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-hidden"
+                  className="flex-1 min-h-[36px] bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden"
                 />
                 {inlinePackingTitle.trim() && (
                   <button
                     type="submit"
-                    className="px-3 py-1 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold cursor-pointer transition shadow-xs"
+                    className="min-h-[36px] px-3 py-1 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-xs font-semibold cursor-pointer transition shadow-2xs"
                   >
                     新增
                   </button>
@@ -570,15 +568,15 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
               </form>
             )}
 
-            {/* Category Pills in Modal (Clean text and icons, NO EMOJIS) */}
-            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none px-4 py-2.5 border-b border-slate-100 dark:border-zinc-800 shrink-0">
+            {/* Category Filter Buttons in Modal */}
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none px-4 py-2.5 border-b border-[#E5E2DC] dark:border-slate-800 shrink-0">
               <button
                 type="button"
                 onClick={() => setPackingCategoryFilter('all')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition shrink-0 cursor-pointer ${
+                className={`min-h-[32px] px-2.5 py-1 rounded-lg text-xs font-medium transition shrink-0 cursor-pointer tabular-nums ${
                   packingCategoryFilter === 'all'
-                    ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold'
-                    : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400'
+                    ? 'bg-teal-700 dark:bg-teal-600 text-white font-bold'
+                    : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700'
                 }`}
               >
                 全部 ({pendingPacking.length})
@@ -595,26 +593,26 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                     key={cat}
                     type="button"
                     onClick={() => setPackingCategoryFilter(cat)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition shrink-0 flex items-center gap-1 cursor-pointer ${
+                    className={`min-h-[32px] px-2.5 py-1 rounded-lg text-xs font-medium transition shrink-0 flex items-center gap-1 cursor-pointer ${
                       isSelected
-                        ? 'bg-teal-600 text-white font-bold'
-                        : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400'
+                        ? 'bg-teal-700 dark:bg-teal-600 text-white font-bold'
+                        : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700'
                     }`}
                   >
                     <IconComp className="w-3 h-3" />
                     <span>{meta.label}</span>
-                    {count > 0 && <span className="opacity-75 font-mono text-[10px]">({count})</span>}
+                    {count > 0 && <span className="opacity-75 font-mono tabular-nums text-[10px]">({count})</span>}
                   </button>
                 );
               })}
             </div>
 
             {/* Scrollable Packing Items List */}
-            <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-zinc-800/80 p-2">
+            <div className="flex-1 overflow-y-auto divide-y divide-[#E5E2DC]/70 dark:divide-slate-800/80 p-2">
               {displayedPacking.length === 0 ? (
                 <div className="py-12 text-center px-4">
-                  <Check className="w-8 h-8 text-teal-500 mx-auto mb-2" />
-                  <p className="text-xs text-slate-500 dark:text-zinc-400 font-medium">
+                  <Check className="w-8 h-8 text-teal-600 dark:text-teal-400 mx-auto mb-2" />
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
                     {packingCategoryFilter === 'all' ? '行李物品已全部打包完畢！' : '此分類下無待打包物品'}
                   </p>
                 </div>
@@ -626,23 +624,24 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                   return (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between p-2.5 hover:bg-slate-50/70 dark:hover:bg-white/5 transition rounded-xl"
+                      className="flex items-center justify-between p-2.5 hover:bg-[#FAF9F6] dark:hover:bg-slate-900/50 transition rounded-xl"
                     >
-                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
                         <button
                           type="button"
                           onClick={() => handleTogglePacking(item.id)}
-                          className="w-9 h-9 -ml-1 flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 group/pchk"
+                          className="w-10 h-10 sm:w-9 sm:h-9 -ml-1 flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 group/pchk"
                           aria-label="標記打包"
                         >
-                          <span className="w-4 h-4 rounded-full border-2 border-slate-300 dark:border-zinc-600 group-hover/pchk:border-teal-500 flex items-center justify-center transition">
-                            {item.packed && <Check className="w-2.5 h-2.5 text-teal-600" />}
+                          <span className="w-4 h-4 rounded-full border-2 border-slate-300 dark:border-slate-600 group-hover/pchk:border-teal-600 flex items-center justify-center transition">
+                            {item.packed && <Check className="w-2.5 h-2.5 text-teal-700 dark:text-teal-400" />}
                           </span>
                         </button>
-                        <span className="text-xs sm:text-sm text-slate-900 dark:text-zinc-100 font-medium truncate">
+                        <span className="text-xs sm:text-sm text-slate-900 dark:text-slate-100 font-medium truncate">
                           {item.name}
                         </span>
-                        <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 dark:text-zinc-500 shrink-0 ml-1">
+                        <span className="inline-flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500 shrink-0">
+                          <span>·</span>
                           <IconComp className="w-3 h-3" />
                           <span>{meta?.label}</span>
                         </span>
@@ -652,7 +651,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                         <button
                           type="button"
                           onClick={() => handleDeletePacking(item.id)}
-                          className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer ml-1 shrink-0"
+                          className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 transition cursor-pointer ml-1 shrink-0"
                           aria-label="刪除物品"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -665,24 +664,24 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
 
               {/* Completed Packing in Modal */}
               {completedPacking.length > 0 && (
-                <div className="pt-2 mt-2 border-t border-slate-100 dark:border-zinc-800">
-                  <div className="px-2 py-1 text-[11px] font-semibold text-slate-400 dark:text-zinc-500">
+                <div className="pt-2 mt-2 border-t border-[#E5E2DC] dark:border-slate-800">
+                  <div className="px-2 py-1 text-[11px] font-semibold text-slate-400 dark:text-slate-500 tabular-nums">
                     已打包項目 ({completedPacking.length})
                   </div>
                   {completedPacking.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between p-2 hover:bg-slate-50/50 dark:hover:bg-zinc-800/30 transition rounded-xl opacity-60"
+                      className="flex items-center justify-between p-2 hover:bg-[#FAF9F6] dark:hover:bg-slate-800/30 transition rounded-xl opacity-60"
                     >
                       <div className="flex items-center gap-2.5 min-w-0 flex-1">
                         <button
                           type="button"
                           onClick={() => handleTogglePacking(item.id)}
-                          className="w-4 h-4 rounded-full bg-teal-600 text-white flex items-center justify-center shrink-0 cursor-pointer"
+                          className="w-4 h-4 rounded-full bg-teal-700 dark:bg-teal-500 text-white flex items-center justify-center shrink-0 cursor-pointer"
                         >
                           <Check className="w-2.5 h-2.5" />
                         </button>
-                        <span className="text-xs line-through text-slate-400 dark:text-zinc-500 truncate">
+                        <span className="text-xs line-through text-slate-400 dark:text-slate-500 truncate">
                           {item.name}
                         </span>
                       </div>
@@ -690,7 +689,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                         <button
                           type="button"
                           onClick={() => handleDeletePacking(item.id)}
-                          className="p-1 text-slate-300 hover:text-rose-500 dark:text-zinc-600 dark:hover:text-rose-400 transition cursor-pointer ml-1"
+                          className="p-1 text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 transition cursor-pointer ml-1"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
@@ -707,21 +706,21 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
       {/* Detailed Todo Modal (Detailed Sheet) */}
       {isAddSheetOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-150"
           onClick={() => setIsAddSheetOpen(false)}
         >
           <div
-            className="w-full sm:max-w-md bg-white dark:bg-[#1C1C1E] rounded-t-3xl sm:rounded-3xl border border-slate-200 dark:border-zinc-800 shadow-2xl overflow-hidden p-5 animate-in slide-in-from-bottom duration-200"
+            className="w-full sm:max-w-md bg-white dark:bg-[#111827] rounded-t-3xl sm:rounded-3xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl overflow-hidden p-5 animate-in slide-in-from-bottom duration-200"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-zinc-800">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E5E2DC] dark:border-slate-800">
               <h4 className="font-bold text-base text-slate-900 dark:text-white">
                 新增待辦事項
               </h4>
               <button
                 type="button"
                 onClick={() => setIsAddSheetOpen(false)}
-                className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+                className="w-10 h-10 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -735,22 +734,20 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                   placeholder="輸入待辦名稱..."
                   value={inputTitle}
                   onChange={(e) => setInputTitle(e.target.value)}
-                  className="w-full px-3.5 py-3 rounded-2xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-sm focus:outline-hidden focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+                  className="w-full px-3.5 py-3 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white text-sm focus:outline-hidden focus:ring-2 focus:ring-teal-600 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                 />
               </div>
 
-
-
               {/* Due Date */}
               <div>
-                <label className="block text-xs font-semibold text-slate-500 dark:text-zinc-400 mb-2">
+                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
                   預計完成日期 (選填)
                 </label>
                 <input
                   type="date"
                   value={inputDueDate}
                   onChange={(e) => setInputDueDate(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-xs focus:outline-hidden focus:ring-2 focus:ring-teal-500"
+                  className="w-full px-3.5 py-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white text-xs font-mono tabular-nums focus:outline-hidden focus:ring-2 focus:ring-teal-600"
                 />
               </div>
 
@@ -759,14 +756,14 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                 <button
                   type="button"
                   onClick={() => setIsAddSheetOpen(false)}
-                  className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-zinc-800 transition cursor-pointer"
+                  className="min-h-[44px] px-4 py-2.5 rounded-2xl border border-[#E5E2DC] dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
                   disabled={!inputTitle.trim()}
-                  className="px-5 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition disabled:opacity-50 cursor-pointer shadow-xs"
+                  className="min-h-[44px] px-5 py-2.5 rounded-2xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-xs font-bold transition disabled:opacity-50 cursor-pointer shadow-2xs"
                 >
                   確認新增
                 </button>

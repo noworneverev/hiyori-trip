@@ -19,14 +19,14 @@ export function useDarkMode() {
   useEffect(() => {
     const root = document.documentElement;
     const body = document.body;
-    const themeColor = isDark ? '#020617' : '#ffffff';
+    const themeColor = isDark ? '#090D16' : '#FAF9F6';
 
     if (isDark) {
       root.classList.add('dark');
-      root.style.backgroundColor = '#020617';
+      root.style.backgroundColor = '#090D16';
       root.style.colorScheme = 'dark';
       if (body) {
-        body.style.backgroundColor = '#020617';
+        body.style.backgroundColor = '#090D16';
         body.style.colorScheme = 'dark';
       }
       try {
@@ -34,10 +34,10 @@ export function useDarkMode() {
       } catch {}
     } else {
       root.classList.remove('dark');
-      root.style.backgroundColor = '#f8fafc';
+      root.style.backgroundColor = '#FAF9F6';
       root.style.colorScheme = 'light';
       if (body) {
-        body.style.backgroundColor = '#f8fafc';
+        body.style.backgroundColor = '#FAF9F6';
         body.style.colorScheme = 'light';
       }
       try {

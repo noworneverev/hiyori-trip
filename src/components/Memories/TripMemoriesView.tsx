@@ -868,11 +868,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       `}</style>
 
       {/* 1. Compact Header Banner with Inline Stats */}
-      <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-4 sm:p-5 shadow-2xs no-print space-y-3.5">
+      <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-5 shadow-2xs no-print space-y-3.5">
         {/* Top Row: Title, Inline Clean Stats, and Quick Actions */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+            <div className="w-9 h-9 rounded-2xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center shrink-0">
               <Camera className="w-5 h-5" />
             </div>
             <div className="min-w-0">
@@ -881,21 +881,21 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   {lang === 'zh' ? '旅程回憶相簿' : 'Trip Memories'}
                 </h3>
                 {/* Clean Unboxed Inline Stats (Zero-Pill) */}
-                <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
+                <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium flex-wrap">
                   <span className="hidden sm:inline" aria-hidden="true">·</span>
-                  <span className="font-mono font-bold text-slate-700 dark:text-slate-200">
+                  <span className="font-mono tabular-nums font-bold text-slate-700 dark:text-slate-200">
                     {allMemories.length}
                   </span>
                   <span>張相片</span>
                   <span aria-hidden="true">·</span>
-                  <span className="font-mono font-bold text-slate-700 dark:text-slate-200">
+                  <span className="font-mono tabular-nums font-bold text-slate-700 dark:text-slate-200">
                     {new Set(allMemories.map((m) => m.spotId).filter(Boolean)).size}
                   </span>
                   <span>處打卡</span>
                   {allMemories.some((m) => !m.spotId) && (
                     <>
                       <span aria-hidden="true">·</span>
-                      <span className="font-mono font-bold text-teal-600 dark:text-teal-400">
+                      <span className="font-mono tabular-nums font-bold text-teal-700 dark:text-teal-400">
                         {allMemories.filter((m) => !m.spotId).length}
                       </span>
                       <span>隨拍</span>
@@ -903,13 +903,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   )}
                   <span aria-hidden="true">·</span>
                   {currentUser ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200/80 dark:border-emerald-800">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                      <span>雲端已連線</span>
+                    <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400">
+                      雲端已連線
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-200/80 dark:border-amber-800" title="登入後同步至雲端">
-                      <span>本機模式</span>
+                    <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400" title="登入後同步至雲端">
+                      本機模式
                     </span>
                   )}
                 </div>
@@ -917,28 +916,26 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             </div>
           </div>
 
-          {/* Action Buttons: Unified, Compact, Aligned */}
+          {/* Action Buttons */}
           <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-            {/* Global Multi-Trip Footprint Hub Trigger */}
             {onOpenGlobalHub && (
               <button
                 type="button"
                 onClick={onOpenGlobalHub}
-                className="px-2.5 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/80 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 text-xs font-semibold flex items-center gap-1 transition shadow-2xs active:scale-95 cursor-pointer"
+                className="min-h-[40px] px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/80 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 text-xs font-semibold flex items-center gap-1.5 transition shadow-2xs active:scale-95 cursor-pointer"
                 title="探索跨旅程回憶與月曆足跡"
               >
-                <Compass className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                <Compass className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                 <span className="whitespace-nowrap">足跡時光庫</span>
               </button>
             )}
 
-            {/* Google Photos Whole-Trip Album Link */}
             {trip.googlePhotosAlbumUrl && (
               <a
                 href={trip.googlePhotosAlbumUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
+                className="min-h-[40px] px-3 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition active:scale-95"
                 title={lang === 'zh' ? '開啟此行程之 Google 相簿完整相簿（原始高畫質）' : 'Open Google Photos full album'}
               >
                 <ExternalLink className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
@@ -946,12 +943,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               </a>
             )}
 
-            {/* Print Button (Available in Polaroid Mode) */}
             {viewMode === 'polaroid' && (
               <button
                 type="button"
                 onClick={handlePrintPolaroids}
-                className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold flex items-center gap-1 shadow-xs transition active:scale-95"
+                className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
                 title="以 A4 或相片紙沖印拍立得卡片"
               >
                 <Printer className="w-3.5 h-3.5" />
@@ -959,12 +955,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               </button>
             )}
 
-            {/* Upload Memory Photo Button */}
             {canShowUploadAction && (
               <button
                 type="button"
                 onClick={() => handleTriggerUpload('', true)}
-                className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
+                className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span className="whitespace-nowrap">{lang === 'zh' ? '上傳相片' : 'Add Photo'}</span>
@@ -973,14 +968,14 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           </div>
         </div>
 
-        {/* Middle Row: View Mode Switcher (Clean, Single-Line, Anti-Wrap Segmented Control) */}
-        <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl text-xs font-semibold">
+        {/* Middle Row: View Mode Switcher */}
+        <div className="grid grid-cols-3 gap-1 p-1 bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 rounded-2xl text-xs font-semibold">
           <button
             type="button"
             onClick={() => setViewMode('itinerary')}
-            className={`py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
+            className={`min-h-[38px] py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
               viewMode === 'itinerary'
-                ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 font-bold shadow-2xs'
+                ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
                 : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
@@ -991,9 +986,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           <button
             type="button"
             onClick={() => setViewMode('gallery')}
-            className={`py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
+            className={`min-h-[38px] py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
               viewMode === 'gallery'
-                ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 font-bold shadow-2xs'
+                ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
                 : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
@@ -1004,27 +999,27 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           <button
             type="button"
             onClick={() => setViewMode('polaroid')}
-            className={`py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
+            className={`min-h-[38px] py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
               viewMode === 'polaroid'
-                ? 'bg-white dark:bg-slate-700 text-rose-600 dark:text-rose-400 font-bold shadow-2xs'
+                ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
                 : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
             }`}
           >
-            <Sparkles className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+            <Sparkles className="w-3.5 h-3.5 shrink-0 text-teal-700 dark:text-teal-400" />
             <span className="whitespace-nowrap truncate">{lang === 'zh' ? '拍立得' : 'Polaroid'}</span>
           </button>
         </div>
 
-        {/* Bottom Row: Day Filter Chips (Compact horizontal scroll) */}
+        {/* Bottom Row: Day Filter Chips */}
         <div className="flex items-center gap-1.5 overflow-x-auto pt-1 no-scrollbar scroll-smooth">
-          <span className="text-[11px] font-bold text-slate-400 shrink-0 pr-1">天數:</span>
+          <span className="text-[11px] font-bold text-slate-400 shrink-0 pr-1">天數</span>
           <button
             type="button"
             onClick={() => setSelectedDayFilter('all')}
-            className={`px-2.5 py-1 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
+            className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
               selectedDayFilter === 'all'
-                ? 'bg-teal-600 text-white shadow-2xs'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100'
             }`}
           >
             全部 ({allMemories.length})
@@ -1033,10 +1028,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             <button
               type="button"
               onClick={() => setSelectedDayFilter('custom')}
-              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
+              className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
                 selectedDayFilter === 'custom'
-                  ? 'bg-teal-600 text-white shadow-2xs'
-                  : 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 hover:bg-teal-100'
+                  ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                  : 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200/70 dark:border-teal-800/60 hover:bg-teal-100'
               }`}
             >
               ✨ 漫遊隨拍 ({unassignedMemories.length})
@@ -1049,10 +1044,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 key={day.dayNumber}
                 type="button"
                 onClick={() => setSelectedDayFilter(day.dayNumber)}
-                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition shrink-0 cursor-pointer ${
+                className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
                   selectedDayFilter === day.dayNumber
-                    ? 'bg-teal-600 text-white shadow-2xs'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                    ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                    : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100'
                 }`}
               >
                 Day {day.dayNumber} ({countInDay})
@@ -1085,32 +1080,32 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         <div className="space-y-6">
 
       {/* Compact Spots Check-in Progress & Filter Bar */}
-          <div className="p-3 sm:p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xs space-y-2">
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs space-y-2.5">
             <div className="flex items-center justify-between text-xs">
               <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                <Route className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                <Route className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                 <span>景點記錄進度</span>
               </span>
-              <span className="font-mono text-xs text-teal-700 dark:text-teal-400 font-bold">
+              <span className="font-mono tabular-nums text-xs text-teal-700 dark:text-teal-400 font-bold">
                 {visitedSpotsCount} / {allSpots.length} 景點 ({allSpots.length > 0 ? Math.round((visitedSpotsCount / allSpots.length) * 100) : 0}%)
               </span>
             </div>
-            <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+            <div className="w-full bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC]/60 dark:border-slate-700/50 h-1.5 rounded-full overflow-hidden">
               <div
-                className="bg-teal-500 h-full rounded-full transition-all duration-500"
+                className="bg-teal-700 dark:bg-teal-500 h-full rounded-full transition-all duration-500"
                 style={{
                   width: `${allSpots.length > 0 ? Math.round((visitedSpotsCount / allSpots.length) * 100) : 0}%`,
                 }}
               />
             </div>
             <div className="flex items-center justify-between gap-2 pt-0.5">
-              <div className="flex items-center p-0.5 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-bold">
+              <div className="flex items-center p-0.5 bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 rounded-xl text-xs font-bold">
                 <button
                   type="button"
                   onClick={() => setFilterVisitedOnly(true)}
-                  className={`px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[11px] ${
+                  className={`min-h-[34px] px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[11px] font-mono tabular-nums ${
                     filterVisitedOnly
-                      ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-2xs'
+                      ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 shadow-2xs'
                       : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                   }`}
                   title="僅呈現有照片或已造訪景點"
@@ -1121,9 +1116,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setFilterVisitedOnly(false)}
-                  className={`px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[11px] ${
+                  className={`min-h-[34px] px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[11px] font-mono tabular-nums ${
                     !filterVisitedOnly
-                      ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-2xs'
+                      ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 shadow-2xs'
                       : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                   }`}
                   title="顯示全部景點"
@@ -1136,7 +1131,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 <button
                   type="button"
                   onClick={() => handleTriggerUpload('', true)}
-                  className="text-teal-600 dark:text-teal-400 font-bold hover:underline text-xs flex items-center gap-1 cursor-pointer"
+                  className="text-teal-700 dark:text-teal-400 font-bold hover:underline text-xs flex items-center gap-1 cursor-pointer"
                 >
                   <Plus className="w-3 h-3" />
                   <span>新增隨拍</span>
@@ -1147,16 +1142,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
           {/* Unassigned / All-trip Custom Snapshots (自由漫遊隨拍) */}
           {unassignedMemories.length > 0 && (
-            <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-4 sm:p-5 shadow-2xs space-y-3">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+            <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-5 shadow-2xs space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-[#E5E2DC] dark:border-slate-800">
                 <div className="flex items-center gap-2">
                   <span className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 flex items-center justify-center font-bold text-sm">
                     ✨
                   </span>
                   <div>
-                    <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                    <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white flex items-center gap-1.5">
                       <span>漫遊隨拍</span>
-                      <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-950 text-teal-700 dark:text-teal-300 font-bold">
+                      <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">·</span>
+                      <span className="text-xs font-mono tabular-nums text-teal-700 dark:text-teal-400 font-bold">
                         {unassignedMemories.length} 張
                       </span>
                     </h4>
@@ -1678,8 +1674,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           })}
         </div>
       ) : filteredMemories.length === 0 ? (
-        <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-12 text-center space-y-4">
-          <div className="w-16 h-16 rounded-3xl bg-rose-50 dark:bg-rose-950/60 text-rose-500 flex items-center justify-center mx-auto shadow-inner">
+        <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-12 text-center space-y-4">
+          <div className="w-16 h-16 rounded-3xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center mx-auto">
             <Camera className="w-8 h-8" />
           </div>
           <div className="space-y-1 max-w-sm mx-auto">
@@ -1696,7 +1692,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             <button
               type="button"
               onClick={() => setShowUploadModal(true)}
-              className="px-5 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md transition active:scale-95"
+              className="min-h-[44px] px-5 py-2.5 rounded-2xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs shadow-sm transition active:scale-95 cursor-pointer"
             >
               📸 上傳照片
             </button>
@@ -1708,7 +1704,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           {filteredMemories.map((mem) => (
             <div
               key={mem.id}
-              className="group rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 overflow-hidden shadow-2xs hover:shadow-lg transition flex flex-col"
+              className="group rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 overflow-hidden shadow-2xs hover:shadow-lg transition flex flex-col"
             >
               {/* Image Container with Hover Zoom */}
               <div
@@ -1809,12 +1805,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         /* ================= 2B. AUTHENTIC POLAROID STUDIO PRINT MODE ================= */
         <div id="polaroid-print-area">
           {/* Print Notice (Screen only) */}
-          <div className="no-print p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60 text-amber-900 dark:text-amber-200 text-xs flex items-center justify-between gap-3 mb-5">
-            <div className="flex items-center gap-2">
-              <span className="text-lg">🎞️</span>
+          <div className="no-print p-4 rounded-2xl bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-200 text-xs flex items-center justify-between gap-3 mb-5">
+            <div className="flex items-center gap-2.5">
+              <Printer className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
               <div>
                 <p className="font-bold">拍立得沖印模式</p>
-                <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
                   支援 A4、4×6 相片紙直接列印。
                 </p>
               </div>
@@ -1822,7 +1818,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             <button
               type="button"
               onClick={handlePrintPolaroids}
-              className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shrink-0 shadow-xs"
+              className="min-h-[40px] px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs shrink-0 shadow-xs cursor-pointer"
             >
               列印
             </button>
@@ -1833,13 +1829,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             {filteredMemories.map((mem, index) => (
               <div
                 key={mem.id}
-                className="polaroid-card w-full max-w-[290px] bg-[#fbfaf5] dark:bg-[#1c212a] p-3.5 pb-8 rounded-xs shadow-xl border border-[#e5e0d4] dark:border-slate-800 transition-transform duration-300 hover:scale-[1.02] flex flex-col relative group"
+                className="polaroid-card w-full max-w-[290px] bg-[#fbfaf5] dark:bg-[#111827] p-3.5 pb-8 rounded-xs shadow-xl border border-[#E5E2DC] dark:border-slate-800 transition-transform duration-300 hover:scale-[1.02] flex flex-col relative group"
                 style={{
                   transform: `rotate(${(index % 3 - 1) * 0.8}deg)`,
                 }}
               >
                 {/* Washi Tape / Retro Clip effect at top */}
-                <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 w-16 h-5 bg-amber-100/80 dark:bg-slate-700/80 border border-amber-200/60 backdrop-blur-xs rounded-xs shadow-2xs rotate-[-1deg] no-print" />
+                <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 w-16 h-5 bg-[#EAE6DC]/90 dark:bg-slate-700/80 border border-[#D8D3C6] dark:border-slate-600 backdrop-blur-xs rounded-xs shadow-2xs rotate-[-1deg] no-print" />
 
                 {/* Photo Window (Square with film border effect) */}
                 <div className="relative aspect-square w-full bg-slate-900 overflow-hidden rounded-xs border border-slate-300/40 dark:border-slate-800 shadow-inner">
@@ -1932,20 +1928,20 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           onClick={() => setShowUploadModal(false)}
         >
           <div
-            className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-150"
+            className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/70 dark:bg-slate-800/40">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center font-bold">
-                  📸
+            <div className="px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between shrink-0 bg-[#FAF9F6] dark:bg-slate-900/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center">
+                  <Camera className="w-4 h-4" />
                 </div>
                 <div>
                   <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
                     {lang === 'zh' ? '新增回憶照片' : 'Add Memory Photo'}
                   </h3>
-                  <p className="text-[10px] text-slate-400">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     {lang === 'zh' ? '關聯行程景點與心得隨筆' : 'Link to itinerary spot & add notes'}
                   </p>
                 </div>
@@ -1953,7 +1949,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               <button
                 type="button"
                 onClick={() => setShowUploadModal(false)}
-                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer"
+                className="w-10 h-10 flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1963,23 +1959,23 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             <form onSubmit={handleSaveMemory} className="p-5 space-y-4 overflow-y-auto text-xs">
               {/* Cloud Connection & Auth Status Banner */}
               {!currentUser ? (
-                <div className="px-3 py-2.5 rounded-2xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-[11px] text-amber-900 dark:text-amber-200 flex items-center justify-between gap-2">
+                <div className="px-3.5 py-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800 text-[11px] text-slate-700 dark:text-slate-300 flex items-center justify-between gap-2">
                   <span className="font-semibold flex items-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <AlertTriangle className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
                     <span>本機模式 · 登入以啟用雲端備份</span>
                   </span>
                   <button
                     type="button"
                     onClick={loginWithGoogle}
-                    className="px-2.5 py-1 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-bold text-[10px] shrink-0 transition cursor-pointer active:scale-95"
+                    className="min-h-[32px] px-3 py-1 rounded-lg bg-teal-700 hover:bg-teal-800 text-white font-bold text-[11px] shrink-0 transition cursor-pointer active:scale-95"
                   >
                     登入 Google
                   </button>
                 </div>
               ) : (
-                <div className="px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-[10px] text-emerald-800 dark:text-emerald-300 font-semibold flex items-center justify-between">
+                <div className="px-3 py-2 rounded-xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/60 dark:border-teal-800/60 text-[11px] text-teal-800 dark:text-teal-300 font-semibold flex items-center justify-between">
                   <span className="flex items-center gap-1.5 truncate">
-                    <Cloud className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <Cloud className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
                     <span className="truncate">已連線雲端同步 ({currentUser.email || '已登入'})</span>
                   </span>
                 </div>
@@ -2289,10 +2285,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       key={m.label}
                       type="button"
                       onClick={() => setUploadMood(m.icon)}
-                      className={`p-1.5 rounded-xl text-center border transition ${
+                      className={`p-1.5 rounded-xl text-center border transition cursor-pointer ${
                         uploadMood === m.icon
-                          ? 'border-rose-500 bg-rose-50 dark:bg-rose-950/60 font-bold text-rose-800 dark:text-rose-200'
-                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                          ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 font-bold text-teal-800 dark:text-teal-200'
+                          : 'border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                       }`}
                     >
                       <div className="text-base">{m.icon}</div>
@@ -2390,21 +2386,20 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           onTouchEnd={(e) => e.stopPropagation()}
         >
           <div
-            className="max-w-4xl w-full bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-700/80 flex flex-col max-h-[95vh] relative"
+            className="max-w-4xl w-full bg-[#111827] rounded-3xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-[95vh] relative"
             onClick={(e) => e.stopPropagation()}
             onTouchStart={handleLightboxTouchStart}
             onTouchEnd={handleLightboxTouchEnd}
           >
             {/* Top Close Button & Action Bar */}
             <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
-              {/* Sync Status Badge */}
               {renderSyncBadge(lightboxMemory)}
 
               {canShowUploadAction && (
                 <button
                   type="button"
                   onClick={() => setIsEditingLightboxUrl(!isEditingLightboxUrl)}
-                  className="px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/90 text-teal-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-white/20 shadow-sm"
+                  className="min-h-[40px] px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/90 text-teal-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-white/20 shadow-sm cursor-pointer"
                   title="編輯此照片的 Google 相簿連結"
                 >
                   <Edit2 className="w-3 h-3" />
@@ -2416,7 +2411,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   href={lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-full bg-black/75 hover:bg-teal-600 text-white text-xs font-bold transition flex items-center gap-1.5 border border-white/20 shadow-md backdrop-blur-md active:scale-95"
+                  className="min-h-[40px] px-3 py-1.5 rounded-full bg-black/75 hover:bg-teal-700 text-white text-xs font-bold transition flex items-center gap-1.5 border border-white/20 shadow-md backdrop-blur-md active:scale-95"
                   title="開啟 Google 相簿檢視 4K / 原始超高畫質相片"
                 >
                   <ExternalLink className="w-3.5 h-3.5 text-teal-300" />
@@ -2430,14 +2425,14 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     <button
                       type="button"
                       onClick={() => handleDeleteMemory(lightboxMemory.id)}
-                      className="px-2.5 py-1 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer"
+                      className="min-h-[32px] px-2.5 py-1 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold cursor-pointer"
                     >
                       確認刪除
                     </button>
                     <button
                       type="button"
                       onClick={() => setConfirmDeleteMemId(null)}
-                      className="px-2 py-1 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs cursor-pointer"
+                      className="min-h-[32px] px-2.5 py-1 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs cursor-pointer"
                     >
                       取消
                     </button>
@@ -2446,7 +2441,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setConfirmDeleteMemId(lightboxMemory.id)}
-                    className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full bg-black/60 text-rose-300 hover:bg-rose-600 hover:text-white transition shadow-sm cursor-pointer"
+                    className="w-10 h-10 flex items-center justify-center rounded-full bg-black/60 text-rose-300 hover:bg-rose-600 hover:text-white transition shadow-sm cursor-pointer"
                     title="刪除此相片"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -2459,7 +2454,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   setLightboxMemory(null);
                   setConfirmDeleteMemId(null);
                 }}
-                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/90 transition shadow-sm cursor-pointer"
+                className="w-10 h-10 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/90 transition shadow-sm cursor-pointer"
                 title="關閉"
               >
                 <X className="w-5 h-5" />
@@ -2468,19 +2463,19 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
             {/* Quick Inline Edit Bar for Google Photos URL */}
             {isEditingLightboxUrl && (
-              <div className="p-3 bg-slate-800/95 border-b border-slate-700 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 z-20 mt-12 sm:mt-14">
+              <div className="p-3 bg-slate-900 border-b border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 z-20 mt-14">
                 <input
                   type="url"
                   value={lightboxEditUrl}
                   onChange={(e) => setLightboxEditUrl(e.target.value)}
                   placeholder="貼上 Google 相簿分享或原始照片連結 (如 https://photos.app.goo.gl/...)"
-                  className="flex-1 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-600 text-white text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-500"
+                  className="flex-1 min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-500"
                 />
                 <div className="flex items-center gap-2 justify-end">
                   <button
                     type="button"
                     onClick={handleSaveLightboxGoogleUrl}
-                    className="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold transition flex items-center gap-1"
+                    className="min-h-[40px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer"
                   >
                     <Check className="w-3.5 h-3.5" />
                     <span>儲存連結</span>
@@ -2488,7 +2483,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsEditingLightboxUrl(false)}
-                    className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition"
+                    className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition cursor-pointer"
                   >
                     取消
                   </button>
@@ -2525,9 +2520,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     onError={() => setLightboxHighResFailed(true)}
                     className="max-h-[65vh] w-auto max-w-full object-contain pointer-events-none"
                   />
-                  <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-bold text-teal-300 border border-teal-500/30 flex items-center gap-1.5 shadow-sm">
-                    <span className="w-1.5 h-1.5 rounded-full bg-teal-400" />
-                    <span>Google 相簿高畫質原圖</span>
+                  <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-md text-[11px] font-bold text-teal-300 border border-teal-500/30 shadow-sm">
+                    Google 相簿高畫質原圖
                   </div>
                 </div>
               ) : (
@@ -2541,9 +2535,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     className="max-h-[65vh] w-auto max-w-full object-contain pointer-events-none"
                   />
                   {lightboxMemory.googlePhotosUrl && (
-                    <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-full bg-black/75 backdrop-blur-md text-[11px] font-bold text-amber-300 border border-amber-500/30 flex items-center gap-1.5 shadow-sm">
-                      <ExternalLink className="w-3 h-3 text-amber-400" />
-                      <span>已連結 Google 相簿相簿</span>
+                    <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-md text-[11px] font-bold text-slate-200 border border-white/20 flex items-center gap-1.5 shadow-sm">
+                      <ExternalLink className="w-3 h-3 text-teal-400" />
+                      <span>已連結 Google 相簿</span>
                     </div>
                   )}
                 </div>
@@ -2589,7 +2583,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             )}
 
             {/* Caption & Info Bar */}
-            <div className="p-3.5 sm:p-4 bg-slate-900 text-white flex items-center justify-between gap-3 border-t border-slate-800">
+            <div className="p-3.5 sm:p-4 bg-[#111827] text-white flex items-center justify-between gap-3 border-t border-slate-800">
               <div className="space-y-0.5 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-base">{lightboxMemory.mood}</span>
@@ -2597,9 +2591,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     {lightboxMemory.spotTitle || lightboxMemory.location || trip.destination}
                   </h4>
                   {lightboxMemory.dayNumber && (
-                    <span className="text-[10px] font-mono bg-teal-900/80 text-teal-200 px-2 py-0.5 rounded-full shrink-0">
-                      Day {lightboxMemory.dayNumber}
-                    </span>
+                    <>
+                      <span aria-hidden="true" className="text-slate-600">·</span>
+                      <span className="text-xs font-mono tabular-nums text-teal-400 shrink-0">
+                        Day {lightboxMemory.dayNumber}
+                      </span>
+                    </>
                   )}
                 </div>
                 {lightboxMemory.caption && (

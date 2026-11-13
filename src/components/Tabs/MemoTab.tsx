@@ -47,10 +47,10 @@ interface StickyNoteItem {
 }
 
 const STICKY_CATS = [
-  { key: 'locker', label: '置物櫃', icon: Package, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/60 dark:text-amber-300' },
-  { key: 'seat', label: '車次座位', icon: Train, color: 'text-sky-600 bg-sky-50 dark:bg-sky-950/60 dark:text-sky-300' },
-  { key: 'hotel', label: '住宿密碼', icon: Key, color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/60 dark:text-indigo-300' },
-  { key: 'other', label: '隨身速記', icon: Bookmark, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/60 dark:text-emerald-300' },
+  { key: 'locker', label: '置物櫃', icon: Package },
+  { key: 'seat', label: '車次座位', icon: Train },
+  { key: 'hotel', label: '住宿密碼', icon: Key },
+  { key: 'other', label: '隨身速記', icon: Bookmark },
 ] as const;
 
 const OFFICIAL_EMERGENCY_HOTLINES = [
@@ -61,7 +61,6 @@ const OFFICIAL_EMERGENCY_HOTLINES = [
     number: '110',
     description: '遺失物品、遭竊、交通意外報警 (日本與台灣皆為 110)',
     badge: '24小時',
-    badgeColor: 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300',
   },
   {
     id: 'jp-ambulance',
@@ -70,7 +69,6 @@ const OFFICIAL_EMERGENCY_HOTLINES = [
     number: '119',
     description: '突發重大傷病、火警求援 (日本與台灣皆為 119)',
     badge: '緊急救護',
-    badgeColor: 'bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300',
   },
   {
     id: 'mofa-hotline',
@@ -80,7 +78,6 @@ const OFFICIAL_EMERGENCY_HOTLINES = [
     altNumber: '+886-3-398-2629',
     description: '護照遺失、重大天災、傷病急難 (諧音：您幫我 您救我)',
     badge: '全球免付費',
-    badgeColor: 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300',
   },
   {
     id: 'jnto-callcenter',
@@ -89,7 +86,6 @@ const OFFICIAL_EMERGENCY_HOTLINES = [
     number: '050-3816-2720',
     description: '多語支援 (中文/英/日/韓)、天災避難諮詢與即時交通受阻引導',
     badge: '支援中文',
-    badgeColor: 'bg-teal-100 dark:bg-teal-900/50 text-teal-700 dark:text-teal-300',
   },
   {
     id: 'teco-japan',
@@ -98,7 +94,6 @@ const OFFICIAL_EMERGENCY_HOTLINES = [
     number: '+81-3-3280-7811',
     description: '駐日館處代表號 (緊急急難手機: +81-80-1009-7179 / 7435)',
     badge: '駐外館處',
-    badgeColor: 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300',
   },
   {
     id: 'jp-medical-advice',
@@ -107,7 +102,6 @@ const OFFICIAL_EMERGENCY_HOTLINES = [
     number: '#7119',
     description: '不確定是否需叫救護車時之專業醫師/護理師電話諮詢評估',
     badge: '急診諮詢',
-    badgeColor: 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300',
   },
 ] as const;
 
@@ -359,419 +353,422 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
   };
 
   return (
-    <div className="space-y-5 pb-8">
-      {/* 1. Quick Sticky Notes Section (隨身便籤卡片：置物櫃、房號、車次等) */}
-      <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 shadow-2xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 gap-2">
-          <div>
-            <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
-              <Bookmark className="w-5 h-5 text-amber-500" />
-              <span>速記便籤 ({stickyNotes.length})</span>
-            </h3>
+    <div className="space-y-5 pb-12">
+      {/* Desktop 2-Column Workbench: Sticky Notes + Main Memo Notebook */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* 1. Quick Sticky Notes Section (隨身便籤卡片：置物櫃、房號、車次等) */}
+        <div className="lg:col-span-6 rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-5 sm:p-6 shadow-2xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#E5E2DC] dark:border-slate-800 gap-2">
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
+                <Bookmark className="w-5 h-5 text-teal-700 dark:text-teal-400" />
+                <span className="tabular-nums">速記便籤 ({stickyNotes.length})</span>
+              </h3>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (!showAddSticky && requireAuth && !requireAuth(() => setShowAddSticky(true), lang === 'zh' ? '新增速記便籤' : 'Add sticky note')) {
+                  return;
+                }
+                setShowAddSticky(!showAddSticky);
+              }}
+              className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1.5 transition active:scale-95 shadow-2xs self-start sm:self-auto cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>新增便籤</span>
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              if (!showAddSticky && requireAuth && !requireAuth(() => setShowAddSticky(true), lang === 'zh' ? '新增速記便籤' : 'Add sticky note')) {
-                return;
-              }
-              setShowAddSticky(!showAddSticky);
-            }}
-            className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition active:scale-95 shadow-2xs self-start sm:self-auto"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>新增便籤</span>
-          </button>
-        </div>
+          {/* Add Sticky Note Form */}
+          {showAddSticky && (
+            <form
+              onSubmit={handleAddSticky}
+              className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/70 border border-[#E5E2DC] dark:border-slate-700 space-y-3 animate-in fade-in duration-100 text-xs"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                  <span>新增隨身便籤</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowAddSticky(false)}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                >
+                  取消
+                </button>
+              </div>
 
-        {/* Add Sticky Note Form */}
-        {showAddSticky && (
-          <form
-            onSubmit={handleAddSticky}
-            className="p-4 rounded-2xl bg-amber-50/50 dark:bg-slate-800/80 border border-amber-200 dark:border-slate-700 space-y-3 animate-in fade-in duration-100 text-xs"
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                <span>新增隨身便籤</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowAddSticky(false)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                取消
-              </button>
-            </div>
+              {/* Category Select Buttons */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                {STICKY_CATS.map((c) => {
+                  const Icon = c.icon;
+                  const isSelected = newStickyCat === c.key;
+                  return (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => setNewStickyCat(c.key)}
+                      className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold transition border flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                        isSelected
+                          ? 'bg-teal-700 dark:bg-teal-600 text-white border-teal-700 dark:border-teal-600 shadow-2xs'
+                          : 'bg-white dark:bg-[#111827] border-[#E5E2DC] dark:border-slate-700 text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{c.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
 
-            {/* Category Select Chips */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-              {STICKY_CATS.map((c) => {
-                const Icon = c.icon;
-                const isSelected = newStickyCat === c.key;
-                return (
-                  <button
-                    key={c.key}
-                    type="button"
-                    onClick={() => setNewStickyCat(c.key)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition border flex items-center gap-1.5 shrink-0 ${
-                      isSelected
-                        ? 'bg-amber-500 text-slate-950 border-amber-600 font-black shadow-xs'
-                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    <span>{c.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <input
-              type="text"
-              value={newStickyLabel}
-              onChange={(e) => setNewStickyLabel(e.target.value)}
-              placeholder="便籤標題 (如：金澤站置物櫃 / 車次 8 車 12B / 飯店大門密碼)..."
-              className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-white outline-none focus:border-amber-500"
-            />
-
-            <div className="flex items-center gap-2">
               <input
                 type="text"
-                required
-                value={newStickyContent}
-                onChange={(e) => setNewStickyContent(e.target.value)}
-                placeholder="便籤內容 (如：#24 號櫃密碼 7789 / 密碼 1234*)..."
-                className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-mono font-medium text-slate-800 dark:text-white outline-none focus:border-amber-500"
+                value={newStickyLabel}
+                onChange={(e) => setNewStickyLabel(e.target.value)}
+                placeholder="便籤標題 (如：金澤站置物櫃 / 車次 8 車 12B / 飯店大門密碼)..."
+                className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-white outline-none focus:border-teal-600"
               />
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shrink-0 transition active:scale-95"
-              >
-                確認新增
-              </button>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  required
+                  value={newStickyContent}
+                  onChange={(e) => setNewStickyContent(e.target.value)}
+                  placeholder="便籤內容 (如：#24 號櫃密碼 7789 / 密碼 1234*)..."
+                  className="flex-1 px-3 py-2.5 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-xs font-mono font-medium text-slate-800 dark:text-white outline-none focus:border-teal-600"
+                />
+                <button
+                  type="submit"
+                  className="min-h-[40px] px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs shrink-0 transition active:scale-95 cursor-pointer"
+                >
+                  確認新增
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Sticky Notes Grid */}
+          {stickyNotes.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-400">
+              尚無速記便籤，點擊「新增便籤」快速記錄房號、置物櫃或密碼！
             </div>
-          </form>
-        )}
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-3">
+              {stickyNotes.map((note) => {
+                const matched = STICKY_CATS.find((c) => c.key === note.category) || STICKY_CATS[3];
+                const Icon = matched.icon;
+                const isEditing = editingStickyId === note.id;
 
-        {/* Sticky Notes Grid */}
-        {stickyNotes.length === 0 ? (
-          <div className="py-6 text-center text-xs text-slate-400">
-            尚無速記便籤，點擊「新增速記便籤」快速記錄房號、置物櫃或密碼！
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {stickyNotes.map((note) => {
-              const matched = STICKY_CATS.find((c) => c.key === note.category) || STICKY_CATS[3];
-              const Icon = matched.icon;
-              const isEditing = editingStickyId === note.id;
+                if (isEditing) {
+                  return (
+                    <form
+                      key={note.id}
+                      onSubmit={handleSaveEditSticky}
+                      className="p-3.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border-2 border-teal-600 dark:border-teal-500 space-y-2.5 shadow-sm animate-in fade-in duration-100 text-xs"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-teal-800 dark:text-teal-300 flex items-center gap-1.5">
+                          <Edit2 className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                          <span>編輯便籤</span>
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setEditingStickyId(null)}
+                            className="px-2.5 py-1 rounded-lg text-slate-500 hover:bg-slate-200/60 dark:hover:bg-slate-800 text-xs font-medium cursor-pointer"
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSaveEditSticky}
+                            className="px-3 py-1 rounded-lg bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>儲存</span>
+                          </button>
+                        </div>
+                      </div>
 
-              if (isEditing) {
+                      <div className="grid grid-cols-4 gap-1">
+                        {STICKY_CATS.map((cat) => {
+                          const CatIcon = cat.icon;
+                          return (
+                            <button
+                              key={cat.key}
+                              type="button"
+                              onClick={() => setEditStickyCat(cat.key)}
+                              className={`py-1.5 px-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition cursor-pointer ${
+                                editStickyCat === cat.key
+                                  ? 'bg-teal-700 dark:bg-teal-600 text-white'
+                                  : 'bg-white dark:bg-[#111827] text-slate-600 dark:text-slate-400 border border-[#E5E2DC] dark:border-slate-700'
+                              }`}
+                            >
+                              <CatIcon className="w-3 h-3" />
+                              <span className="truncate">{cat.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <input
+                        type="text"
+                        value={editStickyLabel}
+                        onChange={(e) => setEditStickyLabel(e.target.value)}
+                        placeholder="便籤標題..."
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-[#111827] text-xs font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-teal-600"
+                      />
+
+                      <textarea
+                        rows={2}
+                        value={editStickyContent}
+                        onChange={(e) => setEditStickyContent(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                            e.preventDefault();
+                            handleSaveEditSticky();
+                          }
+                        }}
+                        placeholder="便籤內容..."
+                        className="w-full px-2.5 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-[#111827] text-xs font-bold font-mono text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-teal-600 resize-none"
+                      />
+                    </form>
+                  );
+                }
+
+                const isDone = !!note.completed;
+
                 return (
-                  <form
+                  <div
                     key={note.id}
-                    onSubmit={handleSaveEditSticky}
-                    className="p-3.5 rounded-2xl bg-amber-50/70 dark:bg-slate-800 border-2 border-amber-500 space-y-2.5 shadow-md animate-in fade-in duration-100 text-xs"
+                    className={`p-3.5 rounded-2xl border flex items-start gap-3 transition shadow-2xs ${
+                      isDone
+                        ? 'bg-[#FAF9F6]/70 dark:bg-slate-900/40 border-[#E5E2DC]/70 dark:border-slate-800 opacity-75'
+                        : 'bg-[#FAF9F6] dark:bg-slate-900/60 border-[#E5E2DC] dark:border-slate-800 hover:border-teal-600/50 dark:hover:border-teal-500/50'
+                    }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
-                        <Edit2 className="w-3.5 h-3.5 text-amber-600" />
-                        <span>編輯便籤</span>
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setEditingStickyId(null)}
-                          className="px-2.5 py-1 rounded-lg text-slate-500 hover:bg-slate-200/60 dark:hover:bg-slate-700 text-xs font-medium"
-                        >
-                          取消
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleSaveEditSticky}
-                          className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs flex items-center gap-1 shadow-xs transition active:scale-95"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          <span>儲存</span>
-                        </button>
+                    {/* Checkbox button */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleToggleStickyComplete(note.id, e)}
+                      className={`mt-0.5 shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition active:scale-90 cursor-pointer ${
+                        isDone
+                          ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                          : 'border-2 border-slate-300 dark:border-slate-600 hover:border-teal-600 bg-white dark:bg-[#111827] text-transparent hover:text-slate-300'
+                      }`}
+                      title={isDone ? '點擊取消打勾 (標記為未完成)' : '點擊打勾 (標記為已完成)'}
+                    >
+                      <Check className={`w-3.5 h-3.5 ${isDone ? 'stroke-[3]' : 'opacity-0 hover:opacity-40'}`} />
+                    </button>
+
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                        <span className={`inline-flex items-center gap-1 font-semibold ${
+                          isDone
+                            ? 'text-slate-400 dark:text-slate-500'
+                            : 'text-teal-700 dark:text-teal-400'
+                        }`}>
+                          <Icon className="w-3 h-3" />
+                          <span>{matched.label}</span>
+                        </span>
+                        <span className="text-slate-300 dark:text-slate-600">·</span>
+                        <h4 className={`font-bold text-xs truncate ${isDone ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-900 dark:text-white'}`}>
+                          {note.label}
+                        </h4>
+                        {isDone && (
+                          <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-0.5">
+                            <span>·</span>
+                            <span>已完成</span>
+                          </span>
+                        )}
+                      </div>
+
+                      <div
+                        onClick={() => handleStartEditSticky(note)}
+                        className={`text-xs font-bold font-mono tabular-nums p-2.5 rounded-xl border break-words cursor-pointer transition ${
+                          isDone
+                            ? 'line-through text-slate-400 dark:text-slate-500 bg-white/50 dark:bg-slate-900/50 border-[#E5E2DC]/60 dark:border-slate-800/50'
+                            : 'text-slate-800 dark:text-slate-100 bg-white dark:bg-[#111827] border-[#E5E2DC] dark:border-slate-800 hover:border-teal-600/50 dark:hover:border-teal-500/50'
+                        }`}
+                        title="點擊可直接編輯此便籤"
+                      >
+                        {note.content}
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-4 gap-1">
-                      {STICKY_CATS.map((cat) => {
-                        const CatIcon = cat.icon;
-                        return (
-                          <button
-                            key={cat.key}
-                            type="button"
-                            onClick={() => setEditStickyCat(cat.key)}
-                            className={`py-1 px-1 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition ${
-                              editStickyCat === cat.key
-                                ? 'bg-amber-500 text-slate-950 font-black'
-                                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
-                            }`}
-                          >
-                            <CatIcon className="w-3 h-3" />
-                            <span className="truncate">{cat.label}</span>
-                          </button>
-                        );
-                      })}
+                    <div className="flex flex-col gap-1 shrink-0 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyText(note.content, note.id)}
+                        className="w-8 h-8 flex items-center justify-center rounded-lg border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition cursor-pointer"
+                        title="複製內容"
+                      >
+                        {copiedId === note.id ? (
+                          <Check className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStartEditSticky(note)}
+                        className="w-8 h-8 flex items-center justify-center rounded-lg border border-[#E5E2DC] dark:border-slate-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-slate-500 hover:text-teal-700 dark:hover:text-teal-400 transition cursor-pointer"
+                        title="編輯此便籤"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSticky(note.id)}
+                        className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                        title="刪除"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-
-                    <input
-                      type="text"
-                      value={editStickyLabel}
-                      onChange={(e) => setEditStickyLabel(e.target.value)}
-                      placeholder="便籤標題..."
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-amber-500"
-                    />
-
-                    <textarea
-                      rows={2}
-                      value={editStickyContent}
-                      onChange={(e) => setEditStickyContent(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                          e.preventDefault();
-                          handleSaveEditSticky();
-                        }
-                      }}
-                      placeholder="便籤內容..."
-                      className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold font-mono text-slate-800 dark:text-slate-100 outline-none focus:ring-1 focus:ring-amber-500 resize-none"
-                    />
-                  </form>
+                  </div>
                 );
-              }
-
-              const isDone = !!note.completed;
-
-              return (
-                <div
-                  key={note.id}
-                  className={`p-3.5 rounded-2xl border flex items-start gap-3 transition shadow-2xs ${
-                    isDone
-                      ? 'bg-slate-50/70 dark:bg-slate-900/40 border-slate-200/60 dark:border-slate-800 opacity-80'
-                      : 'bg-slate-50/80 dark:bg-slate-800/80 border-slate-200/90 dark:border-slate-700/80 hover:border-amber-400 dark:hover:border-amber-600/80'
-                  }`}
-                >
-                  {/* Checkbox button */}
-                  <button
-                    type="button"
-                    onClick={(e) => handleToggleStickyComplete(note.id, e)}
-                    className={`mt-0.5 shrink-0 w-6 h-6 rounded-lg flex items-center justify-center transition active:scale-90 ${
-                      isDone
-                        ? 'bg-emerald-600 text-white shadow-xs hover:bg-emerald-700'
-                        : 'border-2 border-slate-300 dark:border-slate-600 hover:border-amber-500 bg-white dark:bg-slate-900 text-transparent hover:text-slate-300'
-                    }`}
-                    title={isDone ? '點擊取消打勾 (標記為未完成)' : '點擊打勾 (標記為已完成)'}
-                  >
-                    <Check className={`w-3.5 h-3.5 ${isDone ? 'stroke-[3]' : 'opacity-0 hover:opacity-40'}`} />
-                  </button>
-
-                  <div className="min-w-0 flex-1 space-y-1.5">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className={`px-2 py-0.5 rounded-lg font-bold text-[11px] flex items-center gap-1 ${
-                        isDone
-                          ? 'bg-slate-200 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
-                          : matched.color
-                      }`}>
-                        <Icon className="w-3 h-3" />
-                        <span>{matched.label}</span>
-                      </span>
-                      <h4 className={`font-bold text-xs truncate ${isDone ? 'text-slate-400 dark:text-slate-500 line-through' : 'text-slate-900 dark:text-white'}`}>
-                        {note.label}
-                      </h4>
-                      {isDone && (
-                        <span className="px-1.5 py-0.2 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold text-[10px] flex items-center gap-0.5">
-                          <Check className="w-2.5 h-2.5" />
-                          <span>已完成</span>
-                        </span>
-                      )}
-                    </div>
-
-                    <div
-                      onClick={() => handleStartEditSticky(note)}
-                      className={`text-xs font-bold font-mono p-2.5 rounded-xl border break-words cursor-pointer transition ${
-                        isDone
-                          ? 'line-through text-slate-400 dark:text-slate-500 bg-slate-100/60 dark:bg-slate-900/50 border-slate-200/50 dark:border-slate-800/50'
-                          : 'text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800 hover:border-amber-400 dark:hover:border-amber-600'
-                      }`}
-                      title="點擊可直接編輯此便籤"
-                    >
-                      {note.content}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col gap-1 shrink-0 pt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => handleCopyText(note.content, note.id)}
-                      className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 transition"
-                      title="複製內容"
-                    >
-                      {copiedId === note.id ? (
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                      ) : (
-                        <Copy className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleStartEditSticky(note)}
-                      className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-amber-50 dark:hover:bg-amber-950/40 text-slate-500 hover:text-amber-600 transition"
-                      title="編輯此便籤"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteSticky(note.id)}
-                      className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 transition"
-                      title="刪除"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* 2. Main Travel Memo & Scratchpad Notebook (Top Priority) */}
-      <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 shadow-2xs space-y-3.5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 gap-2">
-          <div>
-            <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
-              <FileText className="w-5 h-5 text-teal-600 dark:text-teal-400" />
-              <span>{t.travelMemo}</span>
-            </h3>
-          </div>
-
-          {canEdit && (
-            <div className="flex items-center gap-2.5 self-end sm:self-auto shrink-0">
-              {/* Real-time Auto-save Indicator */}
-              <div className="text-[11px] font-medium flex items-center gap-1.5">
-                {isAutoSaving ? (
-                  <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-amber-500" />
-                    <span>儲存中...</span>
-                  </span>
-                ) : isSavedNotes ? (
-                  <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                    <Check className="w-3.5 h-3.5" />
-                    <span>已儲存</span>
-                  </span>
-                ) : (
-                  <span className="text-slate-400">已同步</span>
-                )}
-              </div>
-
-              <button
-                onClick={handleSaveNotes}
-                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 transition active:scale-95"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>儲存</span>
-              </button>
+              })}
             </div>
           )}
         </div>
 
-        {/* Quick Template Insert Buttons */}
-        {canEdit && (
-          <div className="flex flex-wrap items-center gap-1.5 pt-1">
-            <span className="text-[11px] text-slate-400 font-medium">範本：</span>
-            <button
-              type="button"
-              onClick={() =>
-                handleAppendTemplate('【航班資訊】\n• 去程航班：\n• 起飛時間：\n• 航廈航廈：\n• 訂位代號：\n• 回程航班：')
-              }
-              className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
-            >
-              <Plane className="w-3 h-3 text-sky-600" />
-              <span>+ 航班資訊</span>
-            </button>
+        {/* 2. Main Travel Memo & Scratchpad Notebook */}
+        <div className="lg:col-span-6 rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-5 sm:p-6 shadow-2xs space-y-3.5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#E5E2DC] dark:border-slate-800 gap-2">
+            <div>
+              <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
+                <FileText className="w-5 h-5 text-teal-700 dark:text-teal-400" />
+                <span>{t.travelMemo}</span>
+              </h3>
+            </div>
 
-            <button
-              type="button"
-              onClick={() =>
-                handleAppendTemplate('【飯店入住憑證】\n• 飯店名稱：\n• 地址：\n• 入住時間：15:00 後\n• 退房時間：11:00 前\n• 訂房代號：')
-              }
-              className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
-            >
-              <Building className="w-3 h-3 text-indigo-600" />
-              <span>+ 飯店憑證</span>
-            </button>
+            {canEdit && (
+              <div className="flex items-center gap-2.5 self-end sm:self-auto shrink-0">
+                {/* Real-time Auto-save Indicator */}
+                <div className="text-[11px] font-medium flex items-center gap-1.5">
+                  {isAutoSaving ? (
+                    <span className="text-slate-600 dark:text-slate-300">
+                      儲存中...
+                    </span>
+                  ) : isSavedNotes ? (
+                    <span className="text-teal-700 dark:text-teal-400 flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5" />
+                      <span>已儲存</span>
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">已同步</span>
+                  )}
+                </div>
 
-            <button
-              type="button"
-              onClick={() =>
-                handleAppendTemplate('【上網與通訊】\n• eSIM / SIM卡供應商：\n• 開通 APN 設定：\n• 漫遊客服專線：')
-              }
-              className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
-            >
-              <Wifi className="w-3 h-3 text-emerald-600" />
-              <span>+ 上網設定</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() =>
-                handleAppendTemplate('【必買伴手禮清單】\n• 1. \n• 2. \n• 3. ')
-              }
-              className="px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95"
-            >
-              <ShoppingBag className="w-3 h-3 text-rose-600" />
-              <span>+ 伴手禮清單</span>
-            </button>
+                <button
+                  onClick={handleSaveNotes}
+                  className="min-h-[38px] px-4 py-2 bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white rounded-xl text-xs font-bold shadow-2xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>儲存</span>
+                </button>
+              </div>
+            )}
           </div>
-        )}
 
-        <textarea
-          rows={8}
-          readOnly={!canEdit}
-          value={tripNotes}
-          onChange={(e) => {
-            if (!canEdit) return;
-            const val = e.target.value;
-            if (requireAuth && !requireAuth(() => setTripNotes(val), lang === 'zh' ? '編輯旅遊備忘錄' : 'Edit travel memo')) {
-              return;
+          {/* Quick Template Insert Buttons */}
+          {canEdit && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[11px] text-slate-400 font-medium">範本：</span>
+              <button
+                type="button"
+                onClick={() =>
+                  handleAppendTemplate('【航班資訊】\n• 去程航班：\n• 起飛時間：\n• 航廈：\n• 訂位代號：\n• 回程航班：')
+                }
+                className="min-h-[34px] px-2.5 py-1 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/70 hover:bg-slate-100 dark:hover:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95 cursor-pointer"
+              >
+                <Plane className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                <span>+ 航班資訊</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  handleAppendTemplate('【飯店入住憑證】\n• 飯店名稱：\n• 地址：\n• 入住時間：15:00 後\n• 退房時間：11:00 前\n• 訂房代號：')
+                }
+                className="min-h-[34px] px-2.5 py-1 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/70 hover:bg-slate-100 dark:hover:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95 cursor-pointer"
+              >
+                <Building className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                <span>+ 飯店憑證</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  handleAppendTemplate('【上網與通訊】\n• eSIM / SIM卡供應商：\n• 開通 APN 設定：\n• 漫遊客服專線：')
+                }
+                className="min-h-[34px] px-2.5 py-1 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/70 hover:bg-slate-100 dark:hover:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95 cursor-pointer"
+              >
+                <Wifi className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                <span>+ 上網設定</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() =>
+                  handleAppendTemplate('【必買伴手禮清單】\n• 1. \n• 2. \n• 3. ')
+                }
+                className="min-h-[34px] px-2.5 py-1 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/70 hover:bg-slate-100 dark:hover:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition active:scale-95 cursor-pointer"
+              >
+                <ShoppingBag className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                <span>+ 伴手禮清單</span>
+              </button>
+            </div>
+          )}
+
+          <textarea
+            rows={10}
+            readOnly={!canEdit}
+            value={tripNotes}
+            onChange={(e) => {
+              if (!canEdit) return;
+              const val = e.target.value;
+              if (requireAuth && !requireAuth(() => setTripNotes(val), lang === 'zh' ? '編輯旅遊備忘錄' : 'Edit travel memo')) {
+                return;
+              }
+              setTripNotes(val);
+            }}
+            placeholder={
+              lang === 'zh'
+                ? '輸入自由筆記或重要資訊...'
+                : 'Type travel notes...'
             }
-            setTripNotes(val);
-          }}
-          placeholder={
-            lang === 'zh'
-              ? '輸入自由筆記或重要資訊...'
-              : 'Type travel notes...'
-          }
-          className="w-full p-4 rounded-2xl border border-slate-200 dark:border-slate-700/80 focus:ring-2 focus:ring-teal-500/25 focus:border-teal-500 outline-hidden text-xs leading-relaxed font-mono bg-slate-50/60 dark:bg-slate-800/50 text-slate-800 dark:text-slate-100"
-        />
+            className="w-full p-4 rounded-2xl border border-[#E5E2DC] dark:border-slate-700/80 focus:ring-2 focus:ring-teal-600/20 focus:border-teal-600 outline-hidden text-xs leading-relaxed font-mono bg-[#FAF9F6] dark:bg-slate-900/60 text-slate-800 dark:text-slate-100"
+          />
 
-        <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
-          <span>共 {tripNotes.length} 個字元</span>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => handleCopyText(tripNotes, 'all-memo')}
-              className="text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1 font-semibold"
-            >
-              {copiedId === 'all-memo' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-              <span>{copiedId === 'all-memo' ? '已複製' : '複製筆記'}</span>
-            </button>
+          <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+            <span className="font-mono tabular-nums">共 {tripNotes.length} 個字元</span>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => handleCopyText(tripNotes, 'all-memo')}
+                className="text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1 font-semibold cursor-pointer"
+              >
+                {copiedId === 'all-memo' ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                <span>{copiedId === 'all-memo' ? '已複製' : '複製筆記'}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* 3. Emergency & Safety Section */}
-      <div className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 shadow-2xs space-y-4">
+      <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-5 sm:p-6 shadow-2xs space-y-4">
         {/* Section Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E5E2DC] dark:border-slate-800">
           <div>
             <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
-              <ShieldAlert className="w-5 h-5 text-rose-600" />
+              <ShieldAlert className="w-5 h-5 text-rose-600 dark:text-rose-400" />
               <span>緊急求助</span>
             </h3>
           </div>
@@ -779,7 +776,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
             <button
               type="button"
               onClick={() => setShowEmergencyGuide(true)}
-              className="px-3.5 py-2 min-h-[40px] rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-semibold text-xs flex items-center gap-1.5 transition active:scale-95 border border-rose-200/60 dark:border-rose-900/60"
+              className="min-h-[44px] sm:min-h-[40px] px-3.5 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-semibold text-xs flex items-center gap-1.5 transition active:scale-95 border border-rose-200/70 dark:border-rose-900/60 cursor-pointer"
             >
               <BookOpen className="w-4 h-4" />
               <span>應變指引</span>
@@ -793,7 +790,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                   }
                   setShowAddContact(!showAddContact);
                 }}
-                className="px-3.5 py-2 min-h-[40px] rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs flex items-center gap-1.5 transition active:scale-95"
+                className="min-h-[44px] sm:min-h-[40px] px-3.5 py-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>新增聯絡人</span>
@@ -803,30 +800,28 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
         </div>
 
         {/* 1. Official Preset Emergency Hotlines Grid */}
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-wider uppercase">
-              緊急專線
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+              官方緊急專線
             </span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {OFFICIAL_EMERGENCY_HOTLINES.map((hotline) => (
               <div
                 key={hotline.id}
-                className="p-3.5 rounded-2xl bg-slate-50/80 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-800 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition"
+                className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition"
               >
                 <div>
                   <div className="flex items-center justify-between gap-1.5">
                     <span className="font-bold text-slate-900 dark:text-white text-xs truncate">
                       {hotline.shortName}
                     </span>
-                    <span
-                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 ${hotline.badgeColor}`}
-                    >
+                    <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 shrink-0">
                       {hotline.badge}
                     </span>
                   </div>
-                  <p className="font-mono font-black text-rose-600 dark:text-rose-400 text-base mt-1 tracking-wide">
+                  <p className="font-mono tabular-nums font-black text-rose-600 dark:text-rose-400 text-base mt-1 tracking-wide">
                     {hotline.number}
                   </p>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">
@@ -834,14 +829,14 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                   </p>
                 </div>
 
-                <div className="mt-3 pt-2.5 border-t border-slate-200/60 dark:border-slate-700/50 flex items-center justify-between gap-2">
+                <div className="mt-3 pt-2.5 border-t border-[#E5E2DC]/80 dark:border-slate-800 flex items-center justify-between gap-2">
                   <button
                     type="button"
                     onClick={() => handleCopyText(hotline.number, hotline.id)}
-                    className="flex-1 min-h-[38px] py-1.5 px-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] font-semibold flex items-center justify-center gap-1 shadow-2xs hover:bg-slate-100 transition active:scale-95"
+                    className="flex-1 min-h-[44px] sm:min-h-[38px] py-1.5 px-2 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-[#111827] text-slate-700 dark:text-slate-300 text-[11px] font-semibold flex items-center justify-center gap-1 shadow-2xs hover:bg-slate-100 dark:hover:bg-slate-800 transition active:scale-95 cursor-pointer"
                   >
                     {copiedId === hotline.id ? (
-                      <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      <Check className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                     ) : (
                       <Copy className="w-3.5 h-3.5" />
                     )}
@@ -850,7 +845,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
 
                   <a
                     href={`tel:${hotline.number}`}
-                    className="flex-1 min-h-[38px] py-1.5 px-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-2xs transition active:scale-95"
+                    className="flex-1 min-h-[44px] sm:min-h-[38px] py-1.5 px-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-2xs transition active:scale-95"
                   >
                     <Phone className="w-3.5 h-3.5" />
                     <span>撥打</span>
@@ -865,10 +860,10 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
         {showAddContact && (
           <form
             onSubmit={handleAddContact}
-            className="p-4 rounded-2xl bg-rose-50/60 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 space-y-3 text-xs animate-in fade-in duration-150"
+            className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/70 border border-[#E5E2DC] dark:border-slate-700 space-y-3 text-xs animate-in fade-in duration-150"
           >
-            <div className="font-bold text-rose-900 dark:text-rose-200 flex items-center gap-1.5 text-xs">
-              <Plus className="w-4 h-4" />
+            <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs">
+              <Plus className="w-4 h-4 text-teal-700 dark:text-teal-400" />
               <span>新增個人或飯店緊急聯絡人</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -880,7 +875,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                   value={contactName}
                   onChange={(e) => setContactName(e.target.value)}
                   placeholder="例如：東京王子飯店櫃檯、海外保險救援專線"
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-300 dark:border-slate-700 outline-hidden text-xs"
+                  className="w-full px-3 py-2 bg-white dark:bg-[#111827] rounded-xl border border-[#E5E2DC] dark:border-slate-700 outline-hidden text-xs focus:border-teal-600"
                 />
               </div>
 
@@ -892,7 +887,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                   value={contactPhone}
                   onChange={(e) => setContactPhone(e.target.value)}
                   placeholder="例如：+81-3-1234-5678"
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-300 dark:border-slate-700 outline-hidden text-xs font-mono"
+                  className="w-full px-3 py-2 bg-white dark:bg-[#111827] rounded-xl border border-[#E5E2DC] dark:border-slate-700 outline-hidden text-xs font-mono focus:border-teal-600"
                 />
               </div>
             </div>
@@ -905,7 +900,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                   value={contactAddress}
                   onChange={(e) => setContactAddress(e.target.value)}
                   placeholder="例如：東京都港區芝公園..."
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-300 dark:border-slate-700 outline-hidden text-xs"
+                  className="w-full px-3 py-2 bg-white dark:bg-[#111827] rounded-xl border border-[#E5E2DC] dark:border-slate-700 outline-hidden text-xs focus:border-teal-600"
                 />
               </div>
 
@@ -916,7 +911,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                   value={contactNote}
                   onChange={(e) => setContactNote(e.target.value)}
                   placeholder="例如：24小時中文櫃檯、房號 1204"
-                  className="w-full px-3 py-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-300 dark:border-slate-700 outline-hidden text-xs"
+                  className="w-full px-3 py-2 bg-white dark:bg-[#111827] rounded-xl border border-[#E5E2DC] dark:border-slate-700 outline-hidden text-xs focus:border-teal-600"
                 />
               </div>
             </div>
@@ -925,13 +920,13 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
               <button
                 type="button"
                 onClick={() => setShowAddContact(false)}
-                className="px-4 py-2 min-h-[40px] border border-slate-300 dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 font-semibold"
+                className="px-4 py-2 min-h-[40px] border border-[#E5E2DC] dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
               >
                 取消
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 min-h-[40px] bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl shadow-xs"
+                className="px-5 py-2 min-h-[40px] bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold rounded-xl shadow-2xs cursor-pointer"
               >
                 儲存聯絡人
               </button>
@@ -940,18 +935,18 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
         )}
 
         {/* 2. Custom User Contacts List */}
-        <div className="space-y-2 pt-2">
+        <div className="space-y-2.5 pt-2">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 tracking-wider uppercase">
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
               自訂旅程聯絡人 (飯店 / 保險 / 旅伴 / 家屬)
             </span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {trip.emergencyContacts && trip.emergencyContacts.length > 0 ? (
               trip.emergencyContacts.map((contact) => (
                 <div
                   key={contact.id}
-                  className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/90 dark:border-slate-800 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition"
+                  className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition"
                 >
                   <div>
                     <div className="flex items-center justify-between">
@@ -962,7 +957,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                         <button
                           type="button"
                           onClick={() => handleDeleteContact(contact.id)}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
                           title="刪除此聯絡人"
                           aria-label="刪除此聯絡人"
                         >
@@ -971,7 +966,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                       )}
                     </div>
 
-                    <p className="font-mono font-bold text-teal-700 dark:text-teal-400 text-sm mt-1">
+                    <p className="font-mono tabular-nums font-bold text-teal-700 dark:text-teal-400 text-sm mt-1">
                       {contact.phone}
                     </p>
 
@@ -988,14 +983,14 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                     )}
                   </div>
 
-                  <div className="mt-3 pt-2.5 border-t border-slate-200/70 dark:border-slate-700/60 flex items-center justify-between gap-2">
+                  <div className="mt-3 pt-2.5 border-t border-[#E5E2DC]/80 dark:border-slate-800 flex items-center justify-between gap-2">
                     <button
                       type="button"
                       onClick={() => handleCopyText(contact.phone, contact.id)}
-                      className="px-3 min-h-[38px] py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[11px] font-semibold flex items-center gap-1 shadow-2xs hover:bg-slate-100 transition active:scale-95"
+                      className="px-3 min-h-[44px] sm:min-h-[38px] py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-[#111827] text-slate-700 dark:text-slate-300 text-[11px] font-semibold flex items-center gap-1 shadow-2xs hover:bg-slate-100 dark:hover:bg-slate-800 transition active:scale-95 cursor-pointer"
                     >
                       {copiedId === contact.id ? (
-                        <Check className="w-3 h-3 text-emerald-600" />
+                        <Check className="w-3 h-3 text-teal-700 dark:text-teal-400" />
                       ) : (
                         <Copy className="w-3 h-3" />
                       )}
@@ -1004,7 +999,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
 
                     <a
                       href={`tel:${contact.phone}`}
-                      className="px-4 min-h-[38px] py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-2xs transition active:scale-95"
+                      className="px-4 min-h-[44px] sm:min-h-[38px] py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-2xs transition active:scale-95"
                     >
                       <Phone className="w-3.5 h-3.5" />
                       <span>撥打電話</span>
@@ -1013,7 +1008,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                 </div>
               ))
             ) : (
-              <div className="col-span-full py-5 text-center text-xs text-slate-400 bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
+              <div className="col-span-full py-5 text-center text-xs text-slate-400 bg-[#FAF9F6] dark:bg-slate-900/30 rounded-2xl border border-dashed border-[#E5E2DC] dark:border-slate-800">
                 尚無自訂聯絡人
               </div>
             )}
@@ -1021,20 +1016,20 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
         </div>
       </div>
 
-      {/* 4. Full Emergency Guide Modal with Guaranteed Easy-to-Close UX */}
+      {/* 4. Full Emergency Guide Modal */}
       {showEmergencyGuide && (
         <div
-          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
           onClick={() => setShowEmergencyGuide(false)}
         >
           <div
-            className="max-w-xl w-full bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-150 overflow-hidden"
+            className="max-w-xl w-full bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-150 overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header with Enlarged Touch Hitbox Close Button (>=44px) */}
-            <div className="p-5 sm:p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+            <div className="p-5 sm:p-6 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center shrink-0 border border-rose-200/60 dark:border-rose-900/60">
+                <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 border border-rose-200/70 dark:border-rose-900/60">
                   <ShieldAlert className="w-5 h-5" />
                 </div>
                 <div>
@@ -1047,11 +1042,10 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                 </div>
               </div>
 
-              {/* Enlarged 44px Close Button */}
               <button
                 type="button"
                 onClick={() => setShowEmergencyGuide(false)}
-                className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center transition active:scale-90 cursor-pointer shadow-2xs"
+                className="w-11 h-11 min-w-[44px] min-h-[44px] rounded-full bg-[#FAF9F6] hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 flex items-center justify-center transition active:scale-90 cursor-pointer shadow-2xs"
                 title="關閉求助熱線卡片"
                 aria-label="關閉求助熱線卡片"
               >
@@ -1063,7 +1057,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
             <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5 text-xs">
               {/* Important Emergency Call List */}
               <div className="space-y-3">
-                <h4 className="font-bold text-slate-900 dark:text-white text-xs flex items-center gap-1.5 uppercase tracking-wider text-rose-600 dark:text-rose-400">
+                <h4 className="font-bold text-xs flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
                   <Phone className="w-3.5 h-3.5" />
                   <span>各項官方急難求助電話</span>
                 </h4>
@@ -1072,20 +1066,18 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                   {OFFICIAL_EMERGENCY_HOTLINES.map((item) => (
                     <div
                       key={`modal-${item.id}`}
-                      className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      className="p-3.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                     >
                       <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-slate-900 dark:text-white text-xs">
                             {item.name}
                           </span>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${item.badgeColor}`}
-                          >
-                            {item.badge}
+                          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                            · {item.badge}
                           </span>
                         </div>
-                        <p className="font-mono font-black text-rose-600 dark:text-rose-400 text-sm">
+                        <p className="font-mono tabular-nums font-black text-rose-600 dark:text-rose-400 text-sm">
                           {item.number}
                         </p>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
@@ -1097,10 +1089,10 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                         <button
                           type="button"
                           onClick={() => handleCopyText(item.number, `modal-${item.id}`)}
-                          className="min-h-[40px] px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs flex items-center gap-1 shadow-2xs hover:bg-slate-100 transition active:scale-95"
+                          className="min-h-[40px] px-3.5 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-[#111827] text-slate-700 dark:text-slate-300 font-semibold text-xs flex items-center gap-1 shadow-2xs hover:bg-slate-100 dark:hover:bg-slate-800 transition active:scale-95 cursor-pointer"
                         >
                           {copiedId === `modal-${item.id}` ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <Check className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                           ) : (
                             <Copy className="w-3.5 h-3.5" />
                           )}
@@ -1120,9 +1112,9 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
               </div>
 
               {/* 4 Steps Checklist for Emergencies */}
-              <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 space-y-2.5">
-                <h4 className="font-bold text-amber-900 dark:text-amber-200 text-xs flex items-center gap-1.5">
-                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <div className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/70 border border-[#E5E2DC] dark:border-slate-800 space-y-2.5">
+                <h4 className="font-bold text-slate-900 dark:text-white text-xs flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
                   <span>遇到緊急意外處理標準流程 (SOP)</span>
                 </h4>
                 <ol className="space-y-1.5 text-slate-700 dark:text-slate-300 text-[11px] list-decimal list-inside leading-relaxed">
@@ -1147,13 +1139,13 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
             </div>
 
             {/* Modal Footer with Guaranteed Prominent Large Close Button */}
-            <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 shrink-0">
+            <div className="p-4 sm:p-5 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/50 shrink-0">
               <button
                 type="button"
                 onClick={() => setShowEmergencyGuide(false)}
-                className="w-full min-h-[48px] py-3.5 px-4 rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900 text-white font-bold text-sm shadow-md transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full min-h-[48px] py-3.5 px-4 rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900 text-white font-bold text-sm shadow-sm transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
               >
-                <Check className="w-4 h-4 text-emerald-400 dark:text-emerald-600" />
+                <Check className="w-4 h-4 text-teal-400 dark:text-teal-700" />
                 <span>完成 · 關閉求助熱線卡片</span>
               </button>
             </div>

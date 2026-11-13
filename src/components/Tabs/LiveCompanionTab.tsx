@@ -54,14 +54,14 @@ interface LiveCompanionTabProps {
   onOpenQuickAction?: (tab: 'expense' | 'todos') => void;
 }
 
-const CATEGORY_TAGS: Record<CategoryType, { label: string; Icon: React.ComponentType<{ className?: string }>; badgeClass: string }> = {
-  spot: { label: '景點', Icon: Landmark, badgeClass: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' },
-  food: { label: '美食', Icon: Utensils, badgeClass: 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800' },
-  transport: { label: '交通', Icon: Train, badgeClass: 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800' },
-  hotel: { label: '住宿', Icon: Hotel, badgeClass: 'bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200 dark:border-purple-800' },
-  shopping: { label: '購物', Icon: ShoppingBag, badgeClass: 'bg-pink-50 text-pink-700 dark:bg-pink-950/60 dark:text-pink-300 border-pink-200 dark:border-pink-800' },
-  activity: { label: '活動', Icon: Ticket, badgeClass: 'bg-teal-50 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300 border-teal-200 dark:border-teal-800' },
-  other: { label: '其他', Icon: Bookmark, badgeClass: 'bg-slate-50 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700' },
+const CATEGORY_TAGS: Record<CategoryType, { label: string; Icon: React.ComponentType<{ className?: string }> }> = {
+  spot: { label: '景點', Icon: Landmark },
+  food: { label: '美食', Icon: Utensils },
+  transport: { label: '交通', Icon: Train },
+  hotel: { label: '住宿', Icon: Hotel },
+  shopping: { label: '購物', Icon: ShoppingBag },
+  activity: { label: '活動', Icon: Ticket },
+  other: { label: '其他', Icon: Bookmark },
 };
 
 export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
@@ -255,296 +255,300 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* 0. In-Transit Spending Snapshot */}
-      <div className="p-3 sm:p-3.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xs flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 flex items-center justify-center text-amber-700 dark:text-amber-300 shrink-0">
-            <DollarSign className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-              今日支出 ({todayExpenses.length})
-            </div>
-            <div className="text-base sm:text-lg font-black font-mono text-amber-700 dark:text-amber-300">
-              {tripCurrency} {todayTotalSpent.toLocaleString()}
-            </div>
-          </div>
-        </div>
-
-        {onOpenQuickAction && canEdit && (
-          <button
-            type="button"
-            onClick={() => onOpenQuickAction('expense')}
-            className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs transition active:scale-95 flex items-center gap-1 shrink-0 cursor-pointer"
-            title="記帳"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>記一筆</span>
-          </button>
-        )}
-      </div>
-
       {/* 1. Day Selector Ribbon */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
         {trip.days.map((day) => (
           <button
             key={day.id}
             onClick={() => setSelectedDayNumber(day.dayNumber)}
-            className={`px-3 py-2 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 ${
+            className={`min-h-[44px] sm:min-h-[38px] px-3.5 py-2 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 cursor-pointer ${
               day.dayNumber === selectedDayNumber
-                ? 'bg-teal-700 text-white shadow-xs'
-                : 'bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
+                ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                : 'bg-white dark:bg-[#111827] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-800'
             }`}
           >
             <span>{t.day.replace('{n}', String(day.dayNumber))}</span>
-            <span className="opacity-70 font-mono text-[10px]">({formatMonthDaySlash(day.date)})</span>
+            <span className="opacity-75 font-mono tabular-nums text-[10px]">({formatMonthDaySlash(day.date)})</span>
           </button>
         ))}
       </div>
 
-      {/* 2. Daily Theme & Day Highlights Card */}
-      {(activeDay.theme || activeDay.notes) && (
-        <div className="rounded-2xl bg-amber-50/70 dark:bg-slate-900 border border-amber-200/80 dark:border-amber-900/40 p-3.5 sm:p-4 shadow-2xs">
-          <div className="flex items-start gap-2.5">
-            <div className="p-2 rounded-xl bg-amber-700 text-white shrink-0 mt-0.5 shadow-2xs">
-              <MapPin className="w-4 h-4" />
-            </div>
-            <div className="min-w-0 flex-1">
-              {activeDay.theme && (
-                <div className="flex items-center gap-2 flex-wrap mb-1">
-                  <span className="text-[10px] font-bold tracking-wider text-amber-800 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/80 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800">
-                    {lang === 'zh' ? '焦點' : 'Focus'}
-                  </span>
-                  <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
-                    {activeDay.theme}
-                  </h4>
+      {/* Responsive Desktop Workbench: Left Column | Right Column */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        <div className="lg:col-span-5 space-y-4 lg:sticky lg:top-20">
+          {/* 0. In-Transit Spending Snapshot */}
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200/70 dark:border-teal-800/70 flex items-center justify-center text-teal-700 dark:text-teal-400 shrink-0">
+                <DollarSign className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tabular-nums">
+                  今日支出 ({todayExpenses.length})
                 </div>
-              )}
-              {activeDay.notes && (
-                <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed mt-1 flex items-start gap-1.5">
-                  <FileText className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5" />
-                  <span>{activeDay.notes}</span>
-                </p>
-              )}
+                <div className="text-base sm:text-lg font-black font-mono tabular-nums text-slate-900 dark:text-white">
+                  {tripCurrency} {todayTotalSpent.toLocaleString()}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* 3. Micro Weather Capsule (Apple-style minimal bar with tap-to-expand) */}
-      <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-2xs overflow-hidden transition-all duration-200">
-        {/* Clickable Capsule Row */}
-        <div className="p-3 sm:px-4 sm:py-2.5 flex items-center justify-between gap-3 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setIsWeatherExpanded(!isWeatherExpanded)}
-            className="flex items-center gap-2.5 min-w-0 text-left hover:opacity-85 transition group"
-          >
-            <span className="text-xl shrink-0 select-none flex items-center justify-center">
-              {weatherDesc?.icon || <CloudSun className="w-5 h-5 text-amber-500" />}
-            </span>
-            <div className="flex items-center gap-1.5 flex-wrap text-xs text-slate-700 dark:text-slate-300">
-              <span className="font-black font-mono text-sm sm:text-base text-slate-900 dark:text-white">
-                {weather ? `${weather.temperature}°C` : '--°C'}
-              </span>
-              <span className="text-slate-300 dark:text-slate-600">·</span>
-              <span className="font-semibold text-slate-800 dark:text-slate-200">
-                {weatherDesc?.label || '氣象預報'}
-              </span>
-              {weather && (
-                <>
-                  <span className="text-slate-300 dark:text-slate-600">·</span>
-                  <span className="text-blue-600 dark:text-blue-400 font-medium flex items-center gap-0.5">
-                    <Umbrella className="w-3 h-3" />
-                    <span>降雨 {weather.rainProbability}%</span>
-                  </span>
-                </>
-              )}
-              <span className="text-slate-300 dark:text-slate-600">·</span>
-              <span className="text-slate-500 dark:text-slate-400 font-medium truncate max-w-[120px] sm:max-w-none">
-                {weather?.locationName || trip.destination}
-              </span>
-            </div>
-            <span className="text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200 transition">
-              {isWeatherExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </span>
-          </button>
-
-          {/* Quick Actions (Location Switch & Refresh) */}
-          <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-            {weatherMode === 'destination' ? (
+            {onOpenQuickAction && canEdit && (
               <button
                 type="button"
-                onClick={loadGpsWeather}
-                disabled={isWeatherLoading}
-                className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-semibold flex items-center gap-1 transition active:scale-95"
-                title={t.useGpsLocation}
+                onClick={() => onOpenQuickAction('expense')}
+                className="min-h-[44px] sm:min-h-[38px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs shadow-2xs transition active:scale-95 flex items-center gap-1 shrink-0 cursor-pointer"
+                title="記帳"
               >
-                <LocateFixed className="w-3 h-3 text-teal-600 dark:text-teal-400" />
-                <span className="hidden xs:inline">切換</span>
-                <span>GPS</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={loadDestinationWeather}
-                disabled={isWeatherLoading}
-                className="px-2 py-1 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50/50 dark:bg-teal-950/50 hover:bg-teal-100/50 text-teal-800 dark:text-teal-200 text-[11px] font-semibold flex items-center gap-1 transition active:scale-95"
-                title={t.useDestination}
-              >
-                <MapPin className="w-3 h-3 text-teal-600 dark:text-teal-400" />
-                <span className="hidden xs:inline">切換</span>
-                <span>景點</span>
+                <Plus className="w-3.5 h-3.5" />
+                <span>記一筆</span>
               </button>
             )}
-
-            <button
-              type="button"
-              onClick={weatherMode === 'destination' ? loadDestinationWeather : loadGpsWeather}
-              disabled={isWeatherLoading}
-              className="p-1 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition"
-              title="重新整理氣象"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isWeatherLoading ? 'animate-spin' : ''}`} />
-            </button>
           </div>
-        </div>
 
-        {/* Collapsible Details Drawer */}
-        {isWeatherExpanded && (
-          <div className="px-4 pb-3.5 pt-2 border-t border-slate-100 dark:border-slate-800/80 space-y-2.5 animate-in fade-in duration-150">
-            {isWeatherLoading && !weather ? (
-              <div className="py-3 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                <RefreshCw className="w-3.5 h-3.5 animate-spin text-teal-600" />
-                <span>{t.fetchingWeather}</span>
+          {/* 2. Daily Theme & Day Highlights Card */}
+          {(activeDay.theme || activeDay.notes) && (
+            <div className="rounded-2xl bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-3.5 sm:p-4 shadow-2xs">
+              <div className="flex items-start gap-2.5">
+                <div className="p-2 rounded-xl bg-teal-700 dark:bg-teal-600 text-white shrink-0 mt-0.5 shadow-2xs">
+                  <MapPin className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  {activeDay.theme && (
+                    <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                      <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400">
+                        {lang === 'zh' ? '今日焦點' : 'Focus'}
+                      </span>
+                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                      <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
+                        {activeDay.theme}
+                      </h4>
+                    </div>
+                  )}
+                  {activeDay.notes && (
+                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mt-1 flex items-start gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
+                      <span>{activeDay.notes}</span>
+                    </p>
+                  )}
+                </div>
               </div>
-            ) : weatherError ? (
-              <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 text-amber-800 dark:text-amber-300 text-xs flex items-center justify-between">
-                <span>{weatherError}</span>
+            </div>
+          )}
+
+          {/* 3. Micro Weather Capsule */}
+          <div className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs overflow-hidden transition-all duration-200">
+            <div className="p-3 sm:px-4 sm:py-3 flex items-center justify-between gap-3 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setIsWeatherExpanded(!isWeatherExpanded)}
+                className="flex items-center gap-2.5 min-w-0 text-left hover:opacity-85 transition group cursor-pointer"
+              >
+                <span className="text-xl shrink-0 select-none flex items-center justify-center">
+                  {weatherDesc?.icon || <CloudSun className="w-5 h-5 text-teal-700 dark:text-teal-400" />}
+                </span>
+                <div className="flex items-center gap-1.5 flex-wrap text-xs text-slate-700 dark:text-slate-300">
+                  <span className="font-black font-mono tabular-nums text-sm sm:text-base text-slate-900 dark:text-white">
+                    {weather ? `${weather.temperature}°C` : '--°C'}
+                  </span>
+                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {weatherDesc?.label || '氣象預報'}
+                  </span>
+                  {weather && (
+                    <>
+                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                      <span className="text-teal-700 dark:text-teal-400 font-medium font-mono tabular-nums flex items-center gap-0.5">
+                        <Umbrella className="w-3 h-3" />
+                        <span>降雨 {weather.rainProbability}%</span>
+                      </span>
+                    </>
+                  )}
+                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                  <span className="text-slate-500 dark:text-slate-400 font-medium truncate max-w-[120px] sm:max-w-none">
+                    {weather?.locationName || trip.destination}
+                  </span>
+                </div>
+                <span className="text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200 transition">
+                  {isWeatherExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </span>
+              </button>
+
+              <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+                {weatherMode === 'destination' ? (
+                  <button
+                    type="button"
+                    onClick={loadGpsWeather}
+                    disabled={isWeatherLoading}
+                    className="min-h-[36px] px-2.5 py-1 rounded-lg border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-semibold flex items-center gap-1 transition active:scale-95 cursor-pointer"
+                    title={t.useGpsLocation}
+                  >
+                    <LocateFixed className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                    <span className="hidden xs:inline">切換</span>
+                    <span>GPS</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={loadDestinationWeather}
+                    disabled={isWeatherLoading}
+                    className="min-h-[36px] px-2.5 py-1 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50/70 dark:bg-teal-950/50 hover:bg-teal-100/60 text-teal-800 dark:text-teal-200 text-[11px] font-semibold flex items-center gap-1 transition active:scale-95 cursor-pointer"
+                    title={t.useDestination}
+                  >
+                    <MapPin className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                    <span className="hidden xs:inline">切換</span>
+                    <span>景點</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
-                  onClick={loadDestinationWeather}
-                  className="px-2 py-0.5 rounded-md bg-amber-600 text-white font-semibold text-[11px]"
+                  onClick={weatherMode === 'destination' ? loadDestinationWeather : loadGpsWeather}
+                  disabled={isWeatherLoading}
+                  className="w-9 h-9 flex items-center justify-center rounded-lg border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition cursor-pointer"
+                  title="重新整理氣象"
                 >
-                  重試
+                  <RefreshCw className={`w-3.5 h-3.5 ${isWeatherLoading ? 'animate-spin' : ''}`} />
                 </button>
               </div>
-            ) : weather ? (
-              <>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                  <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800/80">
-                    <span className="text-slate-400 text-[10px] block">體感溫度</span>
-                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{weather.apparentTemperature}°C</span>
-                  </div>
-                  <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800/80">
-                    <span className="text-slate-400 text-[10px] block">本日最高/最低</span>
-                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{weather.maxTemp}° / {weather.minTemp}°</span>
-                  </div>
-                  <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800/80">
-                    <span className="text-slate-400 text-[10px] block">濕度</span>
-                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{weather.humidity}%</span>
-                  </div>
-                  <div className="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800/80">
-                    <span className="text-slate-400 text-[10px] block">風速</span>
-                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{weather.windSpeed} km/h</span>
-                  </div>
-                </div>
+            </div>
 
-                {weatherAdvice && (
-                  <div className="p-2.5 rounded-xl bg-teal-50/70 dark:bg-teal-950/40 border border-teal-100 dark:border-teal-900/60 text-xs text-teal-900 dark:text-teal-200 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 truncate">
-                      <Info className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                      <span className="truncate">{weatherAdvice}</span>
-                    </div>
-                    {gpsDistanceToSpot && (
-                      <span className="font-mono font-bold text-teal-700 dark:text-teal-300 bg-white dark:bg-slate-800 px-2 py-0.5 rounded-md border border-teal-200 dark:border-teal-800 shrink-0 text-[11px]">
-                        距下站 {gpsDistanceToSpot}
-                      </span>
-                    )}
+            {isWeatherExpanded && (
+              <div className="px-4 pb-3.5 pt-2.5 border-t border-[#E5E2DC] dark:border-slate-800 space-y-2.5 animate-in fade-in duration-150">
+                {isWeatherLoading && !weather ? (
+                  <div className="py-3 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-teal-700 dark:text-teal-400" />
+                    <span>{t.fetchingWeather}</span>
                   </div>
-                )}
-              </>
-            ) : null}
+                ) : weatherError ? (
+                  <div className="p-2.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs flex items-center justify-between">
+                    <span>{weatherError}</span>
+                    <button
+                      type="button"
+                      onClick={loadDestinationWeather}
+                      className="px-2.5 py-1 rounded-md bg-teal-700 dark:bg-teal-600 text-white font-semibold text-[11px] cursor-pointer"
+                    >
+                      重試
+                    </button>
+                  </div>
+                ) : weather ? (
+                  <>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div className="p-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800">
+                        <span className="text-slate-400 text-[10px] block">體感溫度</span>
+                        <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">{weather.apparentTemperature}°C</span>
+                      </div>
+                      <div className="p-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800">
+                        <span className="text-slate-400 text-[10px] block">本日最高/最低</span>
+                        <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">{weather.maxTemp}° / {weather.minTemp}°</span>
+                      </div>
+                      <div className="p-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800">
+                        <span className="text-slate-400 text-[10px] block">濕度</span>
+                        <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">{weather.humidity}%</span>
+                      </div>
+                      <div className="p-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800">
+                        <span className="text-slate-400 text-[10px] block">風速</span>
+                        <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">{weather.windSpeed} km/h</span>
+                      </div>
+                    </div>
+
+                    {weatherAdvice && (
+                      <div className="p-2.5 rounded-xl bg-teal-50/70 dark:bg-teal-950/40 border border-teal-200/60 dark:border-teal-900/60 text-xs text-teal-900 dark:text-teal-200 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <Info className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+                          <span className="truncate">{weatherAdvice}</span>
+                        </div>
+                        {gpsDistanceToSpot && (
+                          <span className="font-mono tabular-nums font-bold text-teal-700 dark:text-teal-300 shrink-0 text-[11px]">
+                            · 距下站 {gpsDistanceToSpot}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            )}
           </div>
-        )}
-      </div>
 
       {/* 4. Hero "Up Next" Card */}
       {nextItem ? (
-        <div className="rounded-3xl bg-slate-900 dark:bg-slate-950 border border-slate-800 text-white p-5 sm:p-6 shadow-md relative overflow-hidden">
+        <div className="rounded-3xl bg-slate-900 dark:bg-[#111827] border border-slate-800 text-white p-5 sm:p-6 shadow-md relative overflow-hidden">
           <div className="flex items-center justify-between text-xs text-slate-300 font-semibold mb-2 flex-wrap gap-2">
             <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 text-xs font-bold text-teal-300">
+              <span className="flex items-center gap-1.5 text-xs font-bold text-teal-400">
                 <Navigation className="w-3.5 h-3.5" />
                 <span>{t.upNext}</span>
               </span>
-              {/* Category Badge */}
               {nextItem.category && CATEGORY_TAGS[nextItem.category] && (
                 <>
                   <span aria-hidden="true" className="text-slate-500">·</span>
-                  <span className="text-xs text-teal-100 flex items-center gap-1 font-medium">
-                    {React.createElement(CATEGORY_TAGS[nextItem.category].Icon, { className: 'w-3 h-3' })}
+                  <span className="text-xs text-slate-200 flex items-center gap-1 font-medium">
+                    {React.createElement(CATEGORY_TAGS[nextItem.category].Icon, { className: 'w-3 h-3 text-teal-400' })}
                     <span>{CATEGORY_TAGS[nextItem.category].label}</span>
                   </span>
                 </>
               )}
             </div>
 
-            <span className="font-mono text-slate-300 flex items-center gap-1 text-xs">
-              <Clock className="w-3.5 h-3.5 text-teal-300" />
+            <span className="font-mono tabular-nums text-slate-300 flex items-center gap-1 text-xs">
+              <Clock className="w-3.5 h-3.5 text-teal-400" />
               <span>{nextItem.startTime}</span>
               {nextItem.endTime ? <span>~ {nextItem.endTime}</span> : ''}
             </span>
           </div>
 
-          <h3 className="font-black text-xl sm:text-2xl mt-1 tracking-tight">
+          <h3 className="font-black text-xl sm:text-2xl mt-1 tracking-tight text-white">
             {nextItem.title}
           </h3>
 
           {(nextItem.locationName || nextItem.address) && (
-            <p className="text-teal-100 text-xs sm:text-sm flex items-center gap-1.5 mt-1.5 opacity-90">
-              <MapPin className="w-4 h-4 shrink-0 text-teal-300" />
+            <p className="text-slate-300 text-xs sm:text-sm flex items-center gap-1.5 mt-1.5">
+              <MapPin className="w-4 h-4 shrink-0 text-teal-400" />
               <span className="truncate">{nextItem.locationName || nextItem.address}</span>
             </p>
           )}
 
-          {/* Missing Itinerary Notes / Explanation in Up Next */}
           {nextItem.notes && (
-            <div className="mt-3 p-3 rounded-2xl bg-white/15 backdrop-blur-md text-white text-xs border border-white/20 space-y-1">
-              <div className="flex items-center gap-1.5 text-amber-300 font-bold text-[11px]">
+            <div className="mt-3 p-3 rounded-2xl bg-white/10 text-white text-xs border border-white/15 space-y-1">
+              <div className="flex items-center gap-1.5 text-teal-300 font-bold text-[11px]">
                 <FileText className="w-3.5 h-3.5" />
                 <span>{lang === 'zh' ? '說明' : 'Notes'}</span>
               </div>
-              <p className="text-teal-50 text-xs leading-relaxed whitespace-pre-wrap">
+              <p className="text-slate-200 text-xs leading-relaxed whitespace-pre-wrap">
                 {nextItem.notes}
               </p>
             </div>
           )}
 
           {nextItem.transportNote && (
-            <div className="mt-2.5 p-2.5 rounded-xl bg-white/10 backdrop-blur-md text-teal-50 text-xs flex items-start gap-2 border border-white/10">
-              <Bus className="w-4 h-4 text-teal-300 shrink-0 mt-0.5" />
+            <div className="mt-2.5 p-2.5 rounded-xl bg-white/10 text-slate-100 text-xs flex items-start gap-2 border border-white/10">
+              <Bus className="w-4 h-4 text-teal-400 shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold text-[11px] text-teal-200 block">{lang === 'zh' ? '交通' : 'Transit'}:</span>
+                <span className="font-bold text-[11px] text-teal-300 block">{lang === 'zh' ? '交通' : 'Transit'}</span>
                 <span>{nextItem.transportNote}</span>
               </div>
             </div>
           )}
 
-          <div className="flex items-center gap-2 flex-wrap mt-2.5">
-            {nextItem.bookingCode && (
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-400/20 text-amber-200 text-xs font-mono font-bold border border-amber-300/30">
-                <Bookmark className="w-3.5 h-3.5" />
-                <span>{nextItem.bookingCode}</span>
-              </div>
-            )}
-            {typeof nextItem.cost === 'number' && nextItem.cost > 0 && (
-              <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 text-teal-200 text-xs font-mono font-semibold">
-                <DollarSign className="w-3 h-3 text-teal-300" />
-                <span>預估: {trip.currency} {nextItem.cost.toLocaleString()}</span>
-              </div>
-            )}
-          </div>
+          {(nextItem.bookingCode || (typeof nextItem.cost === 'number' && nextItem.cost > 0)) && (
+            <div className="flex items-center gap-2 flex-wrap mt-3 text-xs font-mono tabular-nums text-slate-300">
+              {nextItem.bookingCode && (
+                <span className="inline-flex items-center gap-1 text-teal-300 font-semibold">
+                  <Bookmark className="w-3.5 h-3.5" />
+                  <span>#{nextItem.bookingCode}</span>
+                </span>
+              )}
+              {nextItem.bookingCode && typeof nextItem.cost === 'number' && nextItem.cost > 0 && (
+                <span aria-hidden="true" className="text-slate-500">·</span>
+              )}
+              {typeof nextItem.cost === 'number' && nextItem.cost > 0 && (
+                <span className="inline-flex items-center gap-1 text-slate-200 font-semibold">
+                  <DollarSign className="w-3.5 h-3.5 text-teal-400" />
+                  <span>預估 {trip.currency} {nextItem.cost.toLocaleString()}</span>
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Action Buttons */}
           <div className={`mt-5 grid gap-2.5 ${canEdit ? 'grid-cols-2' : 'grid-cols-1'}`}>
@@ -552,7 +556,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
               href={getGoogleMapsNavigationUrl(nextItem)}
               target="_blank"
               rel="noopener noreferrer"
-              className="py-2.5 px-3 rounded-xl bg-blue-500 hover:bg-blue-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95"
+              className="min-h-[44px] py-2.5 px-3 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95"
             >
               <Navigation className="w-4 h-4" />
               <span>{t.navGoogle}</span>
@@ -562,7 +566,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
               <button
                 type="button"
                 onClick={(e) => handleToggleComplete(nextItem.id, e)}
-                className="py-2.5 px-3 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-md text-white font-bold text-xs flex items-center justify-center gap-1.5 border border-white/20 transition active:scale-95"
+                className="min-h-[44px] py-2.5 px-3 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs flex items-center justify-center gap-1.5 border border-white/20 transition active:scale-95 cursor-pointer"
               >
                 <CheckCircle2 className="w-4 h-4 text-teal-300" />
                 <span>{t.checked}</span>
@@ -571,87 +575,90 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
           </div>
         </div>
       ) : (
-        <div className="rounded-3xl bg-emerald-800 text-white p-6 shadow-md text-center">
+        <div className="rounded-3xl bg-teal-800 dark:bg-teal-900/60 border border-teal-700/60 text-white p-6 shadow-md text-center">
           <h3 className="font-bold text-base flex items-center justify-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-emerald-300" />
+            <CheckCircle2 className="w-5 h-5 text-teal-300" />
             <span>{t.doneToday}</span>
           </h3>
         </div>
       )}
+        </div>
 
       {/* 5. Progress & Complete Day Itinerary Checklist with Full Descriptions */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl p-4 sm:p-6 border border-slate-200/90 dark:border-slate-800 shadow-2xs space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-          <div>
-            <h4 className="font-bold text-slate-800 dark:text-slate-200 text-xs sm:text-sm">
-              {t.day.replace('{n}', String(activeDay.dayNumber))} ({formatDateSlash(activeDay.date)}) {lang === 'zh' ? '行程清單' : 'Itinerary'}
-            </h4>
-          </div>
-          <span className="font-bold text-xs px-2.5 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
-            {completedCount} / {totalCount} ({progressPercent}%)
+      <div className="lg:col-span-7 bg-white dark:bg-[#111827] rounded-3xl p-4 sm:p-6 border border-[#E5E2DC] dark:border-slate-800 shadow-2xs space-y-4">
+        <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#E5E2DC] dark:border-slate-800">
+          <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm">
+            {t.day.replace('{n}', String(activeDay.dayNumber))} ({formatDateSlash(activeDay.date)}) {lang === 'zh' ? '行程清單' : 'Itinerary'}
+          </h4>
+          <span className="font-mono tabular-nums font-bold text-xs text-teal-700 dark:text-teal-400 shrink-0">
+            {completedCount} / {totalCount} · {progressPercent}%
           </span>
         </div>
 
         {/* Progress bar */}
-        <div className="w-full bg-slate-100 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
+        <div className="w-full bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC]/60 dark:border-slate-700/50 h-2 rounded-full overflow-hidden">
           <div
-            className="bg-teal-600 h-full transition-all duration-300 rounded-full"
+            className="bg-teal-700 dark:bg-teal-500 h-full transition-all duration-300 rounded-full"
             style={{ width: `${progressPercent}%` }}
           />
         </div>
 
         {/* Spots list */}
         <div className="space-y-3 pt-1">
-          {activeDay.items.map((item, idx) => {
-            const isExpanded = expandedItemIds[item.id] ?? true; // Default expanded so notes are immediately visible!
+          {activeDay.items.map((item) => {
+            const isExpanded = expandedItemIds[item.id] ?? true;
             const catTag = CATEGORY_TAGS[item.category] || CATEGORY_TAGS.spot;
 
             return (
               <div
                 key={item.id}
-                className={`rounded-2xl p-3.5 border transition ${
+                className={`rounded-2xl p-3.5 sm:p-4 border transition ${
                   item.completed
-                    ? 'bg-slate-50/70 dark:bg-slate-800/40 border-slate-200/60 dark:border-slate-800 opacity-60'
-                    : 'bg-white dark:bg-slate-900/90 border-slate-200/90 dark:border-slate-800 shadow-2xs hover:border-teal-300 dark:hover:border-teal-700'
+                    ? 'bg-[#FAF9F6] dark:bg-slate-900/40 border-[#E5E2DC]/70 dark:border-slate-800 opacity-65'
+                    : 'bg-white dark:bg-[#111827] border-[#E5E2DC] dark:border-slate-800 shadow-2xs hover:border-teal-600/50 dark:hover:border-teal-500/50'
                 }`}
               >
                 {/* Spot Header Row */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex items-start gap-1.5 flex-1 min-w-0">
                     <button
                       type="button"
                       disabled={!canEdit}
                       onClick={(e) => handleToggleComplete(item.id, e)}
-                      className={`mt-0.5 shrink-0 text-slate-400 transition ${canEdit ? 'hover:text-emerald-600 cursor-pointer' : 'cursor-default opacity-80'}`}
+                      className={`w-11 h-11 sm:w-9 sm:h-9 -ml-2 -mt-1.5 flex items-center justify-center rounded-xl shrink-0 text-slate-400 transition ${canEdit ? 'hover:text-teal-700 dark:hover:text-teal-400 hover:bg-slate-100/70 dark:hover:bg-slate-800 cursor-pointer' : 'cursor-default opacity-80'}`}
                       title={item.completed ? '標記為未完成' : '標記為已造訪'}
                     >
                       {item.completed ? (
-                        <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                        <CheckCircle2 className="w-5 h-5 text-teal-700 dark:text-teal-400" />
                       ) : (
-                        <Circle className="w-5 h-5 text-slate-300 dark:text-slate-600 hover:text-teal-600" />
+                        <Circle className="w-5 h-5 text-slate-300 dark:text-slate-600" />
                       )}
                     </button>
 
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className="font-mono text-xs font-bold text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/60 px-2 py-0.5 rounded-md border border-teal-200/50 dark:border-teal-800/50">
-                          {item.startTime} {item.endTime ? `~ ${item.endTime}` : ''}
+                      <div className="flex items-center gap-1.5 flex-wrap mb-1 text-xs">
+                        <span className="font-mono tabular-nums font-bold text-teal-700 dark:text-teal-400">
+                          {item.startTime}{item.endTime ? ` ~ ${item.endTime}` : ''}
                         </span>
-                        <span className={`px-2 py-0.5 rounded-md border text-[10px] font-bold flex items-center gap-1 ${catTag.badgeClass}`}>
-                          <catTag.Icon className="w-3 h-3" />
+                        <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">·</span>
+                        <span className="text-[11px] font-medium text-slate-600 dark:text-slate-400 inline-flex items-center gap-1">
+                          <catTag.Icon className="w-3 h-3 text-teal-700 dark:text-teal-400" />
                           <span>{catTag.label}</span>
                         </span>
                         {item.bookingCode && (
-                          <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[10px] font-mono font-bold flex items-center gap-1">
-                            <Bookmark className="w-3 h-3" />
-                            <span>{item.bookingCode}</span>
-                          </span>
+                          <>
+                            <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">·</span>
+                            <span className="text-[11px] font-mono tabular-nums font-semibold text-slate-600 dark:text-slate-300 inline-flex items-center gap-1">
+                              <Bookmark className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                              <span>#{item.bookingCode}</span>
+                            </span>
+                          </>
                         )}
                       </div>
 
                       <h5
                         onClick={(e) => handleToggleComplete(item.id, e)}
-                        className={`text-sm sm:text-base font-bold cursor-pointer hover:text-teal-600 dark:hover:text-teal-300 transition ${
+                        className={`text-sm sm:text-base font-bold cursor-pointer hover:text-teal-700 dark:hover:text-teal-300 transition ${
                           item.completed
                             ? 'line-through text-slate-400 dark:text-slate-500'
                             : 'text-slate-900 dark:text-white'
@@ -662,7 +669,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
 
                       {(item.locationName || item.address) && (
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-0.5 truncate">
-                          <MapPin className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                          <MapPin className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
                           <span className="truncate">{item.locationName || item.address}</span>
                         </p>
                       )}
@@ -675,7 +682,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                       href={getGoogleMapsNavigationUrl(item)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-900 transition active:scale-95"
+                      className="w-11 h-11 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-700 dark:text-teal-300 border border-teal-200/70 dark:border-teal-800/60 transition active:scale-95"
                       title={t.navGoogle}
                     >
                       <Navigation className="w-4 h-4" />
@@ -684,7 +691,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                       <button
                         type="button"
                         onClick={() => toggleItemExpanded(item.id)}
-                        className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition cursor-pointer"
+                        className="w-11 h-11 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 transition cursor-pointer"
                         title={isExpanded ? '收合說明' : '展開說明'}
                       >
                         {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -694,14 +701,13 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                 </div>
 
                 {/* Expanded Spot Details (Notes, Transport Note, Cost) */}
-                {isExpanded && (item.notes || item.transportNote || item.cost) && (
-                  <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2 text-xs">
-                    {/* Itinerary Notes Description */}
+                {isExpanded && (item.notes || item.transportNote || item.cost || (item.memoryPhotos && item.memoryPhotos.length > 0)) && (
+                  <div className="mt-3 pt-3 border-t border-[#E5E2DC] dark:border-slate-800 space-y-2 text-xs">
                     {item.notes && (
-                      <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800/80">
+                      <div className="p-2.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800">
                         <div className="flex items-center gap-1 text-[11px] font-bold text-teal-700 dark:text-teal-400 mb-1">
-                          <FileText className="w-3.5 h-3.5 text-teal-600" />
-                          <span>{lang === 'zh' ? '備註' : 'Notes'}:</span>
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>{lang === 'zh' ? '備註' : 'Notes'}</span>
                         </div>
                         <p className="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap text-[11px]">
                           {item.notes}
@@ -709,33 +715,30 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                       </div>
                     )}
 
-                    {/* Transport note */}
                     {item.transportNote && (
-                      <div className="p-2.5 rounded-xl bg-teal-50/50 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900/40 text-teal-900 dark:text-teal-200 text-[11px] flex items-start gap-2">
-                        <Bus className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" />
+                      <div className="p-2.5 rounded-xl bg-teal-50/50 dark:bg-teal-950/30 border border-teal-200/50 dark:border-teal-900/50 text-teal-900 dark:text-teal-200 text-[11px] flex items-start gap-2">
+                        <Bus className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
                         <div>
                           <strong className="block text-teal-800 dark:text-teal-300 font-semibold mb-0.5">
-                            {lang === 'zh' ? '交通' : 'Transit'}:
+                            {lang === 'zh' ? '交通' : 'Transit'}
                           </strong>
                           <span>{item.transportNote}</span>
                         </div>
                       </div>
                     )}
 
-                    {/* Cost note */}
                     {typeof item.cost === 'number' && item.cost > 0 && (
-                      <div className="text-[11px] text-slate-500 flex items-center gap-1">
-                        <DollarSign className="w-3.5 h-3.5 text-teal-600" />
-                        <span>{lang === 'zh' ? '預估費用' : 'Cost'}: <strong className="text-slate-800 dark:text-slate-200 font-mono">{trip.currency} {item.cost.toLocaleString()}</strong></span>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                        <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                        <span>{lang === 'zh' ? '預估費用' : 'Cost'} · <strong className="text-slate-800 dark:text-slate-200 font-mono tabular-nums">{trip.currency} {item.cost.toLocaleString()}</strong></span>
                       </div>
                     )}
 
-                    {/* Spot Memory Photos */}
                     {item.memoryPhotos && item.memoryPhotos.length > 0 && (
-                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
-                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-rose-600 dark:text-rose-400 mb-1.5">
+                      <div className="pt-2 border-t border-[#E5E2DC] dark:border-slate-800">
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-teal-700 dark:text-teal-400 mb-1.5">
                           <Camera className="w-3.5 h-3.5" />
-                          <span>打卡回憶相片 ({item.memoryPhotos.length} 張)</span>
+                          <span className="font-mono tabular-nums">打卡回憶相片 ({item.memoryPhotos.length})</span>
                         </div>
                         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
                           {item.memoryPhotos.map((photo, pIdx) => (
@@ -746,7 +749,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                               collabId={trip.collabId}
                               src={photo}
                               alt="Memory photo"
-                              className="w-14 h-14 rounded-xl object-cover border border-rose-200 dark:border-rose-900 shadow-2xs shrink-0"
+                              className="w-14 h-14 rounded-xl object-cover border border-[#E5E2DC] dark:border-slate-700 shadow-2xs shrink-0"
                             />
                           ))}
                         </div>
@@ -758,6 +761,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
             );
           })}
         </div>
+      </div>
       </div>
     </div>
   );

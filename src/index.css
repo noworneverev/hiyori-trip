@@ -3,18 +3,63 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+@theme {
+  --font-sans: "Plus Jakarta Sans", "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root {
+  --app-font-multiplier: 1.0;
+  --bg-canvas: #FAF9F6;
+  --bg-surface: #FFFFFF;
+  --bg-subtle: #F3F1EC;
+  --border-hairline: #E5E2DC;
+  --text-primary: #18181B;
+  --text-secondary: #52525B;
+  --text-muted: #71717A;
+  --accent-primary: #0F766E;
+  --accent-hover: #0D5D57;
+  --accent-soft: #F0FDFA;
+}
+
+html.dark {
+  --bg-canvas: #090D16;
+  --bg-surface: #111827;
+  --bg-subtle: #1A2234;
+  --border-hairline: #1F2937;
+  --text-primary: #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted: #94A3B8;
+  --accent-primary: #14B8A6;
+  --accent-hover: #2DD4BF;
+  --accent-soft: rgba(15, 118, 110, 0.16);
+}
+
 html {
-  background-color: #f8fafc;
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
   scrollbar-gutter: stable;
 }
 
 html.dark {
-  background-color: #020617 !important;
+  background-color: var(--bg-canvas) !important;
 }
 
 body {
   min-height: 100vh;
   min-height: -webkit-fill-available;
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+html.dark body {
+  letter-spacing: 0.01em;
+}
+
+h1, h2, h3 {
+  text-wrap: balance;
 }
 
 /* Cross-browser scrollbar hiding utility (eliminates jitter and unwanted horizontal scrollbars) */
@@ -27,21 +72,21 @@ body {
 
 .scrollbar-none,
 .no-scrollbar {
-  -ms-overflow-style: none !important; /* IE and Edge */
-  scrollbar-width: none !important; /* Firefox */
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
 }
 
-/* Leaflet Map overrides for modern clean look */
+/* Leaflet Map overrides aligned with Hiyori surface tokens */
 .leaflet-container {
   width: 100%;
   height: 100%;
   z-index: 10;
-  background-color: #f1f5f9;
+  background-color: var(--bg-subtle);
   font-family: inherit;
 }
 
 .dark .leaflet-container {
-  background-color: #0f172a;
+  background-color: var(--bg-canvas);
 }
 
 .dark .leaflet-tile-pane {
@@ -50,14 +95,15 @@ body {
 
 .leaflet-popup-content-wrapper {
   border-radius: 1rem;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
   padding: 0;
   overflow: hidden;
+  border: 1px solid var(--border-hairline);
 }
 
 .dark .leaflet-popup-content-wrapper {
-  background-color: #1e293b;
-  color: #f8fafc;
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
 }
 
 .leaflet-popup-content {
@@ -65,9 +111,9 @@ body {
   line-height: 1.5;
 }
 
-/* Pulse animation for active marker */
+/* Pulse animation for active map pin only */
 @keyframes markerPulse {
-  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(15, 118, 110, 0.6); }
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(15, 118, 110, 0.55); }
   70% { transform: scale(1); box-shadow: 0 0 0 12px rgba(15, 118, 110, 0); }
   100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(15, 118, 110, 0); }
 }
@@ -76,15 +122,16 @@ body {
   animation: markerPulse 2s infinite;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .marker-pulse {
+    animation: none;
+  }
+}
+
 /* ==========================================================================
    Accessibility: Typography & Display Scaling Engine
    ========================================================================== */
 
-:root {
-  --app-font-multiplier: 1.0;
-}
-
-/* 1. Comfortable Tier (115% scale) */
 html[data-text-scale="comfortable"] {
   font-size: 110%;
 }
@@ -93,17 +140,15 @@ html[data-text-scale="comfortable"] body {
   line-height: 1.6;
 }
 
-/* 2. Extra Large Tier (130% scale, High Contrast, Enlarged Controls) */
 html[data-text-scale="senior"] {
   font-size: 122%;
 }
 
 html[data-text-scale="senior"] body {
   line-height: 1.65;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.015em;
 }
 
-/* High Contrast text overrides for enhanced visibility in extra large tier */
 html[data-text-scale="senior"] .text-slate-400,
 html[data-text-scale="senior"] .text-zinc-400,
 html[data-text-scale="senior"] .text-slate-500,
@@ -120,7 +165,6 @@ html.dark[data-text-scale="senior"] .text-zinc-500 {
   font-weight: 500;
 }
 
-/* Clear card borders and larger touch targets in Senior mode */
 html[data-text-scale="senior"] .border-slate-200,
 html[data-text-scale="senior"] .border-slate-100 {
   border-color: #cbd5e1 !important;
@@ -131,13 +175,11 @@ html.dark[data-text-scale="senior"] .border-zinc-800 {
   border-color: #475569 !important;
 }
 
-/* Thicker divider lines for easier visual tracking */
 html[data-text-scale="senior"] hr,
 html[data-text-scale="senior"] .divide-y > * {
   border-color: #94a3b8;
 }
 
-/* Larger clickable area for tabs and primary buttons */
 html[data-text-scale="senior"] button,
 html[data-text-scale="senior"] a {
   touch-action: manipulation;

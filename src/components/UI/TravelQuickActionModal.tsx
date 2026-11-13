@@ -478,7 +478,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-full sm:max-w-lg bg-white dark:bg-[#1c1c1e] rounded-t-[28px] sm:rounded-3xl shadow-2xl border-t sm:border border-slate-200/80 dark:border-white/10 overflow-hidden flex flex-col max-h-[90dvh] sm:max-h-[88vh] overscroll-contain touch-pan-y animate-in slide-in-from-bottom duration-200"
+        className="relative w-full max-w-full sm:max-w-lg bg-white dark:bg-[#111827] rounded-t-[28px] sm:rounded-3xl shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-[90dvh] sm:max-h-[88vh] overscroll-contain touch-pan-y animate-in slide-in-from-bottom duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Mobile Drag Indicator Handle (visual affordance, locked to sheet) */}

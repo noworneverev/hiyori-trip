@@ -1085,30 +1085,30 @@ export default function App() {
   const nightCount = Math.max(dayCount - 1, 0);
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 transition-colors overflow-x-hidden">
-      {/* Top Navbar */}
-      <header className={`sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200/90 dark:border-slate-800 shadow-2xs pt-[env(safe-area-inset-top,0px)] max-sm:transition-transform max-sm:duration-300 max-sm:ease-in-out ${
+    <div className="min-h-screen flex flex-col bg-[#FAF9F6] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 transition-colors overflow-x-hidden">
+      {/* Top Navbar (Clean 3-zone contract) */}
+      <header className={`sticky top-0 z-40 bg-white/90 dark:bg-[#111827]/90 backdrop-blur-xl border-b border-[#E5E2DC] dark:border-slate-800 pt-[env(safe-area-inset-top,0px)] max-sm:transition-transform max-sm:duration-300 max-sm:ease-in-out ${
         isNavHidden ? 'max-sm:-translate-y-full' : 'max-sm:translate-y-0'
       }`}>
-        <div className="max-w-6xl mx-auto px-2.5 sm:px-6 h-14 flex items-center justify-between gap-1 sm:gap-3">
-          {/* Brand */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-6">
+          {/* Zone 1: Brand Wordmark */}
+          <div className="flex items-center gap-2 shrink-0">
             <HiyoriLogo className="w-7 h-7 sm:w-8 sm:h-8 shrink-0" />
-            <h1 className="font-bold text-sm sm:text-base tracking-tight text-slate-900 dark:text-white">
+            <h1 className="font-bold text-sm sm:text-base tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0">
               {t.appName}
             </h1>
           </div>
 
-          {/* Quick Actions (Trip Switcher & Control Buttons) */}
-          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+          {/* Zone 2 & 3: Trip Workspace & Account Controls */}
+          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
             {/* Trip Switcher */}
             <div className="relative shrink min-w-0" ref={tripSwitcherRef}>
               <button
                 onClick={() => setShowTripSwitcher(!showTripSwitcher)}
-                className="flex items-center gap-1 h-9 px-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 transition shadow-2xs max-w-[140px] xs:max-w-[180px] sm:max-w-[230px]"
+                className="flex items-center gap-1.5 h-10 sm:h-9 px-2.5 sm:px-3 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 transition max-w-[148px] xs:max-w-[188px] sm:max-w-[240px] cursor-pointer"
                 title="切換旅程"
               >
-                <Plane className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+                <Plane className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
                 <span className="truncate">{currentTrip.title}</span>
                 <ChevronDown className="w-3 h-3 text-slate-400 shrink-0 ml-0.5" />
               </button>
@@ -1120,8 +1120,8 @@ export default function App() {
                     className="fixed inset-0 z-40 bg-black/15 backdrop-blur-[0.5px] sm:hidden"
                     onClick={() => setShowTripSwitcher(false)}
                   />
-                  <div className="fixed inset-x-3 top-14 sm:absolute sm:inset-x-auto sm:left-0 sm:right-auto sm:top-full mt-1.5 w-auto sm:w-80 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200/90 dark:border-slate-800 p-2 z-50 animate-in fade-in zoom-in-95 duration-100">
-                    <div className="px-2.5 py-1 text-[11px] font-bold text-slate-400 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
+                  <div className="fixed inset-x-3 top-14 sm:absolute sm:inset-x-auto sm:left-0 sm:right-auto sm:top-full mt-1.5 w-auto sm:w-80 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-[#111827] rounded-2xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-2 z-50 animate-in fade-in zoom-in-95 duration-100">
+                    <div className="px-2.5 py-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400 border-b border-[#E5E2DC] dark:border-slate-800 flex justify-between items-center font-mono tabular-nums">
                       <span>{lang === 'zh' ? '所有旅程' : 'All Trips'} ({trips.length})</span>
                       <button
                         onClick={() => {
@@ -1131,14 +1131,14 @@ export default function App() {
                             setTripModalData(null);
                           }, lang === 'zh' ? '建立新旅程' : 'Create new trip');
                         }}
-                        className="text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-0.5"
+                        className="text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-0.5 font-sans cursor-pointer"
                       >
                         <Plus className="w-3 h-3" />
                         <span>{t.newTrip}</span>
                       </button>
                     </div>
 
-                    <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 my-1">
+                    <div className="max-h-60 overflow-y-auto divide-y divide-[#E5E2DC]/70 dark:divide-slate-800 my-1">
                       {trips.map((tr) => (
                         <div
                           key={tr.id}
@@ -1146,31 +1146,31 @@ export default function App() {
                             handleSelectTrip(tr.id);
                             setShowTripSwitcher(false);
                           }}
-                          className={`p-2 rounded-xl cursor-pointer transition text-xs flex items-center justify-between ${
+                          className={`p-2.5 min-h-[44px] rounded-xl cursor-pointer transition text-xs flex items-center justify-between ${
                             tr.id === currentTrip.id
-                              ? 'bg-teal-50 dark:bg-teal-950/60 text-teal-900 dark:text-teal-200 font-bold'
-                              : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                              ? 'bg-teal-50 dark:bg-teal-950/50 text-teal-800 dark:text-teal-200 font-bold'
+                              : 'hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                           }`}
                         >
                           <div className="truncate pr-2">
                             <p className="truncate font-semibold">{tr.title}</p>
-                            <p className="text-[10px] text-slate-400">{tr.destination}</p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{tr.destination}</p>
                           </div>
-                          {tr.id === currentTrip.id && <span className="text-teal-600 font-bold shrink-0">✓</span>}
+                          {tr.id === currentTrip.id && <Check className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />}
                         </div>
                       ))}
                     </div>
 
                     {/* Quick Access to Global Travel Memory Hub */}
-                    <div className="pt-1.5 mt-1 border-t border-slate-100 dark:border-slate-800">
+                    <div className="pt-1.5 mt-1 border-t border-[#E5E2DC] dark:border-slate-800">
                       <button
                         onClick={() => {
                           setShowTripSwitcher(false);
                           setShowGlobalHubModal(true);
                         }}
-                        className="w-full py-1.5 px-2 rounded-xl bg-teal-50/80 hover:bg-teal-100 dark:bg-teal-950/60 dark:hover:bg-teal-900/80 text-teal-800 dark:text-teal-200 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        className="w-full min-h-[40px] py-2 px-3 rounded-xl bg-[#FAF9F6] hover:bg-[#F3F1EC] dark:bg-slate-900 dark:hover:bg-slate-800 text-teal-700 dark:text-teal-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                       >
-                        <Compass className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                        <Compass className="w-3.5 h-3.5 shrink-0" />
                         <span>足跡時光庫</span>
                       </button>
                     </div>
@@ -1182,11 +1182,11 @@ export default function App() {
             {/* Global Travel Memory & Footprint Hub Trigger in Header (Desktop / Tablet) */}
             <button
               onClick={() => setShowGlobalHubModal(true)}
-              className="hidden sm:flex h-9 items-center justify-center gap-1.5 px-3 rounded-xl border border-teal-200/80 dark:border-teal-800/80 bg-teal-50/70 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/70 text-teal-800 dark:text-teal-200 transition shadow-2xs active:scale-95 text-xs font-bold shrink-0 cursor-pointer"
+              className="hidden sm:flex h-9 items-center justify-center gap-1.5 px-3 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 transition active:scale-95 text-xs font-semibold shrink-0 whitespace-nowrap cursor-pointer"
               title="搜尋所有過往旅程與月曆足跡"
-              aria-label="跨旅程足跡"
+              aria-label="足跡時光庫"
             >
-              <Compass className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
+              <Compass className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
               <span>足跡時光庫</span>
             </button>
 
@@ -1198,7 +1198,7 @@ export default function App() {
                   setTripModalData(null);
                 }, lang === 'zh' ? '建立新旅程' : 'Create new trip');
               }}
-              className="hidden sm:flex h-9 items-center justify-start gap-1 px-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shadow-xs transition active:scale-95 shrink-0"
+              className="hidden sm:flex h-9 items-center justify-center gap-1.5 px-3.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-xs font-bold transition active:scale-95 shrink-0 whitespace-nowrap cursor-pointer"
               title={t.newTrip}
               aria-label={t.newTrip}
             >
@@ -1209,19 +1209,7 @@ export default function App() {
             {/* Google Cloud Auth & Sync */}
             <AuthButton lang={lang} localTrips={trips} />
 
-            {/* GitHub Repository Link */}
-            <a
-              href="https://github.com/noworneverev/hiyori-trip"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hidden md:flex w-9 h-9 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 items-center justify-center transition shadow-2xs active:scale-95 shrink-0"
-              title="GitHub Repository"
-              aria-label="GitHub Repository"
-            >
-              <Github className="w-4 h-4" />
-            </a>
-
-            {/* Unified App Menu (Display preferences, Trip tools, System updates, Storage) */}
+            {/* Unified App Menu */}
             <AppMenu
               lang={lang}
               onSelectLang={(selectedLang) => {
@@ -1244,7 +1232,7 @@ export default function App() {
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-4 pb-[calc(10rem+env(safe-area-inset-bottom,0px))] sm:pb-20 space-y-4">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3.5 sm:px-6 py-4 sm:py-5 pb-[calc(6rem+env(safe-area-inset-bottom,0px))] sm:pb-20 space-y-4">
         {/* Collaborative Trip Connected Alert */}
         {collabBannerTrip && (
           <div className="bg-emerald-950/90 text-white px-3.5 py-2.5 rounded-2xl shadow-sm flex items-center justify-between gap-2.5 border border-emerald-800/80 animate-in fade-in duration-150">
@@ -1311,34 +1299,32 @@ export default function App() {
           </div>
         )}
 
-        {/* Compact Trip Header (Default across all tabs to save screen space) */}
+        {/* Editorial Trip Masthead (Default: clean zero-pill hairline bar) */}
         {!isHeroExpanded ? (
-          <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-2 sm:p-2.5 px-3 sm:px-4 shadow-2xs flex items-center justify-between gap-2 animate-in fade-in duration-150">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <span
-                className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-xl bg-gradient-to-r ${currentTrip.coverGradient || 'from-emerald-600 to-teal-600'} text-white text-[10px] sm:text-[11px] font-bold shrink-0 shadow-2xs max-w-[80px] xs:max-w-[110px] sm:max-w-[150px] truncate`}
-                title={currentTrip.destination}
-              >
-                {currentTrip.destination}
-              </span>
-              <div className="min-w-0 flex-1 truncate">
-                <h2 className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm truncate">
-                  {currentTrip.title}
-                </h2>
-                <p className="text-[10px] text-slate-400 font-mono truncate">
-                  {formatDateSlash(currentTrip.startDate)} ~ {formatDateSlash(currentTrip.endDate)} · {dayCount}天{nightCount}夜
-                </p>
+          <div className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 px-3.5 py-2.5 sm:px-5 sm:py-3 flex items-center justify-between gap-3 animate-in fade-in duration-150">
+            <div className="min-w-0 flex-1 space-y-0.5">
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 font-mono tabular-nums truncate">
+                <span className="font-sans font-semibold text-teal-700 dark:text-teal-400 truncate max-w-[130px] sm:max-w-none">
+                  {currentTrip.destination}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span className="shrink-0">{formatDateSlash(currentTrip.startDate)} ~ {formatDateSlash(currentTrip.endDate)}</span>
+                <span aria-hidden="true" className="hidden xs:inline">·</span>
+                <span className="hidden xs:inline shrink-0">{dayCount}天{nightCount}夜</span>
               </div>
+              <h2 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base tracking-tight truncate">
+                {currentTrip.title}
+              </h2>
             </div>
 
-            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 ml-auto">
+            <div className="flex items-center gap-1.5 shrink-0 ml-auto">
               <button
                 onClick={() => setShowShareModal(true)}
-                className="min-w-[36px] min-h-[36px] rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center transition"
+                className="min-w-[40px] min-h-[40px] rounded-xl border border-[#E5E2DC] dark:border-slate-800 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center transition cursor-pointer"
                 title="分享行程"
                 aria-label="分享行程"
               >
-                <Share2 className="w-3.5 h-3.5 text-teal-600" />
+                <Share2 className="w-4 h-4 text-teal-700 dark:text-teal-400" />
               </button>
               {permission.canEdit && (
                 <button
@@ -1348,109 +1334,98 @@ export default function App() {
                       setShowTripModal(true);
                     }, lang === 'zh' ? '編輯行程資訊' : 'Edit trip details');
                   }}
-                  className="min-w-[36px] min-h-[36px] rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center transition"
+                  className="min-w-[40px] min-h-[40px] rounded-xl border border-[#E5E2DC] dark:border-slate-800 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center transition cursor-pointer"
                   title="編輯行程"
                   aria-label="編輯行程"
                 >
-                  <Edit className="w-3.5 h-3.5" />
+                  <Edit className="w-4 h-4" />
                 </button>
               )}
               <button
                 onClick={() => setIsHeroExpanded(true)}
-                className="min-h-[36px] px-2.5 rounded-xl text-[11px] font-semibold text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 transition flex items-center gap-1"
+                className="min-h-[40px] px-3 rounded-xl text-xs font-semibold text-teal-700 dark:text-teal-300 bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer transition"
                 title="展開封面"
                 aria-label="展開封面"
               >
-                <span className="hidden sm:inline">更多</span>
+                <span className="hidden sm:inline">詳情</span>
                 <ChevronDown className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
         ) : (
-          /* Full Sleek Trip Hero Card */
-          <div
-            className={`rounded-3xl bg-gradient-to-r ${currentTrip.coverGradient || 'from-emerald-600 via-teal-600 to-cyan-700'} text-white p-4 sm:p-6 shadow-md relative overflow-hidden`}
-          >
-            <div className="relative z-10 flex flex-col md:flex-row md:items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-2">
-                  <span className="px-2 py-0.5 rounded-full bg-white/20 backdrop-blur-md text-[10px] sm:text-[11px] font-bold">
-                    {t.daysCount.replace('{d}', String(dayCount)).replace('{n}', String(nightCount))}
+          /* Expanded Editorial Trip Header */
+          <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-6 shadow-xs">
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+                  <span className="font-sans font-bold text-teal-700 dark:text-teal-400">
+                    {currentTrip.destination}
                   </span>
-                  <span className="flex items-center gap-1 text-[11px] sm:text-xs text-teal-100 font-medium">
-                    <MapPin className="w-3 h-3 text-teal-200 shrink-0" />
-                    <span className="truncate max-w-[150px] sm:max-w-none">{currentTrip.destination}</span>
-                  </span>
-                  <span className="flex items-center gap-1 text-[11px] sm:text-xs text-teal-100 font-mono">
-                    <Calendar className="w-3 h-3 text-teal-200 shrink-0" />
-                    <span>{formatDateSlash(currentTrip.startDate)} ~ {formatDateSlash(currentTrip.endDate)}</span>
-                  </span>
+                  <span aria-hidden="true">·</span>
+                  <span>{formatDateSlash(currentTrip.startDate)} ~ {formatDateSlash(currentTrip.endDate)}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{t.daysCount.replace('{d}', String(dayCount)).replace('{n}', String(nightCount))}</span>
                   {currentTrip.isCollaborative && (
-                    <button
-                      onClick={() => setShowCollabModal(true)}
-                      className="px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-200 border border-emerald-300/30 text-[10px] font-bold flex items-center gap-1 transition hover:bg-emerald-400/30"
-                      title="管理成員與權限"
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                      <span>
-                        {permission.isOwner
-                          ? '擁有者 · 多人共編'
-                          : permission.role === 'editor'
-                          ? '協作編輯中'
-                          : '僅檢視模式'}
-                      </span>
-                    </button>
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <button
+                        onClick={() => setShowCollabModal(true)}
+                        className="font-sans text-teal-700 dark:text-teal-300 font-semibold hover:underline inline-flex items-center gap-1 cursor-pointer"
+                        title="管理成員與權限"
+                      >
+                        <Users className="w-3.5 h-3.5" />
+                        <span>
+                          {permission.isOwner
+                            ? '擁有者 · 多人共編'
+                            : permission.role === 'editor'
+                            ? '協作編輯中'
+                            : '僅檢視模式'}
+                        </span>
+                      </button>
+                    </>
                   )}
                 </div>
 
-                <h2 className="font-black text-lg sm:text-2xl tracking-tight break-words">
+                <h2 className="font-extrabold text-xl sm:text-2xl tracking-tight text-slate-900 dark:text-white break-words">
                   {currentTrip.title}
                 </h2>
 
                 {currentTrip.notes && (
-                  <p className="text-teal-100 text-xs mt-1.5 max-w-2xl opacity-90 line-clamp-2">
+                  <p className="text-slate-600 dark:text-slate-400 text-xs sm:text-sm max-w-2xl leading-relaxed line-clamp-2">
                     {currentTrip.notes}
                   </p>
                 )}
               </div>
 
-              {/* Quick Actions Bar */}
-              <div className="w-full md:w-auto flex items-center gap-1.5 flex-wrap justify-start sm:justify-end mt-2 md:mt-0 pt-2.5 md:pt-0 border-t border-white/15 md:border-0 shrink-0">
-                {/* Collaborators & Permissions Button */}
+              {/* Clean Single-Row Action Cluster */}
+              <div className="w-full md:w-auto flex items-center gap-1.5 flex-wrap justify-start sm:justify-end pt-3 md:pt-0 border-t border-[#E5E2DC] dark:border-slate-800 md:border-0 shrink-0">
                 <button
                   onClick={() => setShowCollabModal(true)}
-                  className={`px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center gap-1.5 border transition active:scale-95 shadow-xs ${
-                    currentTrip.isCollaborative
-                      ? 'bg-emerald-500/30 hover:bg-emerald-500/40 text-emerald-100 border-emerald-400/40'
-                      : 'bg-white/20 hover:bg-white/30 backdrop-blur-md text-white border-white/20'
-                  }`}
+                  className="min-h-[40px] px-3 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition whitespace-nowrap cursor-pointer"
                   title={lang === 'zh' ? '成員與協作權限管理' : 'Manage Collaborators & Permissions'}
                 >
-                  <ShieldCheck className="w-3.5 h-3.5 text-teal-200" />
+                  <ShieldCheck className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                   <span>{currentTrip.isCollaborative ? '成員與權限' : '加人共編'}</span>
                 </button>
 
-                {/* Share Trip Button */}
                 <button
                   onClick={() => setShowShareModal(true)}
-                  className="px-3 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-md text-white font-semibold text-xs flex items-center gap-1.5 border border-white/20 transition active:scale-95 shadow-xs"
+                  className="min-h-[40px] px-3 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition whitespace-nowrap cursor-pointer"
                   title={lang === 'zh' ? '分享行程給家人好友' : 'Share Trip with Friends'}
                 >
-                  <Share2 className="w-3.5 h-3.5 text-teal-100" />
+                  <Share2 className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                   <span>{lang === 'zh' ? '分享行程' : 'Share'}</span>
                 </button>
 
-                {/* Export Printable PDF Button */}
                 <button
                   onClick={() => setShowPDFExportModal(true)}
-                  className="px-3 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-md text-white font-semibold text-xs flex items-center gap-1.5 border border-white/20 transition active:scale-95 shadow-xs"
+                  className="min-h-[40px] px-3 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition whitespace-nowrap cursor-pointer"
                   title={t.exportPDF}
                 >
-                  <Printer className="w-3.5 h-3.5" />
+                  <Printer className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
                   <span className="hidden sm:inline">{t.exportPDF}</span>
                 </button>
 
-                {/* Edit Trip Details (Only if user has edit permission) */}
                 {permission.canEdit && (
                   <button
                     onClick={() => {
@@ -1459,31 +1434,30 @@ export default function App() {
                         setShowTripModal(true);
                       }, lang === 'zh' ? '編輯行程資訊' : 'Edit trip details');
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur-md text-white font-semibold text-xs flex items-center gap-1.5 border border-white/20 transition active:scale-95 shadow-xs"
+                    className="min-h-[40px] px-3 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-semibold text-xs flex items-center gap-1.5 transition whitespace-nowrap cursor-pointer"
                   >
                     <Edit className="w-3.5 h-3.5" />
                     <span>{t.editTrip}</span>
                   </button>
                 )}
 
-                {/* Delete Trip (Only owner has permission to delete) */}
                 {permission.isOwner && (
                   <button
                     onClick={() => {
                       requireAuth(handleDeleteCurrentTrip, lang === 'zh' ? '刪除旅程' : 'Delete trip');
                     }}
-                    className="p-1.5 rounded-xl bg-white/15 hover:bg-rose-500/80 backdrop-blur-md text-white text-xs border border-white/20 transition shadow-xs"
+                    className="min-w-[40px] min-h-[40px] rounded-xl border border-[#E5E2DC] dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-500 hover:text-rose-700 dark:text-slate-400 dark:hover:text-rose-300 flex items-center justify-center transition cursor-pointer"
                     title={t.deleteTrip}
+                    aria-label={t.deleteTrip}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 )}
 
-                {/* Collapse button when expanded */}
                 <button
                   onClick={() => setIsHeroExpanded(false)}
-                  className="px-2.5 py-1.5 rounded-xl bg-black/20 hover:bg-black/30 backdrop-blur-md text-white text-xs border border-white/20 transition flex items-center gap-1"
-                  title="收合封面"
+                  className="min-h-[40px] px-2.5 py-1.5 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-xs font-medium transition flex items-center gap-1 whitespace-nowrap cursor-pointer"
+                  title="收合"
                 >
                   <span>收合</span>
                   <ChevronUp className="w-3.5 h-3.5" />
@@ -1493,18 +1467,18 @@ export default function App() {
           </div>
         )}
 
-        {/* Unauthenticated Read-Only Preview Notice Banner (Slim 1-row) */}
+        {/* Unauthenticated Read-Only Preview Notice Banner (Theme-paired hairline surface) */}
         {!currentUser && (
-          <div className="bg-slate-900 dark:bg-slate-900/95 text-white px-3.5 py-2 rounded-2xl border border-slate-800 text-xs flex items-center justify-between gap-2 shadow-sm animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-[#111827] text-slate-800 dark:text-slate-100 px-3.5 py-2 rounded-2xl border border-[#E5E2DC] dark:border-slate-800 text-xs flex items-center justify-between gap-2 animate-in fade-in duration-150">
             <div className="flex items-center gap-2 min-w-0">
-              <Eye className="w-3.5 h-3.5 text-teal-300 shrink-0" />
-              <span className="font-medium text-slate-200 truncate">
+              <Eye className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+              <span className="font-medium text-slate-600 dark:text-slate-300 truncate">
                 {lang === 'zh' ? '唯讀預覽 · 登入可編輯並同步' : 'Read-only · Sign in to edit & sync'}
               </span>
             </div>
             <button
               onClick={() => requireAuth(() => {}, lang === 'zh' ? '編輯並同步' : 'Edit & sync')}
-              className="px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-[11px] shrink-0 transition active:scale-95 cursor-pointer"
+              className="min-h-[36px] px-3 py-1 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-[11px] shrink-0 transition active:scale-95 whitespace-nowrap cursor-pointer"
             >
               {lang === 'zh' ? 'Google 登入' : 'Sign In'}
             </button>
@@ -1513,83 +1487,81 @@ export default function App() {
 
         {/* Read-Only Viewer Notice Banner */}
         {!permission.canEdit && currentTrip.isCollaborative && (
-          <div className="bg-slate-900/90 text-white px-4 py-3 rounded-2xl border border-slate-700 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-lg animate-in fade-in duration-150">
+          <div className="bg-white dark:bg-[#111827] text-slate-800 dark:text-slate-100 px-4 py-2.5 rounded-2xl border border-[#E5E2DC] dark:border-slate-800 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 animate-in fade-in duration-150">
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 rounded-lg bg-teal-500/20 text-teal-300 flex items-center justify-center shrink-0">
-                <Eye className="w-4 h-4" />
-              </div>
-              <p className="text-slate-300 text-xs">
-                目前為<strong>僅檢視權限</strong>。如需編輯請向擁有者申請權限。
+              <Eye className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
+              <p className="text-slate-600 dark:text-slate-300 text-xs">
+                目前為<strong className="text-slate-900 dark:text-white font-semibold">僅檢視權限</strong>。如需編輯請向擁有者申請權限。
               </p>
             </div>
             <button
               onClick={() => setShowCollabModal(true)}
-              className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-semibold text-xs shrink-0 self-end sm:self-auto transition"
+              className="min-h-[36px] px-3 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-semibold text-xs shrink-0 self-end sm:self-auto transition cursor-pointer"
             >
               權限清單
             </button>
           </div>
         )}
 
-        {/* Desktop Tab Navigation Bar (Apple Frosted Glass Segmented Control) */}
-        <div className="hidden sm:flex items-center gap-1.5 p-1.5 bg-white/70 dark:bg-slate-900/70 backdrop-blur-2xl backdrop-saturate-200 rounded-2xl border border-slate-200/80 dark:border-white/10 shadow-[0_2px_12px_rgba(0,0,0,0.03)] overflow-x-auto scrollbar-none">
+        {/* Desktop Tab Navigation Bar (Unified single-accent segmented control) */}
+        <div className="hidden sm:flex items-center gap-1 p-1.5 bg-white dark:bg-[#111827] rounded-2xl border border-[#E5E2DC] dark:border-slate-800 overflow-x-auto scrollbar-none">
           <button
             onClick={() => setActiveTab('timeline')}
-            className={`flex-1 min-w-[110px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-200 flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-w-[110px] min-h-[40px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-150 flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'timeline'
-                ? 'bg-teal-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
+                ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-[#F3F1EC] dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-slate-100'
             }`}
           >
-            <Route className="w-4 h-4" />
+            <Route className="w-4 h-4 shrink-0" />
             <span>{t.timeline}</span>
           </button>
 
           <button
             onClick={() => setActiveTab('live')}
-            className={`flex-1 min-w-[100px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-200 flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-w-[100px] min-h-[40px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-150 flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'live'
-                ? 'bg-teal-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
+                ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-[#F3F1EC] dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-slate-100'
             }`}
           >
-            <Sparkles className="w-4 h-4 text-amber-300" />
+            <Sparkles className="w-4 h-4 shrink-0" />
             <span>{t.live}</span>
           </button>
 
           <button
             onClick={() => setActiveTab('expenses')}
-            className={`flex-1 min-w-[85px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-200 flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-w-[90px] min-h-[40px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-150 flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'expenses'
-                ? 'bg-teal-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
+                ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-[#F3F1EC] dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-slate-100'
             }`}
           >
-            <Wallet className="w-4 h-4" />
+            <Wallet className="w-4 h-4 shrink-0" />
             <span>{t.expenses}</span>
           </button>
 
           <button
             onClick={() => setActiveTab('prep')}
-            className={`flex-1 min-w-[85px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-200 flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-w-[95px] min-h-[40px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-150 flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'prep'
-                ? 'bg-teal-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
+                ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-[#F3F1EC] dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-slate-100'
             }`}
           >
-            <CheckCircle className="w-4 h-4" />
+            <CheckCircle className="w-4 h-4 shrink-0" />
             <span>{lang === 'zh' ? '待辦清單' : 'Checklists'}</span>
           </button>
 
           <button
             onClick={() => setActiveTab('memories')}
-            className={`flex-1 min-w-[85px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-200 flex items-center justify-center gap-1.5 ${
+            className={`flex-1 min-w-[90px] min-h-[40px] py-2 px-3 rounded-xl font-bold text-xs transition-all duration-150 flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'memories'
-                ? 'bg-rose-600 text-white shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100/70 dark:hover:bg-slate-800/70'
+                ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-[#F3F1EC] dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-slate-100'
             }`}
           >
-            <Camera className="w-4 h-4" />
+            <Camera className="w-4 h-4 shrink-0" />
             <span>{t.memories}</span>
           </button>
         </div>
@@ -1691,19 +1663,19 @@ export default function App() {
         </div>
       </main>
 
-      {/* Footer - Desktop Only (Hidden on Mobile/PWA to avoid duplicate navigation and safe area clutter) */}
-      <footer className="hidden sm:block mt-auto py-5 border-t border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 text-center text-xs text-slate-500 dark:text-slate-400">
-        <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <p>日和手帳 Hiyori © 2026 • {t.localPrivacy}</p>
+      {/* Footer - Desktop Only */}
+      <footer className="hidden sm:block mt-auto py-5 border-t border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-[#111827] text-center text-xs text-slate-500 dark:text-slate-400">
+        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <p>日和手帳 Hiyori © 2026 · {t.localPrivacy}</p>
           <div className="flex items-center gap-3">
-            <button onClick={() => setShowImportExportModal(true)} className="text-teal-600 dark:text-teal-400 hover:underline">
+            <button onClick={() => setShowImportExportModal(true)} className="text-teal-700 dark:text-teal-400 hover:underline cursor-pointer">
               {t.importBackup}
             </button>
-            <span>•</span>
-            <button onClick={() => setShowSettingsModal(true)} className="text-teal-600 dark:text-teal-400 hover:underline">
+            <span aria-hidden="true">·</span>
+            <button onClick={() => setShowSettingsModal(true)} className="text-teal-700 dark:text-teal-400 hover:underline cursor-pointer">
               {t.settings}
             </button>
-            <span>•</span>
+            <span aria-hidden="true">·</span>
             <a
               href="https://github.com/noworneverev/hiyori-trip"
               target="_blank"
@@ -1717,85 +1689,80 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Mobile Bottom Thumb Navigation Bar (Native iOS Translucent Frosted Glass Tab Bar) */}
+      {/* Mobile Bottom Thumb Navigation Bar (Unified single-accent Teal focus) */}
       <nav
         aria-label="主要分頁導覽"
         style={{ position: 'fixed', zIndex: 45 }}
-        className={`sm:hidden fixed bottom-0 inset-x-0 bg-white/85 dark:bg-slate-900/85 backdrop-blur-2xl backdrop-saturate-150 border-t border-slate-200/80 dark:border-white/10 grid grid-cols-5 items-stretch h-[calc(3.5rem+env(safe-area-inset-bottom,0px))] pb-[env(safe-area-inset-bottom,0px)] px-1 shadow-[0_-4px_24px_rgba(0,0,0,0.04)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.35)] select-none max-sm:transition-transform max-sm:duration-300 max-sm:ease-in-out ${
+        className={`sm:hidden fixed bottom-0 inset-x-0 bg-white/90 dark:bg-[#111827]/90 backdrop-blur-xl border-t border-[#E5E2DC] dark:border-slate-800 grid grid-cols-5 items-stretch h-[calc(3.5rem+env(safe-area-inset-bottom,0px))] pb-[env(safe-area-inset-bottom,0px)] px-1 shadow-[0_-4px_20px_rgba(0,0,0,0.04)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.35)] select-none max-sm:transition-transform max-sm:duration-300 max-sm:ease-in-out ${
           isNavHidden ? 'max-sm:translate-y-full' : 'max-sm:translate-y-0'
         }`}
       >
-        {/* Tab 1: 行程 */}
         <button
           onClick={() => setActiveTab('timeline')}
-          className={`flex flex-col items-center justify-center py-1 transition-all duration-150 active:scale-95 ${
+          className={`flex flex-col items-center justify-center min-h-[44px] py-1 transition-all duration-150 active:scale-95 ${
             activeTab === 'timeline'
-              ? 'text-teal-600 dark:text-teal-400'
+              ? 'text-teal-700 dark:text-teal-400'
               : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
           }`}
         >
-          <Route className={`w-5 h-5 transition-transform ${activeTab === 'timeline' ? 'scale-110 stroke-[2.4]' : 'stroke-[1.8]'}`} />
-          <span className={`text-[10px] mt-1 tracking-tight ${activeTab === 'timeline' ? 'font-bold' : 'font-medium'}`}>
+          <Route className={`w-5 h-5 transition-transform ${activeTab === 'timeline' ? 'scale-105 stroke-[2.3]' : 'stroke-[1.8]'}`} />
+          <span className={`text-[10px] mt-0.5 tracking-tight ${activeTab === 'timeline' ? 'font-bold' : 'font-medium'}`}>
             {lang === 'zh' ? '行程' : 'Plan'}
           </span>
         </button>
 
-        {/* Tab 2: 隨行 */}
         <button
           onClick={() => setActiveTab('live')}
-          className={`flex flex-col items-center justify-center py-1 transition-all duration-150 active:scale-95 ${
+          className={`flex flex-col items-center justify-center min-h-[44px] py-1 transition-all duration-150 active:scale-95 ${
             activeTab === 'live'
-              ? 'text-amber-600 dark:text-amber-400'
+              ? 'text-teal-700 dark:text-teal-400'
               : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
           }`}
         >
-          <Sparkles className={`w-5 h-5 transition-transform ${activeTab === 'live' ? 'scale-110 stroke-[2.4]' : 'stroke-[1.8]'}`} />
-          <span className={`text-[10px] mt-1 tracking-tight ${activeTab === 'live' ? 'font-bold' : 'font-medium'}`}>
+          <Sparkles className={`w-5 h-5 transition-transform ${activeTab === 'live' ? 'scale-105 stroke-[2.3]' : 'stroke-[1.8]'}`} />
+          <span className={`text-[10px] mt-0.5 tracking-tight ${activeTab === 'live' ? 'font-bold' : 'font-medium'}`}>
             {lang === 'zh' ? '隨行' : 'Live'}
           </span>
         </button>
 
-        {/* Tab 3: 記帳 */}
         <button
           onClick={() => setActiveTab('expenses')}
-          className={`flex flex-col items-center justify-center py-1 transition-all duration-150 active:scale-95 ${
+          className={`flex flex-col items-center justify-center min-h-[44px] py-1 transition-all duration-150 active:scale-95 ${
             activeTab === 'expenses'
-              ? 'text-teal-600 dark:text-teal-400'
+              ? 'text-teal-700 dark:text-teal-400'
               : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
           }`}
         >
-          <Wallet className={`w-5 h-5 transition-transform ${activeTab === 'expenses' ? 'scale-110 stroke-[2.4]' : 'stroke-[1.8]'}`} />
-          <span className={`text-[10px] mt-1 tracking-tight ${activeTab === 'expenses' ? 'font-bold' : 'font-medium'}`}>
+          <Wallet className={`w-5 h-5 transition-transform ${activeTab === 'expenses' ? 'scale-105 stroke-[2.3]' : 'stroke-[1.8]'}`} />
+          <span className={`text-[10px] mt-0.5 tracking-tight ${activeTab === 'expenses' ? 'font-bold' : 'font-medium'}`}>
             {lang === 'zh' ? '記帳' : 'Spend'}
           </span>
         </button>
 
-        {/* Tab 4: 待辦 */}
         <button
           onClick={() => setActiveTab('prep')}
-          className={`flex flex-col items-center justify-center py-1 transition-all duration-150 active:scale-95 ${
+          className={`flex flex-col items-center justify-center min-h-[44px] py-1 transition-all duration-150 active:scale-95 ${
             activeTab === 'prep'
-              ? 'text-teal-600 dark:text-teal-400'
+              ? 'text-teal-700 dark:text-teal-400'
               : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
           }`}
         >
-          <CheckCircle className={`w-5 h-5 transition-transform ${activeTab === 'prep' ? 'scale-110 stroke-[2.4]' : 'stroke-[1.8]'}`} />
-          <span className={`text-[10px] mt-1 tracking-tight ${activeTab === 'prep' ? 'font-bold' : 'font-medium'}`}>
+          <CheckCircle className={`w-5 h-5 transition-transform ${activeTab === 'prep' ? 'scale-105 stroke-[2.3]' : 'stroke-[1.8]'}`} />
+          <span className={`text-[10px] mt-0.5 tracking-tight ${activeTab === 'prep' ? 'font-bold' : 'font-medium'}`}>
             {lang === 'zh' ? '待辦' : 'Prep'}
           </span>
         </button>
 
-        {/* Tab 5: 相簿 */}
         <button
           onClick={() => setActiveTab('memories')}
-          className={`flex flex-col items-center justify-center py-1 transition-all duration-150 active:scale-95 ${
+          className={`flex flex-col items-center justify-center min-h-[44px] py-1 transition-all duration-150 active:scale-95 ${
             activeTab === 'memories'
-              ? 'text-rose-600 dark:text-rose-400'
+              ? 'text-teal-700 dark:text-teal-400'
               : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
           }`}
         >
-          <Camera className={`w-5 h-5 transition-transform ${activeTab === 'memories' ? 'scale-110 stroke-[2.4]' : 'stroke-[1.8]'}`} />
-          <span className={`text-[10px] mt-1 tracking-tight ${activeTab === 'memories' ? 'font-bold' : 'font-medium'}`}>
+          <Camera className={`w-5 h-5 transition-transform ${activeTab === 'memories' ? 'scale-105 stroke-[2.3]' : 'stroke-[1.8]'}`} />
+          <span className={`text-[10px] mt-0.5 tracking-tight ${activeTab === 'memories' ? 'font-bold' : 'font-medium'}`}>
             {lang === 'zh' ? '相簿' : 'Photo'}
           </span>
         </button>
@@ -2064,13 +2031,13 @@ export default function App() {
                 fabLongPressTimerRef.current = null;
               }
             }}
-            className="w-13 h-13 rounded-full bg-teal-600 hover:bg-teal-700 active:scale-90 text-white shadow-[0_8px_25px_rgba(13,148,136,0.4)] flex items-center justify-center transition-all duration-200 border-2 border-white/40 dark:border-white/15 group cursor-pointer"
+            className="w-13 h-13 rounded-full bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 active:scale-90 text-white shadow-lg flex items-center justify-center transition-all duration-200 border border-white/25 dark:border-slate-700 group cursor-pointer"
             title="旅途快速記帳 (長按或右鍵切換便籤)"
             aria-label="快速記帳"
           >
             <div className="relative flex items-center justify-center">
               <DollarSign className="w-5 h-5 stroke-[2.5] group-hover:scale-110 transition-transform" />
-              <span className="absolute -top-1 -right-1.5 text-[10px] font-black text-teal-200 leading-none">+</span>
+              <span className="absolute -top-1 -right-1.5 text-[10px] font-black text-teal-100 leading-none">+</span>
             </div>
           </button>
         </div>
@@ -2078,7 +2045,7 @@ export default function App() {
 
       {/* Floating Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-4 sm:top-16 left-1/2 -translate-x-1/2 z-[70] max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-2xl bg-slate-900/95 text-white text-xs font-bold shadow-2xl border border-slate-700/80 flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-150 backdrop-blur-md">
+        <div className="fixed top-4 sm:top-16 left-1/2 -translate-x-1/2 z-[70] max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-2xl bg-slate-900/95 dark:bg-[#111827]/95 text-white text-xs font-bold shadow-2xl border border-slate-700/80 flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-150 backdrop-blur-md">
           <Check className="w-3.5 h-3.5 text-teal-400 shrink-0" />
           <span className="truncate">{toastMessage}</span>
         </div>

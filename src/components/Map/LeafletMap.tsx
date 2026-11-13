@@ -245,26 +245,26 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
   }, [items, selectedItemId, onSelectItem]);
 
   return (
-    <div className={`relative w-full ${heightClass} rounded-2xl overflow-hidden shadow-inner border border-slate-200 bg-slate-100`}>
+    <div className={`relative w-full ${heightClass} rounded-2xl overflow-hidden shadow-inner border border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-950`}>
       <div ref={mapContainerRef} className="w-full h-full" />
 
-      {/* Pick Mode Overlay Tip */}
+      {/* Pick Mode Overlay Tip (Static High-Contrast Banner, no animate-pulse) */}
       {isPickMode && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-rose-600/95 text-white px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-lg flex items-center gap-1.5 animate-pulse backdrop-blur-sm pointer-events-none">
-          <MapPin className="w-4 h-4" />
-          點擊地圖任意位置以選取景點座標
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 bg-slate-900/95 dark:bg-[#111827]/95 text-white px-4 py-2 rounded-2xl text-xs font-semibold shadow-lg border border-teal-500/40 flex items-center gap-2 backdrop-blur-md pointer-events-none">
+          <MapPin className="w-4 h-4 text-teal-400 shrink-0" />
+          <span>點擊地圖任意位置以選取景點座標</span>
         </div>
       )}
 
       {/* Empty items notice */}
       {items.length === 0 && !isPickMode && (
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 backdrop-blur-[2px] z-10 p-4 text-center">
+        <div className="absolute inset-0 flex items-center justify-center bg-[#FAF9F6]/90 dark:bg-[#090D16]/85 backdrop-blur-[2px] z-10 p-4 text-center">
           <div className="max-w-xs">
-            <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center mx-auto mb-2 text-slate-500">
+            <div className="w-10 h-10 rounded-2xl bg-slate-200/80 dark:bg-slate-800 flex items-center justify-center mx-auto mb-2 text-slate-500 dark:text-slate-400">
               <MapPin className="w-5 h-5" />
             </div>
-            <p className="text-xs font-semibold text-slate-700">當天尚無座標景點</p>
-            <p className="text-[11px] text-slate-500 mt-0.5">新增景點時設定地址或在地圖上點選，即可自動繪製路線與順序！</p>
+            <p className="text-xs font-semibold text-slate-800 dark:text-slate-200">當天尚無座標景點</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">新增景點時設定地址或在地圖上點選，即可自動繪製路線與順序！</p>
           </div>
         </div>
       )}
