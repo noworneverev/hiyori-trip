@@ -190,7 +190,7 @@ export function getSuggestedNextStartTime<T extends { startTime?: string; endTim
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-export type TimeConflictType = 'overlap' | 'invalid_range' | 'tight_transfer';
+export type TimeConflictType = 'overlap' | 'invalid_range';
 
 export interface ScheduleConflict {
   id: string;
@@ -200,7 +200,6 @@ export interface ScheduleConflict {
   itemBId?: string;
   itemBTitle?: string;
   overlapMinutes?: number;
-  distanceKm?: number;
   message: string;
 }
 
@@ -217,17 +216,6 @@ function formatMinutesToHHMM(totalMinutes: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
-  const R = 6371;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
 export interface SchedulableItemLike {
   id: string;
   title: string;
@@ -238,8 +226,8 @@ export interface SchedulableItemLike {
 }
 
 /**
- * Analyze a single day's sorted itinerary items for invalid time ranges,
- * overlapping time windows, and impossibly tight cross-city transfers.
+ * Analyze a single day's sorted itinerary items for invalid time ranges
+ * and genuine overlapping time windows (touching boundaries like 08:00-10:00 -> 10:00 are valid).
  */
 export function detectDayTimeConflicts<T extends SchedulableItemLike>(
   items: T[],
@@ -295,7 +283,7 @@ export function detectDayTimeConflicts<T extends SchedulableItemLike>(
           overlapMinutes,
           message:
             lang === 'zh'
-              ? `「${curr.title}」與「${next.title}」時段重疊 ${overlapMinutes} 分鐘`
+              ? `「${curr.title}」與「${next.title}」重疊 ${overlapMinutes} 分鐘`
               : `"${curr.title}" overlaps with "${next.title}" by ${overlapMinutes} min`,
         });
       } else if (nextStartM === startM) {
@@ -315,31 +303,6 @@ export function detectDayTimeConflicts<T extends SchedulableItemLike>(
               ? `「${curr.title}」與「${next.title}」開始時間同為 ${curr.startTime}`
               : `"${curr.title}" and "${next.title}" share start time ${curr.startTime}`,
         });
-      } else if (
-        typeof curr.lat === 'number' &&
-        typeof curr.lng === 'number' &&
-        typeof next.lat === 'number' &&
-        typeof next.lng === 'number'
-      ) {
-        const km = haversineKm(curr.lat, curr.lng, next.lat, next.lng);
-        const gapM = nextStartM - effectiveEndM;
-        if (km >= 5 && gapM >= 0 && gapM < 15) {
-          conflictedSet.add(curr.id);
-          conflictedSet.add(next.id);
-          conflicts.push({
-            id: `tight-${curr.id}-${next.id}`,
-            type: 'tight_transfer',
-            itemAId: curr.id,
-            itemATitle: curr.title,
-            itemBId: next.id,
-            itemBTitle: next.title,
-            distanceKm: Math.round(km * 10) / 10,
-            message:
-              lang === 'zh'
-                ? `「${curr.title}」至「${next.title}」相距 ${km.toFixed(1)} km，預留轉乘僅 ${gapM} 分鐘`
-                : `Only ${gapM} min transfer between "${curr.title}" and "${next.title}" (${km.toFixed(1)} km apart)`,
-          });
-        }
       }
     }
   }

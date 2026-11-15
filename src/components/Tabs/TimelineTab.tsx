@@ -178,7 +178,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     };
   }, [trip.id, trip.destination, weatherSignature]);
 
-  // Per-day time conflict analysis
+  // Per-day time conflict analysis (genuine overlaps / invalid ranges only)
   const dayConflictReports = useMemo<Record<number, DayConflictReport>>(() => {
     const map: Record<number, DayConflictReport> = {};
     (trip.days || []).forEach((d) => {
@@ -186,6 +186,34 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     });
     return map;
   }, [trip.days, lang]);
+
+  const [dismissedConflictKeys, setDismissedConflictKeys] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem('hiyori_dismissed_conflicts_v1');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const getConflictKey = (dayNumber: number, report?: DayConflictReport): string => {
+    if (!report || report.conflicts.length === 0) return '';
+    return `${trip.id}:d${dayNumber}:${report.conflicts.map((c) => c.id).join('|')}`;
+  };
+
+  const handleDismissDayConflict = (dayNumber: number, report?: DayConflictReport) => {
+    const key = getConflictKey(dayNumber, report);
+    if (!key) return;
+    setDismissedConflictKeys((prev) => {
+      const next = { ...prev, [key]: true };
+      try {
+        localStorage.setItem('hiyori_dismissed_conflicts_v1', JSON.stringify(next));
+      } catch {
+        // Ignore storage errors
+      }
+      return next;
+    });
+  };
 
   const handleAutoResolveDayConflicts = (dayNumber: number) => {
     if (!canEdit) return;
@@ -806,7 +834,6 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             const chipWeather = dayWeatherMap[day.dayNumber];
             const chipForecast = chipWeather?.status === 'ok' ? chipWeather.forecast : undefined;
             const chipWeatherIcon = chipForecast ? getWeatherDescription(chipForecast.weatherCode, lang).icon : null;
-            const chipConflictCount = dayConflictReports[day.dayNumber]?.conflicts.length || 0;
 
             return (
               <motion.button
@@ -852,9 +879,6 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                       <span className={`text-xs font-black font-mono tabular-nums ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
                         D{day.dayNumber}
                       </span>
-                      {chipConflictCount > 0 && (
-                        <AlertTriangle className={`w-3 h-3 shrink-0 ${isCurrent ? 'text-amber-200' : 'text-amber-600 dark:text-amber-400'}`} />
-                      )}
                       {isToday && (
                         <span className={`text-[9px] font-bold ${isCurrent ? 'text-teal-200' : 'text-teal-700 dark:text-teal-400'}`}>
                           ·今
@@ -877,12 +901,6 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                         <span className={`text-xs font-black font-mono tabular-nums ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
                           Day {day.dayNumber}
                         </span>
-                        {chipConflictCount > 0 && (
-                          <AlertTriangle
-                            className={`w-3 h-3 shrink-0 ${isCurrent ? 'text-amber-200' : 'text-amber-600 dark:text-amber-400'}`}
-                            aria-label="時間衝突"
-                          />
-                        )}
                       </div>
                       {totalCount > 0 ? (
                         <span
@@ -1391,45 +1409,49 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 return null;
               })()}
 
-              {/* Schedule Time-Conflict Detection & One-Click Shift Bar */}
+              {/* Subtle, Dismissible Schedule Time Overlap Strip */}
               {(() => {
                 const report = dayConflictReports[activeDay.dayNumber];
                 if (!report || report.conflicts.length === 0) return null;
+                const key = getConflictKey(activeDay.dayNumber, report);
+                if (dismissedConflictKeys[key]) return null;
                 return (
-                  <div className="rounded-2xl p-3.5 sm:p-4 bg-amber-50/75 dark:bg-amber-950/25 border border-amber-300/80 dark:border-amber-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900 dark:text-amber-200">
-                        <AlertTriangle className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
-                        <span className="font-mono tabular-nums">
-                          {lang === 'zh'
-                            ? `偵測到 ${report.conflicts.length} 項排程時間提醒`
-                            : `${report.conflicts.length} schedule conflict(s) detected`}
+                  <div className="rounded-2xl px-3.5 py-2.5 bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                    <div className="flex items-start sm:items-center gap-2 min-w-0">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
+                      <p className="text-slate-600 dark:text-slate-300 truncate">
+                        <span className="font-semibold text-slate-800 dark:text-slate-100">
+                          {report.conflicts.length === 1
+                            ? report.conflicts[0].message
+                            : lang === 'zh'
+                            ? `有 ${report.conflicts.length} 組時段重疊（如：${report.conflicts[0].message}）`
+                            : `${report.conflicts.length} overlapping times (e.g. ${report.conflicts[0].message})`}
                         </span>
-                      </div>
-                      <ul className="space-y-0.5 text-[11px] text-amber-800 dark:text-amber-300 font-mono tabular-nums">
-                        {report.conflicts.slice(0, 3).map((c) => (
-                          <li key={c.id} className="truncate">
-                            · {c.message}
-                          </li>
-                        ))}
-                        {report.conflicts.length > 3 && (
-                          <li className="opacity-80">
-                            · {lang === 'zh' ? `還有 ${report.conflicts.length - 3} 項時間衝突...` : `+${report.conflicts.length - 3} more...`}
-                          </li>
-                        )}
-                      </ul>
+                      </p>
                     </div>
 
-                    {canEdit && report.hasFixableOverlap && (
+                    <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+                      {canEdit && report.hasFixableOverlap && (
+                        <button
+                          type="button"
+                          onClick={() => handleAutoResolveDayConflicts(activeDay.dayNumber)}
+                          className="min-h-[32px] px-2.5 py-1 rounded-lg border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-teal-700 dark:text-teal-300 font-semibold text-[11px] flex items-center gap-1 transition cursor-pointer"
+                        >
+                          <Wand2 className="w-3 h-3" />
+                          <span>{lang === 'zh' ? '自動順延' : 'Auto-Shift'}</span>
+                        </button>
+                      )}
                       <button
                         type="button"
-                        onClick={() => handleAutoResolveDayConflicts(activeDay.dayNumber)}
-                        className="min-h-[40px] px-3.5 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 dark:bg-amber-600 dark:hover:bg-amber-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer"
+                        onClick={() => handleDismissDayConflict(activeDay.dayNumber, report)}
+                        className="min-h-[32px] px-2 py-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] flex items-center gap-1 transition cursor-pointer"
+                        title={lang === 'zh' ? '忽略此提醒' : 'Dismiss'}
+                        aria-label={lang === 'zh' ? '忽略此提醒' : 'Dismiss'}
                       >
-                        <Wand2 className="w-3.5 h-3.5" />
-                        <span>{lang === 'zh' ? '自動順延重疊時段' : 'Auto-Shift Overlaps'}</span>
+                        <X className="w-3.5 h-3.5" />
+                        <span className="hidden xs:inline">{lang === 'zh' ? '略過' : 'Hide'}</span>
                       </button>
-                    )}
+                    </div>
                   </div>
                 );
               })()}
@@ -1543,15 +1565,20 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                               </span>
                             </>
                           )}
-                          {dayConflictReports[activeDay.dayNumber]?.conflictedItemIds.includes(item.id) && (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-400">
-                                <AlertTriangle className="w-3 h-3 shrink-0" />
-                                <span>{lang === 'zh' ? '時段衝突' : 'Conflict'}</span>
-                              </span>
-                            </>
-                          )}
+                          {(() => {
+                            const report = dayConflictReports[activeDay.dayNumber];
+                            const key = getConflictKey(activeDay.dayNumber, report);
+                            if (!report || dismissedConflictKeys[key] || !report.conflictedItemIds.includes(item.id)) return null;
+                            return (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span className="inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
+                                  <AlertTriangle className="w-3 h-3 shrink-0" />
+                                  <span>{lang === 'zh' ? '時段重疊' : 'Overlap'}</span>
+                                </span>
+                              </>
+                            );
+                          })()}
                         </div>
 
                         {/* Spot Title */}
