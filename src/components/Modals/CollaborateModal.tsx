@@ -5,6 +5,7 @@ import { Language } from '../../utils/i18n';
 import { enableTripCollaboration } from '../../utils/firebase';
 import { User } from 'firebase/auth';
 import { getPublicShareBaseUrl } from '../../utils/url';
+import { copyTextToClipboard } from '../../utils/clipboard';
 import {
   X,
   Users,
@@ -182,6 +183,10 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
 
   // Update general access policy
   const handleChangeGeneralAccess = async (newAccess: GeneralAccessType) => {
+    if (!isOwner) {
+      setMemberError('僅行程建立者可變更連結權限設定');
+      return;
+    }
     setMemberError(null);
     try {
       const cid = await ensureCollaborative();
@@ -202,9 +207,13 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
     try {
       const cid = collabUrl && trip.collabId ? trip.collabId : await ensureCollaborative();
       const url = `${getPublicShareBaseUrl()}?collab=${cid}`;
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
+      const ok = await copyTextToClipboard(url);
+      if (ok) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+      } else {
+        setMemberError('無法複製連結，請長按或全選上方連結複製');
+      }
     } catch (err) {
       setMemberError(err instanceof Error ? err.message : '無法產生並複製共編連結');
     }
@@ -226,9 +235,13 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
           // User cancelled share
         }
       } else {
-        await navigator.clipboard.writeText(url);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2500);
+        const ok = await copyTextToClipboard(url);
+        if (ok) {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2500);
+        } else {
+          setMemberError('無法複製連結，請長按或全選上方連結複製');
+        }
       }
     } catch (err) {
       setMemberError(err instanceof Error ? err.message : '無法分享共編邀請');
@@ -249,11 +262,11 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-150 overflow-hidden flex flex-col max-h-[92vh]"
+        className="w-full max-w-xl rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-150 overflow-hidden flex flex-col max-h-[92vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-2xl bg-teal-100 dark:bg-teal-950 text-teal-700 dark:text-teal-300 flex items-center justify-center">
               <Users className="w-5 h-5" />
@@ -265,8 +278,10 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-700 transition cursor-pointer"
+            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:bg-[#EFECE5] dark:hover:bg-slate-800 transition cursor-pointer"
+            aria-label="關閉"
           >
             <X className="w-5 h-5" />
           </button>
@@ -355,37 +370,41 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
               <span>成員名單：</span>
             </label>
 
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 overflow-hidden bg-white dark:bg-slate-900">
+            <div className="rounded-2xl border border-[#E5E2DC] dark:border-slate-800 divide-y divide-[#E5E2DC]/60 dark:divide-slate-800 overflow-hidden bg-white dark:bg-slate-900">
               {currentMembers.map((member) => {
-                const isOwner = member.role === 'owner';
+                const isMemberOwner = member.role === 'owner';
                 return (
                   <div key={member.email} className="p-3 sm:px-4 flex items-center justify-between gap-3 text-xs">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <div className="w-8 h-8 rounded-full bg-teal-100 dark:bg-teal-950 text-teal-800 dark:text-teal-300 font-bold flex items-center justify-center text-xs shrink-0">
-                        {isOwner ? <Crown className="w-4 h-4 text-amber-500" /> : member.email[0].toUpperCase()}
+                        {isMemberOwner ? <Crown className="w-4 h-4 text-amber-500" /> : member.email[0].toUpperCase()}
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
                           <p className="font-bold text-slate-800 dark:text-slate-200 truncate">
                             {member.email}
                           </p>
-                          {isOwner && (
-                            <span className="px-2 py-0.2 rounded-md bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[10px] font-bold">
-                              建立者
+                          {isMemberOwner && (
+                            <span className="text-amber-700 dark:text-amber-300 text-[10px] font-bold shrink-0">
+                              · 建立者
                             </span>
                           )}
                         </div>
                         <p className="text-[10px] text-slate-400">
-                          {isOwner ? '擁有完整控制權' : member.role === 'editor' ? '可新增與修改所有日程' : '僅可查閱最新進度與天氣'}
+                          {isMemberOwner ? '擁有完整控制權' : member.role === 'editor' ? '可新增與修改所有日程' : '僅可查閱最新進度與天氣'}
                         </p>
                       </div>
                     </div>
 
                     {/* Role Control */}
                     <div className="flex items-center gap-2 shrink-0">
-                      {isOwner || member.role === 'owner' ? (
+                      {isMemberOwner ? (
                         <span className="px-2.5 py-1 text-slate-500 text-xs font-semibold">
-                          {member.role === 'owner' ? '擁有者' : member.role === 'editor' ? '可編輯' : '僅檢視'}
+                          擁有者
+                        </span>
+                      ) : !isOwner ? (
+                        <span className="px-2.5 py-1 text-slate-500 text-xs font-semibold">
+                          {member.role === 'editor' ? '可編輯' : '僅檢視'}
                         </span>
                       ) : (
                         <>
@@ -393,7 +412,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                             <select
                               value={member.role}
                               onChange={(e) => handleChangeRole(member.email, e.target.value as CollaboratorRole)}
-                              className="appearance-none pl-2.5 pr-7 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold focus:outline-hidden cursor-pointer"
+                              className="appearance-none min-h-[38px] pl-2.5 pr-7 py-1 rounded-lg border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold focus:outline-hidden cursor-pointer"
                             >
                               <option value="editor">可編輯</option>
                               <option value="viewer">僅檢視</option>
@@ -404,7 +423,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                           <button
                             type="button"
                             onClick={() => handleRemoveMember(member.email)}
-                            className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
                             title="移除成員權限"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -513,11 +532,11 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 flex items-center justify-end">
+        <div className="px-5 py-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex items-center justify-end">
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs transition cursor-pointer"
+            className="min-h-[44px] sm:min-h-[38px] px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-semibold text-xs transition cursor-pointer"
           >
             完成
           </button>

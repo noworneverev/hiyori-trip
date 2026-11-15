@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { Trip, EmergencyContact } from '../../types/itinerary';
+import { Trip, EmergencyContact, StickyNoteItem } from '../../types/itinerary';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
+import { copyTextToClipboard } from '../../utils/clipboard';
+import { sanitizeTelHref } from '../../utils/url';
 import {
   ShieldAlert,
   Phone,
@@ -35,15 +37,6 @@ interface MemoTabProps {
   canEdit?: boolean;
   onUpdateTrip: (updatedTrip: Trip) => void;
   requireAuth?: (action: () => void, reason?: string) => boolean;
-}
-
-interface StickyNoteItem {
-  id: string;
-  category: 'locker' | 'seat' | 'hotel' | 'other';
-  label: string;
-  content: string;
-  createdAt: number;
-  completed?: boolean;
 }
 
 const STICKY_CATS = [
@@ -126,11 +119,14 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
   }, [showEmergencyGuide]);
 
   // Sync state whenever trip changes
+  const latestTripRef = useRef(trip);
+  latestTripRef.current = trip;
+
   useEffect(() => {
     setTripNotes(trip.notes || '');
   }, [trip.id, trip.notes]);
 
-  // Debounced auto-save so user never loses what they typed
+  // Debounced auto-save so user never loses what they typed (using latestTripRef to prevent stale overwrite)
   const isInitialMount = useRef(true);
   useEffect(() => {
     if (isInitialMount.current) {
@@ -138,11 +134,16 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
       return;
     }
     if (!canEdit) return;
+    if (tripNotes === (latestTripRef.current.notes || '')) {
+      setIsAutoSaving(false);
+      return;
+    }
     setIsAutoSaving(true);
     const timer = setTimeout(() => {
-      if (tripNotes !== (trip.notes || '')) {
+      const currentTrip = latestTripRef.current;
+      if (tripNotes !== (currentTrip.notes || '')) {
         onUpdateTrip({
-          ...trip,
+          ...currentTrip,
           notes: tripNotes,
           updatedAt: Date.now(),
         });
@@ -156,30 +157,45 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
     return () => clearTimeout(timer);
   }, [tripNotes, canEdit]);
 
-  // Quick Sticky Notes synced with local storage (same as quick action modal)
+  // Quick Sticky Notes persisted on trip.stickyNotes & mirrored locally for instant offline access
   const STORAGE_KEY_NOTES = `hiyori_scratchpad_${trip.id}`;
-  const [stickyNotes, setStickyNotes] = useState<StickyNoteItem[]>(() => {
+  const getFallbackLocalNotes = (): StickyNoteItem[] => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY_NOTES);
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
     } catch {}
     return [
       {
-        id: '1',
+        id: 'sticky-default-1',
         category: 'locker',
         label: '車站寄物櫃',
         content: '剪票口旁 28 號置物櫃，密碼 5183',
         createdAt: Date.now(),
       },
       {
-        id: '2',
+        id: 'sticky-default-2',
         category: 'seat',
         label: '指定席座位',
         content: '車次 7 車 14A (靠窗位)',
         createdAt: Date.now(),
       },
     ];
-  });
+  };
+
+  const [stickyNotes, setStickyNotes] = useState<StickyNoteItem[]>(() =>
+    trip.stickyNotes !== undefined ? trip.stickyNotes : getFallbackLocalNotes()
+  );
+
+  useEffect(() => {
+    if (trip.stickyNotes !== undefined) {
+      setStickyNotes(trip.stickyNotes);
+    } else {
+      setStickyNotes(getFallbackLocalNotes());
+    }
+  }, [trip.id, trip.stickyNotes]);
 
   const [newStickyLabel, setNewStickyLabel] = useState('');
   const [newStickyContent, setNewStickyContent] = useState('');
@@ -191,6 +207,27 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
   const [editStickyContent, setEditStickyContent] = useState('');
   const [editStickyCat, setEditStickyCat] = useState<'locker' | 'seat' | 'hotel' | 'other'>('locker');
 
+  const commitStickyNotes = (nextNotes: StickyNoteItem[], deletedId?: string) => {
+    setStickyNotes(nextNotes);
+    try {
+      localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(nextNotes));
+    } catch {}
+    const currentTrip = latestTripRef.current;
+    onUpdateTrip({
+      ...currentTrip,
+      stickyNotes: nextNotes,
+      ...(deletedId
+        ? {
+            deletedItemIds: {
+              ...(currentTrip.deletedItemIds || {}),
+              [deletedId]: Date.now(),
+            },
+          }
+        : {}),
+      updatedAt: Date.now(),
+    });
+  };
+
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_NOTES, JSON.stringify(stickyNotes));
@@ -199,7 +236,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
 
   const handleAddSticky = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStickyContent.trim()) return;
+    if (!canEdit || !newStickyContent.trim()) return;
     if (requireAuth && !requireAuth(() => handleAddSticky(e), lang === 'zh' ? '新增速記便籤' : 'Add sticky note')) {
       return;
     }
@@ -211,56 +248,65 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
       content: newStickyContent.trim(),
       createdAt: Date.now(),
     };
-    setStickyNotes([newNote, ...stickyNotes]);
+    commitStickyNotes([newNote, ...stickyNotes]);
     setNewStickyLabel('');
     setNewStickyContent('');
     setShowAddSticky(false);
   };
 
   const handleStartEditSticky = (note: StickyNoteItem) => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleStartEditSticky(note), lang === 'zh' ? '編輯速記便籤' : 'Edit sticky note')) {
       return;
     }
     setEditingStickyId(note.id);
     setEditStickyLabel(note.label);
     setEditStickyContent(note.content);
-    setEditStickyCat(note.category);
+    const validCats = ['locker', 'seat', 'hotel', 'other'] as const;
+    type StickyCatKey = (typeof validCats)[number];
+    const safeCat: StickyCatKey = (validCats as readonly string[]).includes(note.category)
+      ? (note.category as StickyCatKey)
+      : 'other';
+    setEditStickyCat(safeCat);
   };
 
   const handleSaveEditSticky = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!editingStickyId || !editStickyContent.trim()) return;
-    setStickyNotes((prev) =>
-      prev.map((n) =>
-        n.id === editingStickyId
-          ? {
-              ...n,
-              label: editStickyLabel.trim() || '隨身便籤',
-              content: editStickyContent.trim(),
-              category: editStickyCat,
-            }
-          : n
-      )
+    if (!canEdit || !editingStickyId || !editStickyContent.trim()) return;
+    const nextNotes = stickyNotes.map((n) =>
+      n.id === editingStickyId
+        ? {
+            ...n,
+            label: editStickyLabel.trim() || '隨身便籤',
+            content: editStickyContent.trim(),
+            category: editStickyCat,
+          }
+        : n
     );
+    commitStickyNotes(nextNotes);
     setEditingStickyId(null);
   };
 
   const handleDeleteSticky = (id: string) => {
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleDeleteSticky(id), lang === 'zh' ? '刪除速記便籤' : 'Delete sticky note')) {
       return;
     }
-    setStickyNotes(stickyNotes.filter((n) => n.id !== id));
+    commitStickyNotes(
+      stickyNotes.filter((n) => n.id !== id),
+      id
+    );
     if (editingStickyId === id) setEditingStickyId(null);
   };
 
   const handleToggleStickyComplete = (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
+    if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleToggleStickyComplete(id, e), lang === 'zh' ? '切換便籤完成狀態' : 'Toggle sticky note')) {
       return;
     }
-    setStickyNotes((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, completed: !n.completed } : n))
-    );
+    const nextNotes = stickyNotes.map((n) => (n.id === id ? { ...n, completed: !n.completed } : n));
+    commitStickyNotes(nextNotes);
   };
 
   const [showAddContact, setShowAddContact] = useState(false);
@@ -269,10 +315,12 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
   const [contactAddress, setContactAddress] = useState('');
   const [contactNote, setContactNote] = useState('');
 
-  const handleCopyText = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+  const handleCopyText = async (text: string, id: string) => {
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((prev) => (prev === id ? null : prev)), 2000);
+    }
   };
 
   const handleSaveNotes = () => {
@@ -485,7 +533,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                           </button>
                           <button
                             type="button"
-                            onClick={handleSaveEditSticky}
+                            onClick={() => handleSaveEditSticky()}
                             className="px-3 py-1 rounded-lg bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
                           >
                             <Check className="w-3.5 h-3.5" />
@@ -604,7 +652,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                       <button
                         type="button"
                         onClick={() => handleCopyText(note.content, note.id)}
-                        className="w-8 h-8 flex items-center justify-center rounded-lg border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition cursor-pointer"
+                        className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition cursor-pointer"
                         title="複製內容"
                       >
                         {copiedId === note.id ? (
@@ -613,22 +661,26 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                           <Copy className="w-3.5 h-3.5" />
                         )}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => handleStartEditSticky(note)}
-                        className="w-8 h-8 flex items-center justify-center rounded-lg border border-[#E5E2DC] dark:border-slate-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-slate-500 hover:text-teal-700 dark:hover:text-teal-400 transition cursor-pointer"
-                        title="編輯此便籤"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteSticky(note.id)}
-                        className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 transition cursor-pointer"
-                        title="刪除"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      {canEdit && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditSticky(note)}
+                            className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg border border-[#E5E2DC] dark:border-slate-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-slate-500 hover:text-teal-700 dark:hover:text-teal-400 transition cursor-pointer"
+                            title="編輯此便籤"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteSticky(note.id)}
+                            className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                            title="刪除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -730,13 +782,15 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
             rows={10}
             readOnly={!canEdit}
             value={tripNotes}
+            onFocus={(e) => {
+              if (!canEdit) return;
+              if (requireAuth && !requireAuth(() => e.target.focus(), lang === 'zh' ? '編輯旅遊備忘錄' : 'Edit travel memo')) {
+                e.target.blur();
+              }
+            }}
             onChange={(e) => {
               if (!canEdit) return;
-              const val = e.target.value;
-              if (requireAuth && !requireAuth(() => setTripNotes(val), lang === 'zh' ? '編輯旅遊備忘錄' : 'Edit travel memo')) {
-                return;
-              }
-              setTripNotes(val);
+              setTripNotes(e.target.value);
             }}
             placeholder={
               lang === 'zh'
@@ -844,7 +898,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                   </button>
 
                   <a
-                    href={`tel:${hotline.number}`}
+                    href={sanitizeTelHref(hotline.number)}
                     className="flex-1 min-h-[44px] sm:min-h-[38px] py-1.5 px-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-2xs transition active:scale-95"
                   >
                     <Phone className="w-3.5 h-3.5" />
@@ -957,7 +1011,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                         <button
                           type="button"
                           onClick={() => handleDeleteContact(contact.id)}
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                          className="w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
                           title="刪除此聯絡人"
                           aria-label="刪除此聯絡人"
                         >
@@ -998,7 +1052,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                     </button>
 
                     <a
-                      href={`tel:${contact.phone}`}
+                      href={sanitizeTelHref(contact.phone)}
                       className="px-4 min-h-[44px] sm:min-h-[38px] py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-[11px] font-bold flex items-center gap-1.5 shadow-2xs transition active:scale-95"
                     >
                       <Phone className="w-3.5 h-3.5" />
@@ -1099,7 +1153,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                           <span>{copiedId === `modal-${item.id}` ? '已複製' : '複製'}</span>
                         </button>
                         <a
-                          href={`tel:${item.number}`}
+                          href={sanitizeTelHref(item.number)}
                           className="min-h-[40px] px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs transition active:scale-95"
                         >
                           <Phone className="w-3.5 h-3.5" />

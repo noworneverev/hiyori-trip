@@ -4,7 +4,6 @@ import { Language, TRANSLATIONS, LANGUAGE_OPTIONS } from '../../utils/i18n';
 import { performAppUpdate, UpdateState } from '../../utils/pwaUpdater';
 import { APP_VERSION, BUILD_DATE } from '../../constants/version';
 import { getSavedAccessibilityScale, applyAccessibilityScale, AccessibilityScale, ACCESSIBILITY_OPTIONS } from '../../utils/accessibility';
-import { getCustomGeminiKey, setCustomGeminiKey } from '../../utils/aiClient';
 import { getStorageUsage, getStorageUsageAsync, resetAllLocalData } from '../../utils/storage';
 import {
   Menu,
@@ -26,7 +25,6 @@ import {
   Users,
   RotateCcw,
   Eye,
-  Key,
   Trash2,
   HardDrive,
 } from 'lucide-react';
@@ -61,8 +59,6 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   const [showLangSubmenu, setShowLangSubmenu] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showConfirmReset, setShowConfirmReset] = useState(false);
-  const [geminiKey, setGeminiKeyState] = useState(getCustomGeminiKey());
-  const [isSavedKey, setIsSavedKey] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle' });
   const [scale, setScale] = useState<AccessibilityScale>(getSavedAccessibilityScale);
   const [storageInfo, setStorageInfo] = useState(getStorageUsage);
@@ -93,13 +89,6 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   const handleSelectScale = (nextScale: AccessibilityScale) => {
     setScale(nextScale);
     applyAccessibilityScale(nextScale);
-  };
-
-  const handleSaveGeminiKey = (e: React.FormEvent) => {
-    e.preventDefault();
-    setCustomGeminiKey(geminiKey);
-    setIsSavedKey(true);
-    setTimeout(() => setIsSavedKey(false), 2000);
   };
 
   // Close menu on click/touch outside
@@ -494,30 +483,16 @@ export const AppMenu: React.FC<AppMenuProps> = ({
                         )}
                       </div>
 
-                      {/* Custom Gemini Key Form */}
-                      <div className="pt-2 border-t border-[#E5E2DC] dark:border-slate-800 space-y-1.5">
-                        <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
-                          <span className="font-bold flex items-center gap-1">
-                            <Key className="w-3 h-3 text-teal-700 dark:text-teal-400" />
-                            <span>{lang === 'zh' ? '自訂 Gemini API Key (選填)' : 'Custom Gemini Key'}</span>
-                          </span>
-                        </div>
-                        <form onSubmit={handleSaveGeminiKey} className="flex gap-1.5">
-                          <input
-                            type="password"
-                            value={geminiKey}
-                            onChange={(e) => setGeminiKeyState(e.target.value)}
-                            placeholder="AIzaSy... (留空即使用預設免費解析)"
-                            className="flex-1 px-2.5 py-1 bg-[#FAF9F6] dark:bg-slate-900 rounded-lg border border-[#E5E2DC] dark:border-slate-700 font-mono text-[11px] outline-none focus:border-teal-600 text-slate-800 dark:text-slate-100"
-                          />
-                          <button
-                            type="submit"
-                            className="px-2.5 py-1 bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold rounded-lg text-[10px] flex items-center gap-1 transition cursor-pointer"
-                          >
-                            {isSavedKey ? <Check className="w-3 h-3" /> : null}
-                            <span>{isSavedKey ? '已存' : '儲存'}</span>
-                          </button>
-                        </form>
+                      {/* Smart Parser Info (Read-Only) */}
+                      <div className="pt-2 border-t border-[#E5E2DC] dark:border-slate-800 space-y-1">
+                        <p className="text-[10px] font-bold text-slate-600 dark:text-slate-300">
+                          {lang === 'zh' ? '智慧行程解析模式' : 'Smart Parser Mode'}
+                        </p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                          {lang === 'zh'
+                            ? '行程文字解析已由安全代理或本機離線規則自動處理，無需手動設定 API Key。'
+                            : 'Itinerary parsing automatically uses the server proxy or local offline rules without an API key.'}
+                        </p>
                       </div>
                     </div>
                   )}

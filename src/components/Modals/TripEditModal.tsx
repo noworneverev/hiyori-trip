@@ -11,6 +11,9 @@ import { processPhotoWithExif, ProcessedBatchPhoto } from '../../utils/exif';
 import { searchLocationOSM } from '../../utils/geo';
 import { connectGoogleDrive, getDriveAccessToken, hasDriveAccessToken } from '../../utils/firebase';
 import { DriveAuthExpiredError, uploadOriginalPhotoToDrive } from '../../utils/googleDrive';
+import { sanitizeExternalUrl } from '../../utils/url';
+import { extractMediaId, isMediaRef } from '../../utils/image';
+import { idbDeleteMedia } from '../../utils/indexedDb';
 import {
   X,
   Calendar,
@@ -95,12 +98,30 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
   const [driveConnected, setDriveConnected] = useState<boolean>(() => hasDriveAccessToken());
   const [isConnectingDrive, setIsConnectingDrive] = useState(false);
   const [driveUploadProgress, setDriveUploadProgress] = useState<{ done: number; total: number } | null>(null);
+  const batchPhotosRef = useRef<ProcessedBatchPhoto[]>([]);
+  const didSaveRef = useRef(false);
+
+  useEffect(() => {
+    batchPhotosRef.current = batchPhotos;
+  }, [batchPhotos]);
 
   useEffect(() => {
     const syncDrive = () => setDriveConnected(hasDriveAccessToken());
     window.addEventListener('hiyori_drive_auth_changed', syncDrive);
     return () => window.removeEventListener('hiyori_drive_auth_changed', syncDrive);
   }, []);
+
+  const handleCloseAndCleanup = () => {
+    if (!didSaveRef.current && batchPhotosRef.current.length > 0) {
+      batchPhotosRef.current.forEach((p) => {
+        if (isMediaRef(p.mediaRef)) {
+          const mid = extractMediaId(p.mediaRef);
+          if (mid) idbDeleteMedia(mid).catch(() => {});
+        }
+      });
+    }
+    onClose();
+  };
 
   // Free OpenStreetMap Nominatim Geocoding fallback for Memory Mode
   const [isSearchingGeo, setIsSearchingGeo] = useState(false);
@@ -256,11 +277,11 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
   // Keyboard shortcut
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') handleCloseAndCleanup();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, []);
 
   // Submit standard minimal trip or memory-archive trip
   const handleMinimalSubmit = async (e: React.FormEvent) => {
@@ -281,6 +302,8 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
     const resolvedLng = destinationLng ?? exifSummary.centroidLng;
 
     if (isEditing && trip) {
+      const safeAlbumUrl = sanitizeExternalUrl(googlePhotosAlbumUrl) || undefined;
+      didSaveRef.current = true;
       onSave({
         ...trip,
         title: finalTitle,
@@ -294,7 +317,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
         coverGradient,
         isSoloTrip,
         isSplitEnabled: isSoloTrip ? false : trip.isSplitEnabled,
-        googlePhotosAlbumUrl: googlePhotosAlbumUrl.trim() || undefined,
+        googlePhotosAlbumUrl: safeAlbumUrl,
         updatedAt: Date.now(),
       });
       onClose();
@@ -368,6 +391,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
         setDriveUploadProgress(null);
       }
 
+      const safeAlbumUrl = sanitizeExternalUrl(googlePhotosAlbumUrl) || undefined;
       const initialMemories: TripMemoryItem[] = batchPhotos.map((photo, idx) => {
         const driveInfo = driveResults.get(photo.id);
         return {
@@ -380,7 +404,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
           location: finalDest,
           lat: photo.lat ?? resolvedLat,
           lng: photo.lng ?? resolvedLng,
-          googlePhotosUrl: googlePhotosAlbumUrl.trim() || undefined,
+          googlePhotosUrl: safeAlbumUrl,
           driveFileId: driveInfo?.driveFileId,
           driveFolderId: driveInfo?.driveFolderId || resolvedTripFolderId,
           originalBytes: driveInfo?.originalBytes ?? photo.originalBytes,
@@ -405,7 +429,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
         coverGradient,
         isSoloTrip: true,
         isSplitEnabled: false,
-        googlePhotosAlbumUrl: googlePhotosAlbumUrl.trim() || undefined,
+        googlePhotosAlbumUrl: safeAlbumUrl,
         driveFolderId: resolvedTripFolderId,
         notes: '',
         days: dayList,
@@ -418,6 +442,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
         updatedAt: now,
       };
 
+      didSaveRef.current = true;
       onSave(newMemoryTrip);
       onClose();
       return;
@@ -451,7 +476,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
       coverGradient,
       isSoloTrip,
       isSplitEnabled: !isSoloTrip,
-      googlePhotosAlbumUrl: googlePhotosAlbumUrl.trim() || undefined,
+      googlePhotosAlbumUrl: sanitizeExternalUrl(googlePhotosAlbumUrl) || undefined,
       notes: '',
       days: dayList,
       todos: [],
@@ -463,6 +488,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
       updatedAt: Date.now(),
     };
 
+    didSaveRef.current = true;
     onSave(newTrip);
     onClose();
   };
@@ -480,7 +506,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
     setAiGenError(null);
 
     try {
-      const generatedTrip = await generateAiTrip({
+      const { trip: generatedTrip } = await generateAiTrip({
         destination: targetDest,
         daysCount,
         style: aiStyle,
@@ -496,6 +522,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
       generatedTrip.isSoloTrip = isSoloTrip;
       generatedTrip.isSplitEnabled = !isSoloTrip;
 
+      didSaveRef.current = true;
       onSave(generatedTrip);
       onClose();
     } catch (err: any) {
@@ -531,6 +558,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
       parsedTrip.isSoloTrip = isSoloTrip;
       parsedTrip.isSplitEnabled = !isSoloTrip;
 
+      didSaveRef.current = true;
       onSave(parsedTrip);
       onClose();
     } catch (err: any) {
@@ -554,6 +582,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
+    didSaveRef.current = true;
     onSave(clonedTrip);
     onClose();
   };
@@ -561,7 +590,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto overscroll-contain touch-manipulation"
-      onClick={onClose}
+      onClick={handleCloseAndCleanup}
       onTouchMove={(e) => {
         if (e.target === e.currentTarget) {
           e.preventDefault();
@@ -569,13 +598,13 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
       }}
     >
       <div
-        className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#1C1C1E] shadow-2xl border border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-100 my-auto animate-in fade-in zoom-in-95 duration-150 overflow-hidden flex flex-col max-h-[92vh] overscroll-contain"
+        className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-150 overflow-hidden flex flex-col max-h-[92vh] overscroll-contain"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-zinc-800 bg-slate-50/80 dark:bg-zinc-900/60">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E2DC]/60 dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-zinc-800 text-teal-600 dark:text-teal-400 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-slate-800 text-teal-600 dark:text-teal-400 flex items-center justify-center">
               <HiyoriLogo className="w-5 h-5 shrink-0" />
             </div>
             <div>
@@ -586,8 +615,9 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
           </div>
           <button
             type="button"
-            onClick={onClose}
-            className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-200/50 dark:hover:bg-zinc-800 transition cursor-pointer"
+            onClick={handleCloseAndCleanup}
+            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800 transition cursor-pointer"
+            aria-label="關閉"
           >
             <X className="w-5 h-5" />
           </button>
@@ -703,9 +733,13 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
                       disabled={isConnectingDrive}
                       onClick={async () => {
                         setIsConnectingDrive(true);
+                        setPhotoError(null);
                         try {
-                          await connectGoogleDrive();
-                          setDriveConnected(hasDriveAccessToken());
+                          const token = await connectGoogleDrive();
+                          setDriveConnected(Boolean(token) || hasDriveAccessToken());
+                          if (!token) {
+                            setPhotoError('Google Drive 授權已取消或彈窗被封鎖，照片將先保留 1440px 高清縮圖。');
+                          }
                         } finally {
                           setIsConnectingDrive(false);
                         }
@@ -727,7 +761,15 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
                       </span>
                       <button
                         type="button"
-                        onClick={() => setBatchPhotos([])}
+                        onClick={() => {
+                          batchPhotos.forEach((p) => {
+                            if (isMediaRef(p.mediaRef)) {
+                              const mid = extractMediaId(p.mediaRef);
+                              if (mid) idbDeleteMedia(mid).catch(() => {});
+                            }
+                          });
+                          setBatchPhotos([]);
+                        }}
                         className="font-sans text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
                       >
                         清空
@@ -750,12 +792,16 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
                             type="button"
                             onClick={(ev) => {
                               ev.stopPropagation();
+                              if (isMediaRef(p.mediaRef)) {
+                                const mid = extractMediaId(p.mediaRef);
+                                if (mid) idbDeleteMedia(mid).catch(() => {});
+                              }
                               setBatchPhotos((prev) => prev.filter((item) => item.id !== p.id));
                             }}
-                            className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/70 text-white flex items-center justify-center hover:bg-rose-600 transition cursor-pointer"
+                            className="absolute top-1 right-1 w-8 h-8 rounded-full bg-black/70 text-white flex items-center justify-center hover:bg-rose-600 transition cursor-pointer"
                             aria-label="移除照片"
                           >
-                            <X className="w-3 h-3" />
+                            <X className="w-3.5 h-3.5" />
                           </button>
                           <div className="absolute inset-x-0 bottom-0 px-1.5 py-0.5 bg-gradient-to-t from-black/80 to-transparent text-[9px] text-white font-mono tabular-nums flex items-center justify-between gap-1">
                             <span className="truncate">{p.takenDate.slice(2).replace(/-/g, '/')}</span>
@@ -962,9 +1008,9 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
                 <div className="p-3.5 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-200/60 dark:border-teal-800/40 space-y-1.5">
                   <label className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between">
                     <span>Google 相簿整趟旅程連結 (選填)</span>
-                    {googlePhotosAlbumUrl.trim() && (
+                    {sanitizeExternalUrl(googlePhotosAlbumUrl) && (
                       <a
-                        href={googlePhotosAlbumUrl.trim()}
+                        href={sanitizeExternalUrl(googlePhotosAlbumUrl)!}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-[11px] text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-0.5"
@@ -1194,11 +1240,11 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3.5 border-t border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 flex items-center justify-end gap-2.5">
+        <div className="px-5 py-3.5 border-t border-[#E5E2DC]/60 dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex items-center justify-end gap-2.5">
           <button
             type="button"
-            onClick={onClose}
-            className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-zinc-800 transition cursor-pointer"
+            onClick={handleCloseAndCleanup}
+            className="min-h-[44px] sm:min-h-[38px] px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
           >
             取消
           </button>

@@ -30,7 +30,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200 dark:border-slate-800 p-6 text-center space-y-4 my-auto"
+        className="w-full max-w-sm rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-6 text-center space-y-4 my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto ${
@@ -57,7 +57,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition active:scale-95"
+              className="w-full min-h-[44px] py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 text-white font-bold text-xs transition active:scale-95 cursor-pointer"
             >
               我知道了
             </button>
@@ -66,7 +66,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="w-full py-2.5 px-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs transition active:scale-95"
+                className="w-full min-h-[44px] py-2.5 px-4 rounded-xl border border-[#E5E2DC] dark:border-slate-700 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs transition active:scale-95 cursor-pointer"
               >
                 取消
               </button>
@@ -76,7 +76,7 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
                   onConfirm();
                   onClose();
                 }}
-                className="w-full py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition active:scale-95"
+                className="w-full min-h-[44px] py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition active:scale-95 cursor-pointer"
               >
                 確認刪除
               </button>

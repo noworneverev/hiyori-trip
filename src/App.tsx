@@ -12,7 +12,8 @@ import {
   hydrateStorageFromIndexedDB,
   resetAllLocalData,
 } from './utils/storage';
-import { extractInlineImagesToMediaRefs } from './utils/image';
+import { extractInlineImagesToMediaRefs, rebindTripMediaIds, garbageCollectOrphanedMedia } from './utils/image';
+import { idbDeleteMediaByTrip } from './utils/indexedDb';
 import { formatDateSlash, getTodayLocal, sortItineraryItemsByTime, findInsertionPosition } from './utils/date';
 import { Language, TRANSLATIONS, getStoredLanguage, setStoredLanguage } from './utils/i18n';
 import { useDarkMode } from './hooks/useDarkMode';
@@ -400,6 +401,26 @@ export default function App() {
     return false;
   };
 
+  const markTripsSyncedLocally = (syncedAtByTripId: Record<string, number>) => {
+    if (!syncedAtByTripId || Object.keys(syncedAtByTripId).length === 0) return;
+    setTrips((prev) => {
+      let changed = false;
+      const next = prev.map((tr) => {
+        const syncedAt = syncedAtByTripId[tr.id];
+        if (syncedAt && (tr.lastSyncedAt || 0) < syncedAt) {
+          changed = true;
+          return { ...tr, lastSyncedAt: syncedAt };
+        }
+        return tr;
+      });
+      if (changed) {
+        saveTrips(next);
+        return next;
+      }
+      return prev;
+    });
+  };
+
   // Listen to Auth State and subscribe to cloud trips
   useEffect(() => {
     let unsubscribeFirestore: (() => void) | null = null;
@@ -478,13 +499,16 @@ export default function App() {
         user.uid,
         async (cloudTrips, meta: SnapshotMeta) => {
           if (meta.hasPendingWrites) return;
+          if (meta.fromCache && (!cloudTrips || cloudTrips.length === 0) && Object.keys(cloudTombstones).length === 0) {
+            return;
+          }
 
           if ((cloudTrips && cloudTrips.length > 0) || Object.keys(cloudTombstones).length > 0) {
             const currentLocal = getStoredTrips();
             const deletedIds = new Set(getDeletedTripIds());
             const filteredCloud = (cloudTrips || []).filter((c) => !deletedIds.has(c.id));
 
-            const { merged, tripsToUpload, deletedLocalTripIds } = mergeTrips(
+            const { merged, tripsToUpload, deletedLocalTripIds, conflicts } = mergeTrips(
               currentLocal,
               filteredCloud,
               cloudTombstones,
@@ -493,37 +517,63 @@ export default function App() {
 
             deletedLocalTripIds.forEach((id) => recordDeletedTripId(id));
 
+            if (conflicts.length > 0) {
+              setPendingConflicts((prev) => {
+                const map = new Map(prev.map((c) => [c.tripId, c]));
+                conflicts.forEach((c) => map.set(c.tripId, c));
+                return Array.from(map.values());
+              });
+              setShowConflictModal(true);
+            }
+
+            const conflictIds = new Set(conflicts.map((c) => c.tripId));
+            const uploadIds = new Set(tripsToUpload.map((t) => t.id));
+            const normalizedMerged = merged.map((m) => {
+              if (!conflictIds.has(m.id) && !uploadIds.has(m.id)) {
+                const baseline = Math.max(m.lastSyncedAt || 0, m.updatedAt || 0);
+                if (baseline > (m.lastSyncedAt || 0)) {
+                  return { ...m, lastSyncedAt: baseline };
+                }
+              }
+              return m;
+            });
+
             const hasChange =
-              merged.length !== currentLocal.length ||
-              merged.some((m) => {
+              normalizedMerged.length !== currentLocal.length ||
+              normalizedMerged.some((m) => {
                 const l = currentLocal.find((x) => x.id === m.id);
-                return !l || hasTripContentDifference(m, l);
+                return !l || hasTripContentDifference(m, l) || (m.lastSyncedAt || 0) > (l.lastSyncedAt || 0);
               }) ||
               currentLocal.some((l) => {
-                const m = merged.find((x) => x.id === l.id);
+                const m = normalizedMerged.find((x) => x.id === l.id);
                 return !m || hasTripContentDifference(m, l);
               });
 
             if (hasChange || deletedLocalTripIds.length > 0) {
-              setTrips(merged);
-              saveTrips(merged);
+              setTrips(normalizedMerged);
+              saveTrips(normalizedMerged);
             }
 
             if (tripsToUpload.length > 0) {
+              const syncedMap: Record<string, number> = {};
               for (const tr of tripsToUpload) {
                 if (!deletedIds.has(tr.id)) {
-                  saveTripToCloud(user.uid, tr).catch(() => {
+                  try {
+                    await saveTripToCloud(user.uid, tr);
+                    syncedMap[tr.id] = Math.max(Date.now(), tr.updatedAt || 0);
+                  } catch {
                     enqueueTripSave(user.uid, tr);
-                  });
+                  }
                 }
               }
+              markTripsSyncedLocally(syncedMap);
               showToast(lang === 'zh' ? '已將本機行程與相片同步至雲端' : 'Local trips & photos synced to cloud');
             }
 
             const activeId = getCurrentTripId();
-            const exists = merged.find((t) => t.id === activeId);
+            const exists = normalizedMerged.find((t) => t.id === activeId);
             if (!exists) {
-              const fallbackId = merged[0]?.id || '';
+              const fallbackId = normalizedMerged[0]?.id || '';
               setCurrentTripIdState(fallbackId);
               setCurrentTripId(fallbackId);
             }
@@ -533,9 +583,16 @@ export default function App() {
             const deletedIds = new Set(getDeletedTripIds());
             const toSync = (currentLocal || []).filter((tr) => !deletedIds.has(tr.id));
             if (toSync.length > 0) {
+              const syncedMap: Record<string, number> = {};
               for (const tr of toSync) {
-                await saveTripToCloud(user.uid, tr).catch(() => enqueueTripSave(user.uid, tr));
+                try {
+                  await saveTripToCloud(user.uid, tr);
+                  syncedMap[tr.id] = Math.max(Date.now(), tr.updatedAt || 0);
+                } catch {
+                  enqueueTripSave(user.uid, tr);
+                }
               }
+              markTripsSyncedLocally(syncedMap);
               showToast(lang === 'zh' ? '已將本機既有行程同步至雲端' : 'Local trips synced to cloud');
             }
           }
@@ -607,9 +664,13 @@ export default function App() {
         if (enqueueOnly || (typeof navigator !== 'undefined' && !navigator.onLine)) {
           enqueueTripSave(task.uid, task.trip);
         } else {
-          saveTripToCloud(task.uid, task.trip).catch(() => {
-            enqueueTripSave(task.uid!, task.trip);
-          });
+          saveTripToCloud(task.uid, task.trip)
+            .then(() => {
+              markTripsSyncedLocally({ [task.trip.id]: Math.max(Date.now(), task.trip.updatedAt || 0) });
+            })
+            .catch(() => {
+              enqueueTripSave(task.uid!, task.trip);
+            });
         }
       }
     }
@@ -667,11 +728,15 @@ export default function App() {
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           enqueueTripSave(pending.uid, pending.trip);
         } else {
-          saveTripToCloud(pending.uid, pending.trip).catch((err) => {
-            console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
-            enqueueTripSave(pending.uid!, pending.trip);
-            showToast(lang === 'zh' ? '雲端同步稍有延遲，資料已安全保留於本機' : 'Cloud save delayed, safely queued offline');
-          });
+          saveTripToCloud(pending.uid, pending.trip)
+            .then(() => {
+              markTripsSyncedLocally({ [pending.trip.id]: Math.max(Date.now(), pending.trip.updatedAt || 0) });
+            })
+            .catch((err) => {
+              console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
+              enqueueTripSave(pending.uid!, pending.trip);
+              showToast(lang === 'zh' ? '雲端同步稍有延遲，資料已安全保留於本機' : 'Cloud save delayed, safely queued offline');
+            });
         }
       }
     }, 400);
@@ -837,10 +902,14 @@ export default function App() {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         enqueueTripSave(user.uid, newTrip);
       } else {
-        saveTripToCloud(user.uid, newTrip).catch((err) => {
-          console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
-          enqueueTripSave(user.uid, newTrip);
-        });
+        saveTripToCloud(user.uid, newTrip)
+          .then(() => {
+            markTripsSyncedLocally({ [newTrip.id]: Math.max(Date.now(), newTrip.updatedAt || 0) });
+          })
+          .catch((err) => {
+            console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
+            enqueueTripSave(user.uid, newTrip);
+          });
       }
     }
     setShowTripModal(false);
@@ -874,6 +943,10 @@ export default function App() {
     setCurrentTripIdState(nextActiveId);
     setCurrentTripId(nextActiveId);
     setShowDeleteTripModal(false);
+
+    idbDeleteMediaByTrip(tripToDeleteId)
+      .then(() => garbageCollectOrphanedMedia(remaining))
+      .catch(() => {});
 
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       enqueueTripDelete(user.uid, tripToDeleteId);
@@ -1068,20 +1141,24 @@ export default function App() {
   };
 
   const handleImportTrip = (imported: Trip) => {
-    requireAuth(() => {
-      const exists = trips.some((t) => t.id === imported.id);
-      const sanitized: Trip = exists
-        ? {
-            ...imported,
-            id: `trip-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-            ownerId: currentUserRef.current?.uid || imported.ownerId,
-            updatedAt: Date.now(),
-          }
-        : {
-            ...imported,
-            ownerId: currentUserRef.current?.uid || imported.ownerId,
-            updatedAt: Date.now(),
-          };
+    requireAuth(async () => {
+      const exists = tripsRef.current.some((t) => t.id === imported.id);
+      let baseTrip = imported;
+      if (exists) {
+        const newId = `trip-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+        baseTrip = await rebindTripMediaIds(imported, newId);
+      }
+      const sanitized: Trip = {
+        ...baseTrip,
+        collabId: undefined,
+        isCollaborative: false,
+        collaborators: undefined,
+        editorEmails: undefined,
+        viewerEmails: undefined,
+        generalAccess: undefined,
+        ownerId: currentUserRef.current?.uid || baseTrip.ownerId,
+        updatedAt: Date.now(),
+      };
       applyUpdateTrip(sanitized);
       setCurrentTripIdState(sanitized.id);
       setCurrentTripId(sanitized.id);
@@ -1281,21 +1358,32 @@ export default function App() {
             <div className="flex items-center gap-1.5 shrink-0 ml-auto">
               <button
                 onClick={() => {
-                  requireAuth(() => {
+                  requireAuth(async () => {
+                    const newId = `trip-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+                    const rebound = await rebindTripMediaIds(sharedBannerTrip, newId);
                     const copyTrip: Trip = {
-                      ...sharedBannerTrip,
-                      id: `trip-${Date.now()}`,
+                      ...rebound,
+                      id: newId,
                       title: `${sharedBannerTrip.title} (副本)`,
+                      collabId: undefined,
+                      isCollaborative: false,
+                      collaborators: undefined,
+                      editorEmails: undefined,
+                      viewerEmails: undefined,
+                      generalAccess: undefined,
+                      ownerId: currentUserRef.current?.uid || sharedBannerTrip.ownerId,
                       createdAt: Date.now(),
                       updatedAt: Date.now(),
                     };
-                    handleImportTrip(copyTrip);
+                    applyUpdateTrip(copyTrip);
+                    setCurrentTripIdState(copyTrip.id);
+                    setCurrentTripId(copyTrip.id);
                     setSharedBannerTrip(null);
                     window.history.replaceState({}, '', window.location.pathname);
                     showToast(lang === 'zh' ? '已儲存至我的行程' : 'Saved to my trips');
                   }, lang === 'zh' ? '儲存分享行程' : 'Save shared trip');
                 }}
-                className="px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs transition active:scale-95 flex items-center gap-1"
+                className="min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs transition active:scale-95 flex items-center gap-1 cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>儲存到我的行程</span>
@@ -1305,7 +1393,7 @@ export default function App() {
                   setSharedBannerTrip(null);
                   window.history.replaceState({}, '', window.location.pathname);
                 }}
-                className="min-w-[36px] min-h-[36px] rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition"
+                className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition cursor-pointer"
                 aria-label="關閉"
               >
                 <X className="w-4 h-4" />
@@ -1629,7 +1717,11 @@ export default function App() {
               lang={lang}
               canEdit={permission.canEdit}
               onUpdateTrip={handleUpdateTrip}
-              onNavigateToTimelineDay={() => setActiveTab('timeline')}
+              requireAuth={requireAuth}
+              onNavigateToTimelineDay={(dayNum) => {
+                setRequestedTimelineDay({ dayNumber: dayNum, nonce: Date.now() });
+                setActiveTab('timeline');
+              }}
               onOpenQuickAction={(tab) => {
                 if (currentTrip.isCollaborative && !permission.canEdit) {
                   showToast(lang === 'zh' ? '目前為僅檢視權限' : 'View-only mode');
@@ -1917,13 +2009,15 @@ export default function App() {
           userId={currentUser?.uid}
           lang={lang}
           onResolved={(resolvedTrip) => {
+            const baseline = Math.max(Date.now(), resolvedTrip.updatedAt || 0);
+            const trackedTrip: Trip = { ...resolvedTrip, lastSyncedAt: baseline };
             setTrips((prev) => {
-              const updated = prev.map((t) => (t.id === resolvedTrip.id ? resolvedTrip : t));
+              const updated = prev.map((t) => (t.id === trackedTrip.id ? trackedTrip : t));
               saveTrips(updated);
               return updated;
             });
-            setPendingConflicts((prev) => prev.filter((c) => c.tripId !== resolvedTrip.id));
-            showToast(`【${resolvedTrip.title}】版本衝突已順利解決並同步！`);
+            setPendingConflicts((prev) => prev.filter((c) => c.tripId !== trackedTrip.id));
+            showToast(`【${trackedTrip.title}】版本衝突已順利解決並同步！`);
           }}
           onClose={() => setShowConflictModal(false)}
         />

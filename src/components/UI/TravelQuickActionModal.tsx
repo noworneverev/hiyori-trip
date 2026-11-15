@@ -3,7 +3,8 @@ import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { Trip, ExpenseItem, PaymentMethod } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { getTodayLocal } from '../../utils/date';
-import { compressImageFile, resolveMediaSrc, storeImageAsMediaRef } from '../../utils/image';
+import { compressImageFile, resolveMediaSrc, storeImageAsMediaRef, extractMediaId, isMediaRef } from '../../utils/image';
+import { idbDeleteMedia } from '../../utils/indexedDb';
 import { canUploadImages } from '../../utils/userPermissions';
 import { MediaImage } from './MediaImage';
 import {
@@ -179,6 +180,24 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   const [isCompressingReceipts, setIsCompressingReceipts] = useState<boolean>(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const receiptInputRef = useRef<HTMLInputElement | null>(null);
+  const receiptImagesRef = useRef<string[]>([]);
+  const savedRef = useRef(false);
+
+  useEffect(() => {
+    receiptImagesRef.current = receiptImages;
+  }, [receiptImages]);
+
+  const handleClose = () => {
+    if (!savedRef.current && receiptImagesRef.current.length > 0) {
+      receiptImagesRef.current.forEach((ref) => {
+        if (isMediaRef(ref)) {
+          const mid = extractMediaId(ref);
+          if (mid) idbDeleteMedia(mid).catch(() => {});
+        }
+      });
+    }
+    onClose();
+  };
 
   // Friend split states in Quick Modal
   const splitMembersList = React.useMemo(() => {
@@ -234,6 +253,11 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   };
 
   const handleRemoveReceiptImage = (indexToRemove: number) => {
+    const removed = receiptImages[indexToRemove];
+    if (removed && isMediaRef(removed)) {
+      const mid = extractMediaId(removed);
+      if (mid) idbDeleteMedia(mid).catch(() => {});
+    }
     setReceiptImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
@@ -329,6 +353,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       isPersonal: !isSplitMode ? true : quickIsPersonal,
     };
 
+    savedRef.current = true;
     onUpdateTrip({
       ...trip,
       expenses: [newExpense, ...trip.expenses],
@@ -461,7 +486,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
         if (previewImage) {
           setPreviewImage(null);
         } else {
-          onClose();
+          handleClose();
         }
       }
     };
@@ -470,12 +495,12 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [previewImage, onClose]);
+  }, [previewImage]);
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150 overflow-hidden touch-none"
-      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150 overflow-hidden"
+      onClick={handleClose}
     >
       <div
         className="relative w-full max-w-full sm:max-w-lg bg-white dark:bg-[#111827] rounded-t-[28px] sm:rounded-3xl shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-[90dvh] sm:max-h-[88vh] overscroll-contain touch-pan-y animate-in slide-in-from-bottom duration-200"
@@ -498,15 +523,16 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleSaveQuickExpense()}
-                className="px-3 py-1 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold text-xs flex items-center gap-1 transition active:scale-95 shadow-xs"
+                className="min-h-[36px] px-3 py-1 rounded-xl bg-teal-500 hover:bg-teal-400 text-white font-bold text-xs flex items-center gap-1 transition active:scale-95 shadow-xs cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5" />
                 <span>儲存</span>
               </button>
             )}
             <button
-              onClick={onClose}
-              className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition active:scale-95"
+              type="button"
+              onClick={handleClose}
+              className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition active:scale-95 cursor-pointer"
               aria-label="關閉"
             >
               <X className="w-5 h-5" />
@@ -969,18 +995,18 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
 
             {/* Friend Bill Splitting Section */}
             {!trip.isSoloTrip && trip.isSplitEnabled ? (
-              <div className="p-3.5 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/60 space-y-2.5">
+              <div className="p-3.5 rounded-2xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/80 dark:border-teal-800/60 space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
-                    <Users className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                    <span>🤝 朋友分帳模式</span>
+                  <span className="text-xs font-bold text-teal-900 dark:text-teal-200 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                    <span>朋友分帳模式</span>
                   </span>
-                  <label className="flex items-center gap-1.5 text-xs text-indigo-700 dark:text-indigo-300 font-semibold cursor-pointer">
+                  <label className="flex items-center gap-1.5 text-xs text-teal-800 dark:text-teal-300 font-semibold cursor-pointer">
                     <input
                       type="checkbox"
                       checked={quickIsPersonal}
                       onChange={(e) => setQuickIsPersonal(e.target.checked)}
-                      className="rounded text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                      className="rounded accent-teal-700 w-4 h-4 cursor-pointer"
                     />
                     <span>個人私費 (免分攤)</span>
                   </label>
@@ -990,7 +1016,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                   <div className="space-y-2.5 pt-1">
                     {/* Paid By selector */}
                     <div>
-                      <span className="block text-[11px] font-bold text-indigo-800 dark:text-indigo-300 mb-1">
+                      <span className="block text-[11px] font-bold text-teal-800 dark:text-teal-300 mb-1">
                         代墊付款人：
                       </span>
                       <div className="flex flex-wrap gap-1.5">
@@ -999,10 +1025,10 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                             key={m}
                             type="button"
                             onClick={() => setQuickPaidBy(m)}
-                            className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition ${
+                            className={`min-h-[36px] px-2.5 py-1 rounded-xl text-xs font-bold border transition cursor-pointer ${
                               quickPaidBy === m
-                                ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                                : 'bg-white dark:bg-slate-800 border-indigo-200 dark:border-indigo-900/60 text-indigo-900 dark:text-indigo-200 hover:bg-indigo-50'
+                                ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                                : 'bg-white dark:bg-slate-800 border-teal-200 dark:border-teal-900/60 text-teal-900 dark:text-teal-200 hover:bg-teal-50'
                             }`}
                           >
                             {m} {quickPaidBy === m && '✓'}
@@ -1014,13 +1040,13 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                     {/* Split With selector */}
                     <div>
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-[11px] font-bold text-indigo-800 dark:text-indigo-300">
+                        <span className="text-[11px] font-bold text-teal-800 dark:text-teal-300">
                           參與分攤成員：
                         </span>
                         <button
                           type="button"
                           onClick={() => setQuickSplitWith(splitMembersList)}
-                          className="text-[10px] text-indigo-600 dark:text-indigo-400 underline font-bold"
+                          className="text-[10px] text-teal-700 dark:text-teal-400 underline font-bold cursor-pointer"
                         >
                           全體均分
                         </button>
@@ -1041,9 +1067,9 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                                   setQuickSplitWith([...quickSplitWith, m]);
                                 }
                               }}
-                              className={`px-2.5 py-1 rounded-xl text-xs font-bold border transition ${
+                              className={`min-h-[36px] px-2.5 py-1 rounded-xl text-xs font-bold border transition cursor-pointer ${
                                 isIncluded
-                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                  ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
                                   : 'bg-white/80 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-400 line-through'
                               }`}
                             >
@@ -1053,8 +1079,15 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                         })}
                       </div>
                       {parsedAmount > 0 && (
-                        <p className="text-[10px] text-indigo-600/90 dark:text-indigo-400/90 mt-1 font-mono">
-                          每人預計分攤：{expenseCur} {(parsedAmount / Math.max(quickSplitWith.length, 1)).toFixed(0)}
+                        <p className="text-[10px] text-teal-700/90 dark:text-teal-400/90 mt-1 font-mono tabular-nums">
+                          每人預計分攤：{expenseCur}{' '}
+                          {(() => {
+                            const dec = CURRENCY_MAP[expenseCur]?.decimals ?? 0;
+                            return (parsedAmount / Math.max(quickSplitWith.length, 1)).toLocaleString(undefined, {
+                              minimumFractionDigits: dec,
+                              maximumFractionDigits: dec,
+                            });
+                          })()}
                         </p>
                       )}
                     </div>
@@ -1064,7 +1097,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
             ) : (
               <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700 text-xs">
                 <span className="text-slate-500 dark:text-slate-400 text-[11px] flex items-center gap-1">
-                  <span>👤 目前為個人獨旅模式</span>
+                  <span>目前為個人獨旅模式</span>
                 </span>
                 <button
                   type="button"
@@ -1073,9 +1106,10 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                       ...trip,
                       isSplitEnabled: true,
                       splitMembers: trip.splitMembers && trip.splitMembers.length > 0 ? trip.splitMembers : ['我', '同行旅伴'],
+                      updatedAt: Date.now(),
                     });
                   }}
-                  className="px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold hover:bg-indigo-100 transition text-[11px] border border-indigo-200 dark:border-indigo-800"
+                  className="min-h-[36px] px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 font-bold hover:bg-teal-100 transition text-[11px] border border-teal-200 dark:border-teal-800 cursor-pointer"
                 >
                   切換為朋友分帳
                 </button>
@@ -1216,7 +1250,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                       <button
                         type="button"
                         onClick={() => handleDeleteTodo(todo.id)}
-                        className="min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-rose-500 dark:text-zinc-500 dark:hover:text-rose-400 transition cursor-pointer opacity-80 sm:opacity-0 sm:group-hover:opacity-100 ml-1"
+                        className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center text-slate-400 hover:text-rose-500 dark:text-zinc-500 dark:hover:text-rose-400 transition cursor-pointer opacity-80 sm:opacity-0 sm:group-hover:opacity-100 ml-1"
                         title="刪除"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -1274,7 +1308,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
                           <button
                             type="button"
                             onClick={() => handleDeleteTodo(todo.id)}
-                            className="min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-rose-500 dark:text-zinc-500 dark:hover:text-rose-400 transition cursor-pointer opacity-80 sm:opacity-0 sm:group-hover:opacity-100"
+                            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center text-slate-400 hover:text-rose-500 dark:text-zinc-500 dark:hover:text-rose-400 transition cursor-pointer opacity-80 sm:opacity-0 sm:group-hover:opacity-100"
                             title="刪除"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1311,14 +1345,14 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               <button
                 type="button"
                 onClick={() => setPreviewImage(null)}
-                className="px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs backdrop-blur-md transition active:scale-95 cursor-pointer"
+                className="min-h-[44px] sm:min-h-[38px] px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs backdrop-blur-md transition active:scale-95 cursor-pointer"
               >
                 關閉大圖
               </button>
               <button
                 type="button"
                 onClick={handleDownloadLightboxImage}
-                className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs transition active:scale-95 shadow-xs cursor-pointer"
+                className="min-h-[44px] sm:min-h-[38px] px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs transition active:scale-95 shadow-xs cursor-pointer"
               >
                 下載照片
               </button>

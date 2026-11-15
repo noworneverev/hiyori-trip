@@ -16,7 +16,24 @@ app.use(express.json({ limit: '10mb' }));
 
 // Initialize Google Gemini SDK
 const apiKey = process.env.GEMINI_API_KEY;
-const ai = apiKey ? new GoogleGenAI() : null;
+const ai = apiKey
+  ? new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    })
+  : null;
+
+function addDaysIso(baseDate: string, offsetDays: number): string {
+  const match = (baseDate || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const d = match
+    ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + offsetDays))
+    : new Date();
+  return d.toISOString().slice(0, 10);
+}
 
 // Health check / API status
 app.get('/api/health', (req, res) => {
@@ -32,7 +49,7 @@ async function generateWithModelFallback(params: {
   config: any;
 }) {
   if (!ai) throw new Error('Gemini API key is not configured');
-  const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+  const models = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
   let lastError: any = null;
 
   for (const model of models) {
@@ -172,21 +189,28 @@ ${text}
 
     const tripData = JSON.parse(parsedJsonText);
 
+    const tripDays = Array.isArray(tripData.days) ? tripData.days : [];
+    const computedStart = tripData.startDate || todayStr;
+    const computedEnd =
+      tripData.endDate ||
+      endDate ||
+      (tripDays.length > 0 ? addDaysIso(computedStart, tripDays.length - 1) : computedStart);
+
     // Assign IDs for client usage
     const processedTrip = {
       id: `ai-trip-${Date.now()}`,
       title: tripData.title || 'AI 解析生成的旅遊行程',
       destination: tripData.destination || '旅遊目的地',
-      startDate: tripData.startDate || todayStr,
-      endDate: tripData.endDate || todayStr,
+      startDate: computedStart,
+      endDate: computedEnd,
       currency: tripData.currency || preferredCurrency || 'JPY',
       budgetTotal: tripData.budgetTotal || 30000,
       coverGradient: 'from-emerald-600 via-teal-600 to-cyan-700',
       notes: tripData.notes || '',
-      days: (tripData.days || []).map((day: any, dIdx: number) => ({
+      days: tripDays.map((day: any, dIdx: number) => ({
         id: `day-${Date.now()}-${dIdx + 1}`,
         dayNumber: day.dayNumber || dIdx + 1,
-        date: day.date || todayStr,
+        date: day.date || addDaysIso(computedStart, dIdx),
         theme: day.theme || `第 ${dIdx + 1} 天行程`,
         notes: day.notes || '',
         items: (day.items || []).map((item: any, iIdx: number) => ({
@@ -336,12 +360,13 @@ app.post('/api/generate-trip', async (req, res) => {
     if (!parsedJsonText) throw new Error('LLM 未返回有效數據');
     const tripData = JSON.parse(parsedJsonText);
 
+    const computedStart = tripData.startDate || start;
     const processedTrip = {
       id: `ai-gen-${Date.now()}`,
       title: tripData.title || `${destination} ${count} 天精選之旅`,
       destination: tripData.destination || destination,
-      startDate: tripData.startDate || start,
-      endDate: tripData.endDate || start,
+      startDate: computedStart,
+      endDate: tripData.endDate || addDaysIso(computedStart, Math.max(0, count - 1)),
       currency: tripData.currency || curr,
       budgetTotal: tripData.budgetTotal || 50000,
       coverGradient: 'from-emerald-600 via-teal-600 to-cyan-700',
@@ -349,7 +374,7 @@ app.post('/api/generate-trip', async (req, res) => {
       days: (tripData.days || []).map((day: any, dIdx: number) => ({
         id: `day-${Date.now()}-${dIdx + 1}`,
         dayNumber: day.dayNumber || dIdx + 1,
-        date: day.date || start,
+        date: day.date || addDaysIso(computedStart, dIdx),
         theme: day.theme || `第 ${dIdx + 1} 天精選行程`,
         notes: day.notes || '',
         items: (day.items || []).map((item: any, iIdx: number) => ({

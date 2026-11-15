@@ -16,9 +16,11 @@ import { CategoryType, Trip } from '../../types/itinerary';
 import { formatDateSlash } from '../../utils/date';
 import {
   convertAmount,
+  CURRENCY_MAP,
   formatCurrencyAmount,
   SUPPORTED_CURRENCIES,
 } from '../../utils/currency';
+import { copyTextToClipboard } from '../../utils/clipboard';
 import { MediaImage } from '../UI/MediaImage';
 import {
   CATEGORY_HEX,
@@ -73,6 +75,10 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
 }) => {
   const [selectedMonthDrill, setSelectedMonthDrill] = useState<number | null>(null);
   const [copiedReport, setCopiedReport] = useState(false);
+
+  const currencyDecimals = CURRENCY_MAP[displayCurrency]?.decimals ?? 0;
+  const roundCurrency = (val: number) =>
+    Number((val || 0).toFixed(currencyDecimals));
 
   const analytics = useMemo(() => {
     const matchedTrips = uniqueTrips.filter((t) => {
@@ -250,7 +256,7 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
       name: m.name,
       days: m.uniqueDates.size,
       spotsCount: m.spotsCount,
-      expense: Math.round(m.expenseTotal),
+      expense: roundCurrency(m.expenseTotal),
       spots: m.spots,
     }));
 
@@ -285,7 +291,7 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
 
     const totalDaysCount = uniqueDates.size;
     const avgDailyExpense =
-      totalDaysCount > 0 ? Math.round(totalConvertedExpense / totalDaysCount) : 0;
+      totalDaysCount > 0 ? roundCurrency(totalConvertedExpense / totalDaysCount) : 0;
 
     return {
       matchedTrips,
@@ -299,10 +305,10 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
       categoryPie,
       totalDaysCount,
       totalPhotosCount,
-      totalConvertedExpense: Math.round(totalConvertedExpense),
+      totalConvertedExpense: roundCurrency(totalConvertedExpense),
       avgDailyExpense,
     };
-  }, [uniqueTrips, displaySpots, reviewYear, filterCompletedOnly, displayCurrency]);
+  }, [uniqueTrips, displaySpots, reviewYear, filterCompletedOnly, displayCurrency, currencyDecimals]);
 
   const drillMonthSpots = useMemo(() => {
     if (selectedMonthDrill === null) return [];
@@ -310,7 +316,7 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
     return found?.spots || [];
   }, [selectedMonthDrill, analytics.monthlySeries]);
 
-  const handleCopyReport = () => {
+  const handleCopyReport = async () => {
     const yearLabel = reviewYear === 'all' ? '歷年總覽' : `${reviewYear} 年度`;
     const citiesText =
       analytics.citiesSummary
@@ -326,9 +332,11 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
       `· 總旅費統計：${formatCurrencyAmount(analytics.totalConvertedExpense, displayCurrency)}（日均 ${formatCurrencyAmount(analytics.avgDailyExpense, displayCurrency)}）\n` +
       `— 日和手帳 Hiyori`;
 
-    navigator.clipboard?.writeText(text);
-    setCopiedReport(true);
-    setTimeout(() => setCopiedReport(false), 2400);
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
+      setCopiedReport(true);
+      setTimeout(() => setCopiedReport(false), 2400);
+    }
   };
 
   return (
@@ -772,9 +780,9 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
           {analytics.matchedTrips.map((tr) => {
             const spotStats = analytics.tripSpotIndex.get(tr.id);
-            const totalSpent = Math.round(analytics.tripExpenseMap.get(tr.id) || 0);
+            const totalSpent = roundCurrency(analytics.tripExpenseMap.get(tr.id) || 0);
             const dayLen = Math.max(1, tr.days?.length || 1);
-            const dailySpent = Math.round(totalSpent / dayLen);
+            const dailySpent = roundCurrency(totalSpent / dayLen);
 
             return (
               <div

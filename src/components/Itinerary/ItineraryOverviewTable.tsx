@@ -386,17 +386,17 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
 
                           {/* Spots Chain */}
                           <td className="py-3 px-3 align-top">
-                            {spotTitles.length > 0 ? (
+                            {day.items.length > 0 ? (
                               <div className="flex flex-wrap items-center gap-1">
-                                {spotTitles.map((title, sIdx) => {
-                                  const matchingItem = day.items.find((i) => i.title === title);
+                                {day.items.map((matchingItem, sIdx) => {
                                   const hasCoords =
-                                    matchingItem &&
                                     typeof matchingItem.lat === 'number' &&
-                                    typeof matchingItem.lng === 'number';
+                                    typeof matchingItem.lng === 'number' &&
+                                    !isNaN(matchingItem.lat) &&
+                                    !isNaN(matchingItem.lng);
 
                                   return (
-                                    <React.Fragment key={sIdx}>
+                                    <React.Fragment key={matchingItem.id || sIdx}>
                                       <button
                                         type="button"
                                         onClick={(e) => {
@@ -406,19 +406,19 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                                             setViewMode('map');
                                           }
                                         }}
-                                        className={`px-2 py-0.5 rounded-md text-[11px] font-medium transition cursor-pointer flex items-center gap-1 ${
+                                        className={`min-h-[30px] px-2 py-0.5 rounded-md text-[11px] font-medium transition cursor-pointer flex items-center gap-1 ${
                                           isSelected
                                             ? 'bg-teal-100/80 dark:bg-teal-900/60 text-teal-900 dark:text-teal-200'
                                             : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-[#E5E2DC]/70 dark:border-slate-700/60 hover:text-teal-700 dark:hover:text-teal-300'
                                         }`}
-                                        title={hasCoords ? '點擊在地圖定位此景點' : title}
+                                        title={hasCoords ? '點擊在地圖定位此景點' : matchingItem.title}
                                       >
-                                        <span>{title}</span>
+                                        <span>{matchingItem.title}</span>
                                         {hasCoords && (
                                           <MapPin className="w-2.5 h-2.5 text-teal-700 dark:text-teal-400 opacity-75" />
                                         )}
                                       </button>
-                                      {sIdx < spotTitles.length - 1 && (
+                                      {sIdx < day.items.length - 1 && (
                                         <ArrowRight className="w-2.5 h-2.5 text-slate-400 shrink-0" />
                                       )}
                                     </React.Fragment>
@@ -540,9 +540,9 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                               e.stopPropagation();
                               setViewMode('map');
                             }}
-                            className="p-1.5 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950 rounded-lg flex items-center gap-0.5 text-[11px] font-bold"
+                            className="min-h-[40px] px-2.5 py-1.5 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950 rounded-lg flex items-center gap-1 text-[11px] font-bold cursor-pointer"
                           >
-                            <MapPin className="w-3 h-3" />
+                            <MapPin className="w-3.5 h-3.5" />
                             <span>地圖</span>
                           </button>
                           <div className="flex items-center gap-1 text-[11px] text-teal-700 dark:text-teal-400 font-semibold tabular-nums">

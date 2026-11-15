@@ -2,6 +2,7 @@ import { Trip } from '../types/itinerary';
 import { saveTripToCloud, deleteTripFromCloud, syncCollaborativeTrip, mergeSingleTrip } from './firebase';
 import { getStoredTrips, saveTrips, getDeletedTripIds } from './storage';
 import { idbGetSyncQueue, idbSaveSyncQueue } from './indexedDb';
+import { convertAmount, detectTripCurrency } from './currency';
 
 const QUEUE_STORAGE_KEY = 'hiyori_offline_sync_queue_v1';
 
@@ -204,8 +205,16 @@ export function summarizeTripForConflict(trip: Trip): TripConflictSummary {
   const todoCount = (trip.todos || []).length;
   const packingCount = (trip.packingList || []).length;
   const expenseCount = (trip.expenses || []).length;
+  const baseCur = trip.currency || detectTripCurrency(trip);
   const expenseTotal = (trip.expenses || []).reduce(
-    (sum, e) => sum + (e.convertedAmount || e.amount || 0),
+    (sum, e) =>
+      sum +
+      convertAmount(
+        e.amount || 0,
+        e.currency || baseCur,
+        baseCur,
+        trip.customExchangeRates
+      ),
     0
   );
   return {
@@ -253,9 +262,27 @@ export function hasTripContentDifference(a: Trip, b: Trip): boolean {
     (a.collaborators || []).length !== (b.collaborators || []).length ||
     (a.memories || []).length !== (b.memories || []).length ||
     (a.bookings || []).length !== (b.bookings || []).length ||
+    (a.stickyNotes || []).length !== (b.stickyNotes || []).length ||
     Object.keys(a.deletedItemIds || {}).length !== Object.keys(b.deletedItemIds || {}).length
   ) {
     return true;
+  }
+
+  const aStickies = a.stickyNotes || [];
+  const bStickies = b.stickyNotes || [];
+  for (let s = 0; s < aStickies.length; s++) {
+    const sa = aStickies[s];
+    const sb = bStickies[s];
+    if (
+      !sb ||
+      sa.id !== sb.id ||
+      sa.label !== sb.label ||
+      sa.content !== sb.content ||
+      sa.category !== sb.category ||
+      Boolean(sa.completed) !== Boolean(sb.completed)
+    ) {
+      return true;
+    }
   }
 
   const aMems = a.memories || [];
@@ -453,6 +480,7 @@ export function mergeTrips(
 ): { merged: Trip[]; tripsToUpload: Trip[]; deletedLocalTripIds: string[]; conflicts: TripConflict[] } {
   const tripsToUpload: Trip[] = [];
   const deletedLocalTripIds: string[] = [];
+  const conflicts: TripConflict[] = [];
   const mergedMap = new Map<string, Trip>();
   const localDeletedIds = new Set(getDeletedTripIds());
 
@@ -490,8 +518,46 @@ export function mergeTrips(
     } else {
       const localUpdated = lTrip.updatedAt || 0;
       const cloudUpdated = existing.updatedAt || 0;
+      const lastSynced = lTrip.lastSyncedAt || 0;
+      const timeDiffMs = Math.abs(localUpdated - cloudUpdated);
 
-      if (cloudUpdated > localUpdated) {
+      const bothDivergedSinceSync =
+        lastSynced > 0 &&
+        localUpdated > lastSynced + 2000 &&
+        cloudUpdated > lastSynced + 2000 &&
+        timeDiffMs > 2000 &&
+        hasTripContentDifference(lTrip, existing);
+
+      const divergedWithoutBaseline =
+        !lTrip.id.startsWith('preset-') &&
+        lastSynced === 0 &&
+        localUpdated > 0 &&
+        cloudUpdated > 0 &&
+        timeDiffMs > 2000 &&
+        hasTripContentDifference(lTrip, existing);
+
+      if (bothDivergedSinceSync || divergedWithoutBaseline) {
+        const localSummary = summarizeTripForConflict(lTrip);
+        const cloudSummary = summarizeTripForConflict(existing);
+        const newerVersion =
+          localUpdated > cloudUpdated ? 'local' : cloudUpdated > localUpdated ? 'cloud' : 'equal';
+        const timeDiffMinutes = Math.max(1, Math.round(timeDiffMs / (1000 * 60)));
+
+        conflicts.push({
+          tripId: lTrip.id,
+          tripTitle: lTrip.title,
+          destination: lTrip.destination,
+          localTrip: lTrip,
+          cloudTrip: existing,
+          localSummary,
+          cloudSummary,
+          detectedAt: Date.now(),
+          newerVersion,
+          timeDiffMinutes,
+        });
+        // Preserve local draft temporarily until user resolves via ConflictResolutionModal
+        mergedMap.set(lTrip.id, lTrip);
+      } else if (cloudUpdated > localUpdated) {
         mergedMap.set(lTrip.id, existing);
       } else if (localUpdated > cloudUpdated) {
         const mergedTrip = mergeSingleTrip(lTrip, existing);
@@ -508,7 +574,7 @@ export function mergeTrips(
   }
 
   const merged = Array.from(mergedMap.values());
-  return { merged, tripsToUpload, deletedLocalTripIds, conflicts: [] };
+  return { merged, tripsToUpload, deletedLocalTripIds, conflicts };
 }
 
 export async function executeSafeTripUpdate(

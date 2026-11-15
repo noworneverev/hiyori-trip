@@ -61,16 +61,16 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
       aria-modal="true"
     >
       <div
-        className="w-full max-w-lg bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl rounded-t-[2rem] sm:rounded-3xl shadow-2xl border-t sm:border border-slate-200/90 dark:border-slate-800/90 overflow-hidden flex flex-col max-h-[88vh] sm:max-h-[82vh] animate-in slide-in-from-bottom duration-300 ease-out"
+        className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-t-[2rem] sm:rounded-3xl shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-[88vh] sm:max-h-[82vh] animate-in slide-in-from-bottom duration-300 ease-out"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Mobile Pull Handle Bar */}
         <div className="w-12 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-3 mb-1 shrink-0 sm:hidden" />
 
         {/* Drawer Header */}
-        <div className="px-5 py-3.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/70 dark:bg-slate-800/50 shrink-0">
+        <div className="px-5 py-3.5 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between bg-[#FAF9F6] dark:bg-slate-900/60 shrink-0">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 flex items-center justify-center">
               <Filter className="w-4 h-4" />
             </div>
             <div>
@@ -85,16 +85,16 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
               <button
                 type="button"
                 onClick={onResetAll}
-                className="px-2.5 py-1.5 text-xs font-bold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/60 rounded-lg transition flex items-center gap-1 cursor-pointer"
+                className="min-h-[40px] px-3 py-1.5 text-xs font-bold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/60 rounded-lg transition flex items-center gap-1 cursor-pointer"
               >
-                <RotateCcw className="w-3 h-3" />
+                <RotateCcw className="w-3.5 h-3.5" />
                 <span>{lang === 'zh' ? '重設' : 'Reset'}</span>
               </button>
             )}
             <button
               type="button"
               onClick={onClose}
-              className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               aria-label="關閉"
             >
               <X className="w-4 h-4" />
@@ -284,11 +284,11 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
         </div>
 
         {/* Bottom Action Footer */}
-        <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 shrink-0">
+        <div className="p-4 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 shrink-0">
           <button
             type="button"
             onClick={onClose}
-            className="w-full py-3 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 active:scale-98 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-md shadow-teal-600/20 transition"
+            className="w-full min-h-[44px] py-3 px-4 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 active:scale-98 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
           >
             <Check className="w-4 h-4" />
             <span>{lang === 'zh' ? `套用篩選 (查看 ${filteredCount} 筆)` : `Apply Filter (${filteredCount} Results)`}</span>

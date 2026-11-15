@@ -210,7 +210,11 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
       return;
     }
     const existing = new Set(todos.map((t) => t.title));
-    const additions = DEFAULT_TODOS.filter((t) => !existing.has(t.title));
+    const additions = DEFAULT_TODOS.filter((t) => !existing.has(t.title)).map((t, idx) => ({
+      ...t,
+      id: `todo-rec-${Date.now()}-${idx}`,
+    }));
+    if (additions.length === 0) return;
     onUpdateTrip({ ...trip, todos: [...todos, ...additions], updatedAt: Date.now() });
   };
 
@@ -465,14 +469,16 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                     key={todo.id}
                     className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100/60 dark:hover:bg-slate-800/40 transition group opacity-75"
                   >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
                       <button
                         type="button"
                         onClick={() => handleToggleTodo(todo.id)}
-                        className="w-5 h-5 rounded-full bg-teal-700 dark:bg-teal-500 text-white flex items-center justify-center shrink-0 cursor-pointer shadow-2xs"
+                        className="w-11 h-11 sm:w-8 sm:h-8 -ml-2 flex items-center justify-center rounded-xl shrink-0 cursor-pointer"
                         title="恢復待辦"
                       >
-                        <Check className="w-3 h-3 stroke-[2.5]" />
+                        <span className="w-5 h-5 rounded-full bg-teal-700 dark:bg-teal-500 text-white flex items-center justify-center shadow-2xs">
+                          <Check className="w-3 h-3 stroke-[2.5]" />
+                        </span>
                       </button>
                       <span className="text-sm line-through text-slate-400 dark:text-slate-500 truncate flex-1">
                         {todo.title}
@@ -482,7 +488,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                       <button
                         type="button"
                         onClick={() => handleDeleteTodo(todo.id)}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
+                        className="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
                         title="刪除"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -673,13 +679,16 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                       key={item.id}
                       className="flex items-center justify-between p-2 hover:bg-[#FAF9F6] dark:hover:bg-slate-800/30 transition rounded-xl opacity-60"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
                         <button
                           type="button"
                           onClick={() => handleTogglePacking(item.id)}
-                          className="w-4 h-4 rounded-full bg-teal-700 dark:bg-teal-500 text-white flex items-center justify-center shrink-0 cursor-pointer"
+                          className="w-11 h-11 sm:w-8 sm:h-8 -ml-2 flex items-center justify-center rounded-xl shrink-0 cursor-pointer"
+                          aria-label="恢復待打包"
                         >
-                          <Check className="w-2.5 h-2.5" />
+                          <span className="w-4 h-4 rounded-full bg-teal-700 dark:bg-teal-500 text-white flex items-center justify-center">
+                            <Check className="w-2.5 h-2.5" />
+                          </span>
                         </button>
                         <span className="text-xs line-through text-slate-400 dark:text-slate-500 truncate">
                           {item.name}
@@ -689,9 +698,10 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                         <button
                           type="button"
                           onClick={() => handleDeletePacking(item.id)}
-                          className="p-1 text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 transition cursor-pointer ml-1"
+                          className="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 transition cursor-pointer ml-1"
+                          aria-label="刪除物品"
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </div>

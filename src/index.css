@@ -39,7 +39,12 @@ html {
   background-color: var(--bg-canvas);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  scrollbar-gutter: stable;
+}
+
+@media (min-width: 768px) {
+  html {
+    scrollbar-gutter: stable;
+  }
 }
 
 html.dark {
@@ -149,10 +154,10 @@ html[data-text-scale="senior"] body {
   letter-spacing: 0.015em;
 }
 
-html[data-text-scale="senior"] .text-slate-400,
-html[data-text-scale="senior"] .text-zinc-400,
-html[data-text-scale="senior"] .text-slate-500,
-html[data-text-scale="senior"] .text-zinc-500 {
+html[data-text-scale="senior"]:not(.dark) .text-slate-400:not([class*="bg-black"] *):not([class*="bg-zinc-9"] *):not([class*="bg-slate-9"] *):not(.leaflet-popup-content *),
+html[data-text-scale="senior"]:not(.dark) .text-zinc-400:not([class*="bg-black"] *):not([class*="bg-zinc-9"] *):not([class*="bg-slate-9"] *):not(.leaflet-popup-content *),
+html[data-text-scale="senior"]:not(.dark) .text-slate-500:not([class*="bg-black"] *):not([class*="bg-zinc-9"] *):not([class*="bg-slate-9"] *):not(.leaflet-popup-content *),
+html[data-text-scale="senior"]:not(.dark) .text-zinc-500:not([class*="bg-black"] *):not([class*="bg-zinc-9"] *):not([class*="bg-slate-9"] *):not(.leaflet-popup-content *) {
   color: #1e293b !important;
   font-weight: 500;
 }

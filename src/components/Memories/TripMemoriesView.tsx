@@ -6,6 +6,10 @@ import { Language } from '../../utils/i18n';
 import { processPhotoWithExif } from '../../utils/exif';
 import { searchLocationOSM } from '../../utils/geo';
 import { canUploadImages } from '../../utils/userPermissions';
+import { sanitizeExternalUrl } from '../../utils/url';
+import { extractMediaId, garbageCollectOrphanedMedia, isMediaRef } from '../../utils/image';
+import { idbDeleteMedia } from '../../utils/indexedDb';
+import { getStoredTrips } from '../../utils/storage';
 import {
   auth,
   connectGoogleDrive,
@@ -175,6 +179,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const handleForceSyncMemory = async (mem: TripMemoryItem, e: React.MouseEvent) => {
     e.stopPropagation();
 
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setToastMessage(
+        lang === 'zh'
+          ? '📴 目前處於離線狀態，照片已安全保留於本機，連網後將自動同步'
+          : 'Offline: photo safely stored locally and queued for sync'
+      );
+      setSaveSuccessToast(true);
+      setTimeout(() => setSaveSuccessToast(false), 3200);
+      return;
+    }
+
     if (!auth.currentUser) {
       if (requireAuth) {
         requireAuth(() => handleForceSyncMemory(mem, e), lang === 'zh' ? '同步照片至雲端資料庫' : 'Sync photo to cloud');
@@ -275,8 +290,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           setLightboxMemory(null);
           setConfirmDeleteMemId(null);
         } else if (showUploadModal) {
-          setShowUploadModal(false);
-          setConfirmDeleteSpotPhoto(null);
+          closeUploadModalAndCleanup();
         }
       }
     };
@@ -298,6 +312,30 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const [uploadLimitWarning, setUploadLimitWarning] = useState<string | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const closeUploadModalAndCleanup = (skipMediaDelete = false) => {
+    if (!skipMediaDelete) {
+      setUploadImagePreviews((prev) => {
+        prev.forEach((p) => {
+          if (p.mediaRef && isMediaRef(p.mediaRef)) {
+            idbDeleteMedia(extractMediaId(p.mediaRef)).catch(() => {});
+          }
+        });
+        return [];
+      });
+    } else {
+      setUploadImagePreviews([]);
+    }
+    setUploadBatchProgress(null);
+    setUploadLimitWarning(null);
+    setUploadCaption('');
+    setUploadSpotId('');
+    setUploadGooglePhotosUrl('');
+    setIsCustomSpot(false);
+    setCustomLocationName('');
+    setConfirmDeleteSpotPhoto(null);
+    setShowUploadModal(false);
+  };
 
   // When navigated to with a specific spot ID, auto-open the upload modal for this spot
   useEffect(() => {
@@ -589,7 +627,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     ) {
       return;
     }
-    const finalUrl = lightboxEditUrl.trim();
+    const finalUrl = sanitizeExternalUrl(lightboxEditUrl) || '';
 
     // 1. Update current lightboxMemory in-memory
     const updatedMem = {
@@ -730,7 +768,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   };
 
   const handleRemovePreview = (index: number) => {
-    setUploadImagePreviews((prev) => prev.filter((_, idx) => idx !== index));
+    setUploadImagePreviews((prev) => {
+      const target = prev[index];
+      if (target?.mediaRef && isMediaRef(target.mediaRef)) {
+        idbDeleteMedia(extractMediaId(target.mediaRef)).catch(() => {});
+      }
+      return prev.filter((_, idx) => idx !== index);
+    });
     setUploadLimitWarning(null);
   };
 
@@ -810,13 +854,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     const updatedMemories = (trip.memories || []).filter((m) => m.imageUrl !== photoUrl);
 
     setConfirmDeleteSpotPhoto(null);
-    onUpdateTrip({
+    const updatedTrip: Trip = {
       ...trip,
       days: updatedDays,
       memories: updatedMemories,
       deletedItemIds,
       updatedAt: now,
-    });
+    };
+    onUpdateTrip(updatedTrip);
+    garbageCollectOrphanedMedia(
+      (allTrips || getStoredTrips()).map((t) => (t.id === updatedTrip.id ? updatedTrip : t))
+    ).catch(() => {});
   };
 
   // Submit and save new memories or update Google Photos link
@@ -824,7 +872,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     e.preventDefault();
     if (!canEdit) return;
     const hasNewPhotos = uploadImagePreviews.length > 0;
-    const hasGoogleUrl = Boolean(uploadGooglePhotosUrl.trim());
+    const safeGoogleUrl = sanitizeExternalUrl(uploadGooglePhotosUrl);
+    const hasGoogleUrl = Boolean(safeGoogleUrl);
     if (!hasNewPhotos && !hasGoogleUrl && !uploadCaption.trim()) return;
 
     const isCustom = isCustomSpot || !uploadSpotId;
@@ -850,6 +899,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     let updatedMemories = [...(trip.memories || [])];
     let nextDriveFolderId = trip.driveFolderId;
 
+    let didSave = false;
     setIsSavingMemory(true);
     try {
       if (hasNewPhotos) {
@@ -916,7 +966,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             lng: preview.lng,
             mood: uploadMood,
             location: finalLocation,
-            googlePhotosUrl: uploadGooglePhotosUrl.trim() || undefined,
+            googlePhotosUrl: safeGoogleUrl || undefined,
             driveFileId: driveInfo?.driveFileId,
             driveFolderId: driveInfo?.driveFolderId || nextDriveFolderId,
             originalBytes: driveInfo?.originalBytes ?? preview.originalBytes,
@@ -927,7 +977,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           };
         });
         updatedMemories = [...newMemories, ...updatedMemories];
-    } else if (hasGoogleUrl) {
+    } else if (hasGoogleUrl && safeGoogleUrl) {
       // User only updated/added googlePhotosUrl without uploading files
       if (!isCustom && uploadSpotId) {
         // Check if memories already exist for this spot
@@ -937,7 +987,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             m.spotId === uploadSpotId
               ? {
                   ...m,
-                  googlePhotosUrl: uploadGooglePhotosUrl.trim() || undefined,
+                  googlePhotosUrl: safeGoogleUrl || undefined,
                   caption: uploadCaption.trim() || m.caption,
                   mood: uploadMood || m.mood,
                 }
@@ -946,7 +996,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         } else {
           updatedMemories.unshift({
             id: `mem-gphoto-${now}`,
-            imageUrl: uploadGooglePhotosUrl.trim(),
+            imageUrl: safeGoogleUrl,
             caption: uploadCaption.trim() || finalTitle,
             spotId: uploadSpotId,
             spotTitle: finalTitle,
@@ -954,7 +1004,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             date: chosenDate,
             mood: uploadMood,
             location: finalLocation,
-            googlePhotosUrl: uploadGooglePhotosUrl.trim(),
+            googlePhotosUrl: safeGoogleUrl,
             createdAt: now,
           });
         }
@@ -962,13 +1012,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         // Custom snap with Google Photos URL
         updatedMemories.unshift({
           id: `mem-custom-gphoto-${now}`,
-          imageUrl: uploadGooglePhotosUrl.trim(),
+          imageUrl: safeGoogleUrl,
           caption: uploadCaption.trim() || finalTitle,
           dayNumber: chosenDayNum,
           date: chosenDate,
           mood: uploadMood,
           location: finalLocation,
-          googlePhotosUrl: uploadGooglePhotosUrl.trim(),
+          googlePhotosUrl: safeGoogleUrl,
           createdAt: now,
         });
       }
@@ -992,7 +1042,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               memoryPhotos: merged.length > 0 ? merged : undefined,
               memoryNotes: uploadCaption.trim() || item.memoryNotes,
               memoryMood: uploadMood,
-              googlePhotosUrl: uploadGooglePhotosUrl.trim() || item.googlePhotosUrl || undefined,
+              googlePhotosUrl: safeGoogleUrl || item.googlePhotosUrl || undefined,
             };
           }
           return item;
@@ -1026,6 +1076,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         driveFolderId: nextDriveFolderId,
         updatedAt: Date.now(),
       });
+      didSave = true;
 
       if (auth.currentUser) {
         setToastMessage(
@@ -1046,16 +1097,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     } finally {
       setIsSavingMemory(false);
       setDriveUploadProgress(null);
-      // Reset and close
-      setUploadImagePreviews([]);
-      setUploadBatchProgress(null);
-      setUploadLimitWarning(null);
-      setUploadCaption('');
-      setUploadSpotId('');
-      setUploadGooglePhotosUrl('');
-      setIsCustomSpot(false);
-      setCustomLocationName('');
-      setShowUploadModal(false);
+      closeUploadModalAndCleanup(didSave);
     }
   };
 
@@ -1065,8 +1107,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     const updatedMemories = (trip.memories || []).filter((m) => m.id !== memId);
     const deletedItemIds: Record<string, number> = {
       ...(trip.deletedItemIds || {}),
-      [memId]: now,
     };
+    if (!memId.startsWith('spot-mem-')) {
+      deletedItemIds[memId] = now;
+    }
 
     // Also cleanup spot reference if present
     let updatedDays = trip.days;
@@ -1090,13 +1134,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       setLightboxMemory(null);
     }
 
-    onUpdateTrip({
+    const updatedTrip: Trip = {
       ...trip,
       days: updatedDays,
       memories: updatedMemories,
       deletedItemIds,
       updatedAt: now,
-    });
+    };
+    onUpdateTrip(updatedTrip);
+    garbageCollectOrphanedMedia(
+      (allTrips || getStoredTrips()).map((t) => (t.id === updatedTrip.id ? updatedTrip : t))
+    ).catch(() => {});
   };
 
   // Delete memory (explicit confirmation dialog if backed up to Google Drive)
@@ -1246,8 +1294,14 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       onClick={async () => {
                         setIsConnectingDrive(true);
                         try {
-                          await connectGoogleDrive();
-                          setDriveConnected(hasDriveAccessToken());
+                          const token = await connectGoogleDrive();
+                          const ok = Boolean(token) || hasDriveAccessToken();
+                          setDriveConnected(ok);
+                          if (!ok) {
+                            setToastMessage('⚠️ Google Drive 授權未完成或被瀏覽器阻擋，請允許彈出視窗後重試');
+                            setSaveSuccessToast(true);
+                            setTimeout(() => setSaveSuccessToast(false), 3500);
+                          }
                         } finally {
                           setIsConnectingDrive(false);
                         }
@@ -1277,9 +1331,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               </button>
             )}
 
-            {trip.googlePhotosAlbumUrl && (
+            {sanitizeExternalUrl(trip.googlePhotosAlbumUrl) && (
               <a
-                href={trip.googlePhotosAlbumUrl}
+                href={sanitizeExternalUrl(trip.googlePhotosAlbumUrl)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="min-h-[40px] px-3 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition active:scale-95"
@@ -1749,7 +1803,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                                           e.stopPropagation();
                                           setConfirmDeleteMemId(pm.id);
                                         }}
-                                        className="absolute top-0.5 right-0.5 w-6 h-6 rounded bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center transition opacity-90 sm:opacity-0 sm:group-hover/thumb:opacity-100 z-10 cursor-pointer"
+                                        className="absolute top-0.5 right-0.5 w-8 h-8 sm:w-6 sm:h-6 rounded bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center transition opacity-90 sm:opacity-0 sm:group-hover/thumb:opacity-100 z-10 cursor-pointer"
                                         title="刪除"
                                       >
                                         <Trash2 className="w-3 h-3 text-rose-300 hover:text-white" />
@@ -1757,6 +1811,16 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                                     )}
                                   </div>
                                 ))}
+                                {spotMems.length > 3 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setLightboxMemory(spotMems[3])}
+                                    className="w-12 h-12 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-800 hover:border-teal-500 text-teal-700 dark:text-teal-300 font-mono font-bold text-xs flex items-center justify-center shrink-0 transition cursor-pointer"
+                                    title={`查看全部 ${spotMems.length} 張相片`}
+                                  >
+                                    +{spotMems.length - 3}
+                                  </button>
+                                )}
                               </div>
                               {spotMems.some((pm) => pm.id === confirmDeleteMemId) && (
                                 <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/70 text-[11px]">
@@ -1811,9 +1875,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                                 ) : (
                                   <span className="text-slate-400 text-[10px]">相簿</span>
                                 )}
-                                {(spot.googlePhotosUrl || firstPhoto.googlePhotosUrl) && (
+                                {sanitizeExternalUrl(spot.googlePhotosUrl || firstPhoto.googlePhotosUrl) && (
                                   <a
-                                    href={spot.googlePhotosUrl || firstPhoto.googlePhotosUrl}
+                                    href={sanitizeExternalUrl(spot.googlePhotosUrl || firstPhoto.googlePhotosUrl)}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     onClick={(e) => e.stopPropagation()}
@@ -1844,12 +1908,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                                     </button>
                                   </div>
                                 ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteMemId(firstPhoto.id)}
-                                    className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
-                                    title="刪除主照"
-                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteMemId(firstPhoto.id)}
+                                      className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                                      title="刪除主照"
+                                    >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 )
@@ -2145,7 +2209,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     )}
                   </div>
 
-                  <p className="text-xs text-slate-700 dark:text-slate-300 font-medium leading-relaxed italic border-l-2 border-teal-500/60 pl-2.5 py-0.5">
+                  <p className="text-xs text-slate-700 dark:text-slate-300 font-medium leading-relaxed italic py-0.5">
                     「{mem.caption}」
                   </p>
                 </div>
@@ -2174,7 +2238,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     <button
                       type="button"
                       onClick={() => setConfirmDeleteMemId(mem.id)}
-                      className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                      className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
                       title="刪除此照片"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -2293,7 +2357,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setConfirmDeleteMemId(mem.id)}
-                    className="no-print absolute top-2 right-2 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full bg-slate-900/70 text-white hover:bg-rose-600 transition shadow-md cursor-pointer"
+                    className="no-print absolute top-2 right-2 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-full bg-slate-900/70 text-white hover:bg-rose-600 transition shadow-md cursor-pointer"
                     title="刪除"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -2309,7 +2373,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       {showUploadModal && canShowUploadAction && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150"
-          onClick={() => setShowUploadModal(false)}
+          onClick={() => closeUploadModalAndCleanup()}
         >
           <div
             className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-150"
@@ -2332,8 +2396,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setShowUploadModal(false)}
-                className="w-10 h-10 flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer"
+                onClick={() => closeUploadModalAndCleanup()}
+                className="w-11 h-11 sm:w-10 sm:h-10 flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2382,8 +2446,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     onClick={async () => {
                       setIsConnectingDrive(true);
                       try {
-                        await connectGoogleDrive();
-                        setDriveConnected(hasDriveAccessToken());
+                        const token = await connectGoogleDrive();
+                        const ok = Boolean(token) || hasDriveAccessToken();
+                        setDriveConnected(ok);
+                        if (!ok) {
+                          setUploadLimitWarning('Google Drive 授權未完成或被瀏覽器阻擋，若跳過授權仍可先以 1440px 高清縮圖儲存在本機與雲端。');
+                        }
                       } finally {
                         setIsConnectingDrive(false);
                       }
@@ -2504,7 +2572,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleRemovePreview(idx)}
-                            className="absolute top-1 right-1 p-1 rounded-full bg-slate-900/80 text-white hover:bg-rose-600 transition shadow-sm cursor-pointer"
+                            className="absolute top-1 right-1 w-9 h-9 sm:w-7 sm:h-7 flex items-center justify-center rounded-full bg-slate-900/80 text-white hover:bg-rose-600 transition shadow-sm cursor-pointer"
                             title="移除此張"
                           >
                             <X className="w-3.5 h-3.5" />
@@ -2566,7 +2634,14 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       <button
                         type="button"
                         onClick={() => {
-                          setUploadImagePreviews([]);
+                          setUploadImagePreviews((prev) => {
+                            prev.forEach((p) => {
+                              if (p.mediaRef && isMediaRef(p.mediaRef)) {
+                                idbDeleteMedia(extractMediaId(p.mediaRef)).catch(() => {});
+                              }
+                            });
+                            return [];
+                          });
                           setUploadLimitWarning(null);
                         }}
                         className="text-rose-600 hover:underline cursor-pointer"
@@ -2760,9 +2835,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   <label className="block font-bold text-slate-700 dark:text-slate-300">
                     Google 相簿連結（選填）
                   </label>
-                  {uploadGooglePhotosUrl && (
+                  {sanitizeExternalUrl(uploadGooglePhotosUrl) && (
                     <a
-                      href={uploadGooglePhotosUrl}
+                      href={sanitizeExternalUrl(uploadGooglePhotosUrl)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-[10px] text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1 font-semibold"
@@ -2785,19 +2860,19 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setShowUploadModal(false)}
-                  className="px-4 py-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold cursor-pointer"
+                  onClick={() => closeUploadModalAndCleanup()}
+                  className="min-h-[44px] px-4 py-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold cursor-pointer"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
                   disabled={
-                    (uploadImagePreviews.length === 0 && !uploadGooglePhotosUrl.trim() && !uploadCaption.trim()) ||
+                    (uploadImagePreviews.length === 0 && !sanitizeExternalUrl(uploadGooglePhotosUrl) && !uploadCaption.trim()) ||
                     isProcessingImage ||
                     isSavingMemory
                   }
-                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-bold shadow-xs transition active:scale-95 flex items-center gap-1.5 cursor-pointer"
+                  className="min-h-[44px] px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-bold shadow-xs transition active:scale-95 flex items-center gap-1.5 cursor-pointer"
                 >
                   {isSavingMemory ? (
                     <>
@@ -2852,9 +2927,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   <span className="hidden sm:inline">{isEditingLightboxUrl ? '收合編輯' : '修改原圖連結'}</span>
                 </button>
               )}
-              {(lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl) && (
+              {sanitizeExternalUrl(lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl) && (
                 <a
-                  href={lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl}
+                  href={sanitizeExternalUrl(lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="min-h-[40px] px-3 py-1.5 rounded-full bg-black/75 hover:bg-teal-700 text-white text-xs font-bold transition flex items-center gap-1.5 border border-white/20 shadow-md backdrop-blur-md active:scale-95"
@@ -2947,7 +3022,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     e.stopPropagation();
                     handlePrevLightbox();
                   }}
-                  className="absolute left-2 sm:left-4 z-10 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition active:scale-90 border border-white/10"
+                  className="absolute left-2 sm:left-4 z-10 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition active:scale-90 border border-white/10"
                   title="上一張"
                 >
                   <ChevronLeft className="w-6 h-6" />
@@ -2966,13 +3041,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     className="max-h-[65vh] w-auto max-w-full object-contain pointer-events-none"
                   />
                 </div>
-              ) : lightboxMemory.googlePhotosUrl && !lightboxHighResFailed ? (
+              ) : sanitizeExternalUrl(lightboxMemory.googlePhotosUrl) && !lightboxHighResFailed ? (
                 <div className="relative flex items-center justify-center max-h-[65vh]">
                   <MediaImage
                     tripId={trip.id}
                     ownerId={trip.ownerId}
                     collabId={trip.collabId}
-                    src={lightboxMemory.googlePhotosUrl}
+                    src={sanitizeExternalUrl(lightboxMemory.googlePhotosUrl)!}
                     alt={lightboxMemory.caption}
                     onError={() => setLightboxHighResFailed(true)}
                     className="max-h-[65vh] w-auto max-w-full object-contain pointer-events-none"
@@ -2999,7 +3074,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     e.stopPropagation();
                     handleNextLightbox();
                   }}
-                  className="absolute right-2 sm:right-4 z-10 w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition active:scale-90 border border-white/10"
+                  className="absolute right-2 sm:right-4 z-10 w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition active:scale-90 border border-white/10"
                   title="下一張"
                 >
                   <ChevronRight className="w-6 h-6" />
@@ -3048,7 +3123,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   )}
                 </div>
                 {lightboxMemory.caption && (
-                  <p className="text-xs text-slate-300 italic truncate">
+                  <p className="text-xs text-slate-300 italic whitespace-pre-wrap break-words leading-relaxed">
                     「{lightboxMemory.caption}」
                   </p>
                 )}
@@ -3091,8 +3166,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     onClick={async () => {
                       setIsConnectingDrive(true);
                       try {
-                        await connectGoogleDrive();
-                        setDriveConnected(hasDriveAccessToken());
+                        const token = await connectGoogleDrive();
+                        const ok = Boolean(token) || hasDriveAccessToken();
+                        setDriveConnected(ok);
+                        if (!ok) {
+                          setDriveOriginalError('Google Drive 授權未完成或被瀏覽器阻擋');
+                        }
                       } finally {
                         setIsConnectingDrive(false);
                       }
@@ -3112,9 +3191,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       let token = getDriveAccessToken();
                       if (!token) {
                         token = await connectGoogleDrive();
-                        setDriveConnected(hasDriveAccessToken());
+                        setDriveConnected(Boolean(token) || hasDriveAccessToken());
                       }
-                      if (!token || !lightboxMemory.driveFileId) return;
+                      if (!token) {
+                        setDriveOriginalError('需要 Google Drive 授權才能下載未壓縮原圖');
+                        return;
+                      }
+                      if (!lightboxMemory.driveFileId) return;
                       setIsDownloadingDriveOriginal(true);
                       try {
                         const ext =
@@ -3146,9 +3229,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   </button>
                 )}
 
-                {(lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl) && (
+                {sanitizeExternalUrl(lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl) && (
                   <a
-                    href={lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl}
+                    href={sanitizeExternalUrl(lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 text-xs font-bold flex items-center gap-1.5 transition active:scale-95"

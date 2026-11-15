@@ -2,7 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { ItineraryItem, CategoryType } from '../../types/itinerary';
 import { searchLocationOSM } from '../../utils/geo';
-import { compressImageFile, storeImageAsMediaRef } from '../../utils/image';
+import { compressImageFile, storeImageAsMediaRef, extractMediaId, isMediaRef } from '../../utils/image';
+import { idbDeleteMedia } from '../../utils/indexedDb';
+import { sanitizeExternalUrl } from '../../utils/url';
 import { canUploadImages } from '../../utils/userPermissions';
 import { findInsertionPosition, checkItemTimeOverlap } from '../../utils/date';
 import { MediaImage } from '../UI/MediaImage';
@@ -96,7 +98,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   const hasExistingExtraDetails = Boolean(
     item?.locationName ||
     item?.address ||
-    item?.lat ||
+    typeof item?.lat === 'number' ||
     item?.transportNote ||
     item?.notes ||
     item?.bookingCode ||
@@ -124,6 +126,13 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const initialPhotosRef = useRef<string[]>(item?.memoryPhotos || []);
+  const memoryPhotosRef = useRef<string[]>(memoryPhotos);
+  const didSaveRef = useRef(false);
+
+  useEffect(() => {
+    memoryPhotosRef.current = memoryPhotos;
+  }, [memoryPhotos]);
 
   // Search OSM
   const [searchQuery, setSearchQuery] = useState('');
@@ -142,6 +151,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   // Sync state when item prop changes
   useEffect(() => {
     if (item) {
+      initialPhotosRef.current = item.memoryPhotos || [];
       setTitle(item.title || '');
       setCategory(item.category || 'spot');
       setStartTime(item.startTime || defaultStartTime || '09:00');
@@ -172,6 +182,18 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     }
   }, [item, defaultStartTime]);
 
+  const handleClose = () => {
+    if (!didSaveRef.current) {
+      memoryPhotosRef.current.forEach((ref) => {
+        if (isMediaRef(ref) && !initialPhotosRef.current.includes(ref)) {
+          const mid = extractMediaId(ref);
+          if (mid) idbDeleteMedia(mid).catch(() => {});
+        }
+      });
+    }
+    onClose();
+  };
+
   const handlePhotoFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0 || !canEdit) return;
@@ -200,6 +222,11 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 
   const handleRemovePhoto = (idx: number) => {
     if (!canEdit) return;
+    const removed = memoryPhotos[idx];
+    if (removed && isMediaRef(removed) && !initialPhotosRef.current.includes(removed)) {
+      const mid = extractMediaId(removed);
+      if (mid) idbDeleteMedia(mid).catch(() => {});
+    }
     setMemoryPhotos((prev) => prev.filter((_, i) => i !== idx));
   };
 
@@ -266,6 +293,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     e.preventDefault();
     if (!canEdit || !title.trim()) return;
 
+    didSaveRef.current = true;
     onSave(
       {
         title: title.trim(),
@@ -283,7 +311,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
         costPaid,
         memoryPhotos: memoryPhotos.length > 0 ? memoryPhotos : undefined,
         memoryMood: memoryMood || '✨',
-        googlePhotosUrl: googlePhotosUrl.trim() || undefined,
+        googlePhotosUrl: sanitizeExternalUrl(googlePhotosUrl) || undefined,
         completed: item?.completed || false,
       },
       item?.id
@@ -292,19 +320,19 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') handleClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, []);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs p-0 sm:p-4 overflow-y-auto"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <div
-        className="w-full max-w-xl rounded-t-[28px] sm:rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200/80 dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col max-h-[92vh] sm:max-h-[88vh] overflow-hidden animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-200"
+        className="w-full max-w-xl rounded-t-[28px] sm:rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col max-h-[92vh] sm:max-h-[88vh] overflow-hidden animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* iOS Drag Handle on Mobile */}
@@ -312,18 +340,18 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
           <div className="w-10 h-1 rounded-full bg-slate-300 dark:bg-slate-700" />
         </div>
 
-        {/* Clean Apple-style Header */}
-        <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-slate-100 dark:border-slate-800/80">
+        {/* Clean Header */}
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-[#E5E2DC]/60 dark:border-slate-800/80">
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-teal-500" />
             <h3 className="font-bold text-base sm:text-lg text-slate-900 dark:text-white tracking-tight">
               {item ? '編輯行程景點' : `新增第 ${dayNumber} 天行程`}
             </h3>
           </div>
           <button
             type="button"
-            onClick={onClose}
-            className="min-w-[36px] min-h-[36px] rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+            onClick={handleClose}
+            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+            aria-label="關閉"
           >
             <X className="w-5 h-5" />
           </button>
@@ -517,7 +545,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
               <div className="flex items-center gap-2">
                 <span>更多詳細資訊 (地點、交通、預約、花費、相片)</span>
                 {(locationName || transportNote || bookingCode || cost) && (
-                  <span className="w-2 h-2 rounded-full bg-teal-500" />
+                  <span className="text-[10px] font-semibold text-teal-700 dark:text-teal-400">· 已填寫</span>
                 )}
               </div>
               {showMoreDetails ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
@@ -616,8 +644,8 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                   {/* Coords summary badge & optional raw inputs */}
                   <div className="pt-1 flex items-center justify-between text-[11px]">
                     <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
-                      {lat && lng ? (
-                        <span className="text-teal-700 dark:text-teal-300 font-medium flex items-center gap-1">
+                      {typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng) ? (
+                        <span className="text-teal-700 dark:text-teal-300 font-medium font-mono tabular-nums flex items-center gap-1">
                           <Check className="w-3.5 h-3.5 text-teal-600" />
                           已就緒導航座標 ({lat.toFixed(4)}, {lng.toFixed(4)})
                         </span>
@@ -664,18 +692,18 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 
                 {/* 4b. Transit guidance with instant chips */}
                 <div>
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-1.5">
                     <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
                       <Bus className="w-3.5 h-3.5 text-teal-600" />
                       <span>交通提醒與搭乘方式</span>
                     </label>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 flex-wrap">
                       {['步行 5 分', '搭乘地鐵', '搭公車', 'JR/新幹線', '搭計程車'].map((chip) => (
                         <button
                           type="button"
                           key={chip}
                           onClick={() => appendTransitChip(chip)}
-                          className="px-1.5 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] text-slate-600 dark:text-slate-400 font-medium transition"
+                          className="px-2 py-1 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] text-slate-600 dark:text-slate-400 font-medium transition cursor-pointer"
                         >
                           +{chip}
                         </button>
@@ -843,9 +871,9 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                         <ExternalLink className="w-3 h-3 text-rose-600" />
                         <span>Google 相簿連結（選填）</span>
                       </label>
-                      {googlePhotosUrl && (
+                      {sanitizeExternalUrl(googlePhotosUrl) && (
                         <a
-                          href={googlePhotosUrl}
+                          href={sanitizeExternalUrl(googlePhotosUrl)!}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-[10px] text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1 font-semibold"
@@ -872,14 +900,14 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
           <div className="pt-3 pb-1 flex items-center justify-end gap-2.5 border-t border-slate-100 dark:border-slate-800">
             <button
               type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold text-xs transition"
+              onClick={handleClose}
+              className="min-h-[44px] sm:min-h-[38px] px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold text-xs transition cursor-pointer"
             >
               取消
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md transition active:scale-95 flex items-center gap-1.5"
+              className="min-h-[44px] sm:min-h-[38px] px-6 py-2.5 rounded-2xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs shadow-md transition active:scale-95 flex items-center gap-1.5 cursor-pointer"
             >
               <Check className="w-4 h-4" />
               <span>{item ? '儲存變更' : '加入行程'}</span>

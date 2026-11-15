@@ -59,7 +59,7 @@ export function getGoogleMapsNavigationUrl(item: { title: string; lat?: number; 
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
   }
 
-  if (item.lat && item.lng) {
+  if (typeof item.lat === 'number' && !isNaN(item.lat) && typeof item.lng === 'number' && !isNaN(item.lng)) {
     return `https://www.google.com/maps/search/?api=1&query=${item.lat},${item.lng}`;
   }
 
@@ -73,7 +73,7 @@ export function getAppleMapsUrl(item: { title: string; lat?: number; lng?: numbe
   const cleanTitle = (item.title || '').trim();
   const cleanAddress = (item.address || '').trim();
   const query = encodeURIComponent(`${cleanTitle} ${cleanAddress}`.trim() || 'Attraction');
-  if (item.lat && item.lng) {
+  if (typeof item.lat === 'number' && !isNaN(item.lat) && typeof item.lng === 'number' && !isNaN(item.lng)) {
     return `https://maps.apple.com/?q=${query}&ll=${item.lat},${item.lng}`;
   }
   return `https://maps.apple.com/?q=${query}`;

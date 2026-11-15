@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import html2canvas from 'html2canvas';
 import { Trip } from '../../types/itinerary';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import { copyTextToClipboard } from '../../utils/clipboard';
 import { formatCurrencyAmount } from '../../utils/currency';
 import { resolveMediaSrc } from '../../utils/image';
 import { computeTripExpenseInCurrency, GalleryPhotoItem } from './travelHubTypes';
@@ -80,11 +82,25 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
   const [copiedText, setCopiedText] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
 
+  useBodyScrollLock(isOpen);
+
   const posterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setSelectedYear(initialYear || 'all');
   }, [initialYear, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isOpen, onClose]);
 
   const summary = useMemo(() => {
     const matchedTrips = trips.filter((tr) => {
@@ -226,7 +242,7 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
     }
   };
 
-  const handleCopyText = () => {
+  const handleCopyText = async () => {
     const label = selectedYear === 'all' ? '歷年總覽' : `${selectedYear} 年度`;
     const text =
       `【日和手帳 · ${label}旅行足跡卡】\n` +
@@ -235,9 +251,13 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
       `· 城市：${summary.cities.join(' · ') || '探索中'}\n` +
       `· 足跡：${summary.spotsCount} 處 · 照片 ${summary.photosCount} 張\n` +
       `— 日和手帳 Hiyori`;
-    navigator.clipboard?.writeText(text);
-    setCopiedText(true);
-    setTimeout(() => setCopiedText(false), 2200);
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
+      setCopiedText(true);
+      setTimeout(() => setCopiedText(false), 2200);
+    } else {
+      setExportStatus('無法複製文字摘要，請手動選取複製');
+    }
   };
 
   return (
@@ -246,10 +266,10 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden my-auto text-slate-900 dark:text-slate-100"
+        className="w-full max-w-4xl bg-white dark:bg-[#111827] rounded-3xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl overflow-hidden my-auto text-slate-900 dark:text-slate-100"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
+        <div className="px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between">
           <div>
             <h3 className="font-bold text-base text-slate-900 dark:text-white">
               足跡年鑑圖卡工作室
@@ -261,7 +281,7 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="min-w-[40px] min-h-[40px] rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center cursor-pointer"
+            className="min-w-[44px] min-h-[44px] sm:min-w-[40px] sm:min-h-[40px] rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-[#EFECE5] dark:hover:bg-slate-800 flex items-center justify-center cursor-pointer"
             aria-label="關閉"
           >
             <X className="w-5 h-5" />

@@ -42,6 +42,14 @@ interface CityHotspot {
   bounds: L.LatLngBounds;
 }
 
+const escapeHtml = (str: string) =>
+  str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
 export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
   spots,
   canEditMap,
@@ -252,7 +260,7 @@ export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
         setSelectedCity(spot.tripDestination || null);
         map.flyTo([spot.lat!, spot.lng!], Math.max(map.getZoom(), 13), { duration: 0.45 });
       });
-      marker.bindTooltip(`${spot.spotTitle} · ${spot.tripDestination}`, {
+      marker.bindTooltip(`${escapeHtml(spot.spotTitle)} · ${escapeHtml(spot.tripDestination || '')}`, {
         direction: 'top',
         offset: [0, -10],
       });
@@ -402,7 +410,7 @@ export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
-                {onToggleSpotVisited && (canEditMap.get(selectedSpot.tripId) ?? true) && (
+                {onToggleSpotVisited && !selectedSpot.spotId.startsWith('mem-cluster-') && (canEditMap.get(selectedSpot.tripId) ?? true) && (
                   <button
                     type="button"
                     onClick={(e) =>
@@ -413,7 +421,7 @@ export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
                         e
                       )
                     }
-                    className={`min-w-[36px] min-h-[36px] rounded-xl flex items-center justify-center transition cursor-pointer ${
+                    className={`min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] rounded-xl flex items-center justify-center transition cursor-pointer ${
                       selectedSpot.completed
                         ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
                         : 'bg-slate-100 dark:bg-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
@@ -430,7 +438,7 @@ export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedSpot(null)}
-                  className="min-w-[36px] min-h-[36px] rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
+                  className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
                   aria-label="關閉景點預覽"
                 >
                   <X className="w-4 h-4" />

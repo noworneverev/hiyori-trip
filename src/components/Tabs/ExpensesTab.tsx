@@ -3,7 +3,10 @@ import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { Trip, ExpenseItem, PaymentMethod } from '../../types/itinerary';
 import { formatDateSlash, getTodayLocal } from '../../utils/date';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
-import { compressImageFile, storeImageAsMediaRef, resolveMediaSrc } from '../../utils/image';
+import { compressImageFile, storeImageAsMediaRef, resolveMediaSrc, garbageCollectOrphanedMedia, isMediaRef, extractMediaId } from '../../utils/image';
+import { idbDeleteMedia } from '../../utils/indexedDb';
+import { getStoredTrips } from '../../utils/storage';
+import { copyTextToClipboard } from '../../utils/clipboard';
 import { MediaImage } from '../UI/MediaImage';
 import {
   SUPPORTED_CURRENCIES,
@@ -108,10 +111,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   // Base display currency (auto-detected from trip destination or trip.currency)
   const defaultDetectedCurrency = detectTripCurrency(trip);
   const [baseCurrency, setBaseCurrency] = useState<string>(trip.currency || defaultDetectedCurrency);
-
-  useEffect(() => {
-    setBaseCurrency(trip.currency || detectTripCurrency(trip));
-  }, [trip.id, trip.currency]);
+  const initialEditReceiptsRef = useRef<string[]>([]);
 
   // Form states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -133,6 +133,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   const [isCompressingReceipts, setIsCompressingReceipts] = useState(false);
   const [receiptError, setReceiptError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const nextCur = trip.currency || detectTripCurrency(trip);
+    setBaseCurrency(nextCur);
+    setItemCurrency(nextCur);
+  }, [trip.id, trip.currency]);
 
   // Filter Drawer Bottom Sheet state
   const [showFilterDrawer, setShowFilterDrawer] = useState(false);
@@ -155,6 +160,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   React.useEffect(() => {
     fetchLiveExchangeRates().then((res) => setLiveRatesInfo(res));
   }, []);
+
+  React.useEffect(() => {
+    if (showRateModal) {
+      setTempRates(trip.customExchangeRates || {});
+    }
+  }, [showRateModal, trip.customExchangeRates]);
 
   const handleRefreshLiveRates = async () => {
     setIsFetchingRates(true);
@@ -210,6 +221,24 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   // Lock background scroll when any modal or receipt viewer in ExpensesTab is open
   useBodyScrollLock(Boolean(showAddModal || showRateModal || showCashModal || showCategoryManageModal || viewingReceiptGallery));
 
+  const closeAddExpenseModal = () => {
+    const stagedAdded = receiptImages.filter(
+      (ref) => isMediaRef(ref) && !initialEditReceiptsRef.current.includes(ref)
+    );
+    if (stagedAdded.length > 0) {
+      stagedAdded.forEach((ref) => {
+        const mid = extractMediaId(ref);
+        if (mid) idbDeleteMedia(mid).catch(() => {});
+      });
+    }
+    initialEditReceiptsRef.current = [];
+    setShowAddModal(false);
+    setEditingExpenseId(null);
+    setConfirmingDeleteExpense(false);
+    setReceiptImages([]);
+    setReceiptError(null);
+  };
+
   useEffect(() => {
     const hasOverlay = showAddModal || showRateModal || showCashModal || Boolean(viewingReceiptGallery);
     if (!hasOverlay) return;
@@ -219,15 +248,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         else if (showCashModal) setShowCashModal(false);
         else if (showRateModal) setShowRateModal(false);
         else if (showAddModal) {
-          setShowAddModal(false);
-          setEditingExpenseId(null);
-          setConfirmingDeleteExpense(false);
+          closeAddExpenseModal();
         }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showAddModal, showRateModal, showCashModal, viewingReceiptGallery]);
+  }, [showAddModal, showRateModal, showCashModal, viewingReceiptGallery, receiptImages]);
 
   // Custom categories list from trip
   const customCategories = trip.customExpenseCategories || [];
@@ -270,9 +297,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
   // Cash on hand tracker (手頭現金管理)
   const initialCashCur = trip.initialCashCurrency || baseCurrency || 'JPY';
+  const storedLocalCashRaw = typeof window !== 'undefined' ? localStorage.getItem(`trip_cash_${trip.id}`) : null;
+  const hasInitialCash = typeof trip.initialCashAmount === 'number' || storedLocalCashRaw !== null;
   const initialCashAmt = typeof trip.initialCashAmount === 'number'
     ? trip.initialCashAmount
-    : (typeof window !== 'undefined' ? parseFloat(localStorage.getItem(`trip_cash_${trip.id}`) || '0') || 0 : 0);
+    : (storedLocalCashRaw !== null ? (parseFloat(storedLocalCashRaw) || 0) : 0);
 
   const totalCashSpent = useMemo(() => {
     return trip.expenses
@@ -291,17 +320,36 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   const remainingCash = initialCashAmt - totalCashSpent;
   const cashSpentPercent = initialCashAmt > 0
     ? Math.min(100, Math.round((totalCashSpent / initialCashAmt) * 100))
-    : 0;
+    : (totalCashSpent > 0 ? 100 : 0);
 
-  const [cashInputAmt, setCashInputAmt] = useState<string>(String(initialCashAmt || ''));
+  const [cashInputAmt, setCashInputAmt] = useState<string>(hasInitialCash ? String(initialCashAmt) : '');
   const [cashInputCur, setCashInputCur] = useState<string>(initialCashCur);
+
+  useEffect(() => {
+    setCashInputCur(initialCashCur);
+  }, [trip.id, initialCashCur]);
 
   const handleSaveInitialCash = () => {
     if (!canEdit) return;
     if (requireAuth && !requireAuth(handleSaveInitialCash, lang === 'zh' ? '儲存手頭現金設定' : 'Save cash setting')) {
       return;
     }
-    const parsed = parseFloat(cashInputAmt) || 0;
+    const trimmed = cashInputAmt.trim();
+    if (trimmed === '') {
+      onUpdateTrip({
+        ...trip,
+        initialCashAmount: undefined,
+        initialCashCurrency: undefined,
+        updatedAt: Date.now(),
+      });
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(`trip_cash_${trip.id}`);
+      }
+      setShowCashModal(false);
+      return;
+    }
+    const parsed = parseFloat(trimmed);
+    if (isNaN(parsed) || parsed < 0) return;
     onUpdateTrip({
       ...trip,
       initialCashAmount: parsed,
@@ -521,6 +569,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   };
 
   const handleRemoveReceiptImage = (indexToRemove: number) => {
+    const removed = receiptImages[indexToRemove];
+    if (removed && isMediaRef(removed) && !initialEditReceiptsRef.current.includes(removed)) {
+      const mid = extractMediaId(removed);
+      if (mid) idbDeleteMedia(mid).catch(() => {});
+    }
     setReceiptImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
     setReceiptError(null);
   };
@@ -645,6 +698,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       : (trip.startDate || todayStr);
     setDate(defaultDate);
     setNotes('');
+    initialEditReceiptsRef.current = [];
     setReceiptImages([]);
     setItemPaidBy('我');
     setItemSplitWith(splitMembersList);
@@ -674,6 +728,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       : item.receiptImage
       ? [item.receiptImage]
       : [];
+    initialEditReceiptsRef.current = imgs;
     setReceiptImages(imgs);
 
     setItemPaidBy(item.paidBy || '我');
@@ -719,11 +774,15 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         return exp;
       });
 
-      onUpdateTrip({
+      const updatedTrip: Trip = {
         ...trip,
         expenses: updatedExpenses,
         updatedAt: Date.now(),
-      });
+      };
+      onUpdateTrip(updatedTrip);
+      garbageCollectOrphanedMedia(
+        getStoredTrips().map((t) => (t.id === updatedTrip.id ? updatedTrip : t))
+      ).catch(() => {});
     } else {
       // Create new expense
       const newExpense: ExpenseItem = {
@@ -744,14 +803,19 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         isPersonal: !isSplitMode ? true : itemIsPersonal,
       };
 
-      onUpdateTrip({
+      const updatedTrip: Trip = {
         ...trip,
         expenses: [newExpense, ...trip.expenses],
         updatedAt: Date.now(),
-      });
+      };
+      onUpdateTrip(updatedTrip);
+      garbageCollectOrphanedMedia(
+        getStoredTrips().map((t) => (t.id === updatedTrip.id ? updatedTrip : t))
+      ).catch(() => {});
     }
 
     // Reset Form
+    initialEditReceiptsRef.current = [];
     setEditingExpenseId(null);
     setTitle('');
     setAmount('');
@@ -774,12 +838,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       ...(trip.deletedItemIds || {}),
       [id]: now,
     };
-    onUpdateTrip({
+    const updatedTrip: Trip = {
       ...trip,
       expenses: trip.expenses.filter((e) => e.id !== id),
       deletedItemIds,
       updatedAt: now,
-    });
+    };
+    onUpdateTrip(updatedTrip);
+    garbageCollectOrphanedMedia(
+      getStoredTrips().map((t) => (t.id === updatedTrip.id ? updatedTrip : t))
+    ).catch(() => {});
   };
 
   const handleConfirmDeleteCurrentlyEditing = () => {
@@ -836,11 +904,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   };
 
   // Copy formatted split summary for LINE / messages
-  const handleCopySplitSummary = () => {
+  const handleCopySplitSummary = async () => {
     const text = formatSplitsForSharing(trip);
-    navigator.clipboard.writeText(text);
-    setCopiedSplitToast(true);
-    setTimeout(() => setCopiedSplitToast(false), 2500);
+    const copied = await copyTextToClipboard(text);
+    if (copied) {
+      setCopiedSplitToast(true);
+      setTimeout(() => setCopiedSplitToast(false), 2500);
+    }
   };
 
   // Save exchange rates
@@ -983,11 +1053,25 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     return groups;
   }, [filteredExpenses, trip.startDate, trip.days, baseCurrency, trip.customExchangeRates]);
 
+  const baseDecimals = CURRENCY_MAP[baseCurrency]?.decimals ?? 0;
+  const roundForBase = (val: number) => {
+    const f = Math.pow(10, baseDecimals);
+    return Math.round(val * f) / f;
+  };
+
+  const displayRateSource = baseCurrency === 'JPY' ? 'TWD' : baseCurrency;
+  const displayRateTarget = 'JPY';
+  const displayRateToJpy =
+    trip.customExchangeRates?.[displayRateSource] ??
+    liveRatesInfo?.rates?.[displayRateSource] ??
+    CURRENCY_MAP[displayRateSource]?.defaultRateToJPY ??
+    4.8;
+
   return (
     <div className="space-y-4">
-      {/* 1. 預算資訊與財務總覽毛玻璃卡 (Apple Frosted Glass Container) */}
-      <div className="rounded-3xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-white/60 dark:border-slate-800/80 p-4 sm:p-6 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100 dark:border-slate-800">
+      {/* 1. 預算資訊與財務總覽卡 */}
+      <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-6 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#E5E2DC]/60 dark:border-slate-800">
           <div>
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 flex items-center justify-center">
@@ -1003,18 +1087,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
           <div className="flex items-center gap-2 flex-wrap">
             {/* Live Exchange Rate Indicator */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-              <span>1 TWD ≈ {(liveRatesInfo?.rates['TWD'] || 4.8).toFixed(2)} JPY</span>
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-teal-50/80 dark:bg-teal-950/50 border border-teal-200/80 dark:border-teal-800 text-[11px] font-semibold text-teal-800 dark:text-teal-300 font-mono tabular-nums">
+              <span>1 {displayRateSource} ≈ {displayRateToJpy.toFixed(2)} {displayRateTarget}</span>
               <button
                 type="button"
                 onClick={handleRefreshLiveRates}
                 disabled={isFetchingRates}
-                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-emerald-100 dark:hover:bg-emerald-900 text-[10px] font-bold text-emerald-800 dark:text-emerald-300 transition disabled:opacity-50 ml-0.5"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-teal-100 dark:hover:bg-teal-900 text-[10px] font-bold text-teal-800 dark:text-teal-300 transition disabled:opacity-50 ml-0.5 cursor-pointer"
                 title="更新匯率"
               >
                 <RefreshCw className={`w-2.5 h-2.5 ${isFetchingRates ? 'animate-spin' : ''}`} />
-                <span>{isFetchingRates ? '更新中' : '更新'}</span>
+                <span className="font-sans">{isFetchingRates ? '更新中' : '更新'}</span>
               </button>
             </div>
 
@@ -1054,10 +1137,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 <button
                   type="button"
                   onClick={() => {
-                    onUpdateTrip({ ...trip, isSplitEnabled: false });
+                    onUpdateTrip({ ...trip, isSplitEnabled: false, updatedAt: Date.now() });
                     setExpenseSubTab('records');
                   }}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
                     !trip.isSplitEnabled
                       ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-2xs'
                       : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
@@ -1076,12 +1159,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                       splitMembers: trip.splitMembers && trip.splitMembers.length > 0
                         ? trip.splitMembers
                         : ['我', '同行旅伴'],
+                      updatedAt: Date.now(),
                     });
                     setExpenseSubTab('split');
                   }}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer ${
                     trip.isSplitEnabled
-                      ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-2xs'
+                      ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-2xs'
                       : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                   }`}
                   title="啟用旅伴共同分帳與自動結算"
@@ -1096,7 +1180,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             {canEdit && (
               <button
                 onClick={handleOpenAddExpense}
-                className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5 transition active:scale-95"
+                className="min-h-[38px] px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>{t.addExpense}</span>
@@ -1105,10 +1189,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           </div>
         </div>
 
-        {/* Big Total & Summary Cards (Apple-Style 4-Metric Grid) */}
+        {/* Big Total & Summary Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3 mt-4">
           {/* Card 1: Grand Total Card */}
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-teal-500/10 via-teal-500/5 to-transparent border border-teal-200/60 dark:border-teal-800/50 flex flex-col justify-between">
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/70 dark:border-teal-800/50 flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between text-xs text-teal-900 dark:text-teal-300 font-semibold mb-1">
                 <span>{lang === 'zh' ? '累計支出總金額' : 'Total Spent'}</span>
@@ -1116,40 +1200,40 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   以 {baseCurrency}
                 </span>
               </div>
-              <div className="font-black font-mono text-xl sm:text-2xl text-teal-950 dark:text-teal-100 tracking-tight">
+              <div className="font-black font-mono tabular-nums text-xl sm:text-2xl text-teal-950 dark:text-teal-100 tracking-tight">
                 {formatCurrencyAmount(totalSpentInBase, baseCurrency)}
               </div>
             </div>
             {baseCurrency !== 'TWD' ? (
-              <p className="text-[10px] text-teal-700 dark:text-teal-400 mt-1 font-mono truncate">
+              <p className="text-[10px] text-teal-700 dark:text-teal-400 mt-1 font-mono tabular-nums truncate">
                 ≈ {formatCurrencyAmount(convertAmount(totalSpentInBase, baseCurrency, 'TWD', trip.customExchangeRates), 'TWD')}
               </p>
             ) : (
-              <p className="text-[10px] text-teal-700 dark:text-teal-400 mt-1 font-mono truncate">
+              <p className="text-[10px] text-teal-700 dark:text-teal-400 mt-1 font-mono tabular-nums truncate">
                 ≈ {formatCurrencyAmount(convertAmount(totalSpentInBase, 'TWD', 'JPY', trip.customExchangeRates), 'JPY')}
               </p>
             )}
           </div>
 
           {/* Card 2: Budget Progress Card (預算掌控) */}
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-indigo-500/10 via-indigo-500/5 to-transparent border border-indigo-200/60 dark:border-indigo-800/50 flex flex-col justify-between">
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800/60 border border-[#E5E2DC] dark:border-slate-700 flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between text-xs text-indigo-900 dark:text-indigo-300 font-semibold mb-1">
+              <div className="flex items-center justify-between text-xs text-slate-800 dark:text-slate-200 font-semibold mb-1">
                 <span className="flex items-center gap-1">
-                  <Coins className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <Coins className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                   <span>預算執行率</span>
                 </span>
                 {trip.budgetTotal > 0 && (
-                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold ${
+                  <span className={`text-[10px] font-mono tabular-nums px-1.5 py-0.5 rounded font-bold ${
                     totalSpentInBase > trip.budgetTotal
                       ? 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'
-                      : 'bg-indigo-100 dark:bg-indigo-900 text-indigo-800 dark:text-indigo-200'
+                      : 'bg-teal-100 dark:bg-teal-900 text-teal-800 dark:text-teal-200'
                   }`}>
                     {Math.round((totalSpentInBase / trip.budgetTotal) * 100)}%
                   </span>
                 )}
               </div>
-              <div className="font-black font-mono text-xl sm:text-2xl text-indigo-950 dark:text-indigo-100 tracking-tight">
+              <div className="font-black font-mono tabular-nums text-xl sm:text-2xl text-slate-900 dark:text-white tracking-tight">
                 {trip.budgetTotal > 0 ? (
                   formatCurrencyAmount(trip.budgetTotal, baseCurrency)
                 ) : (
@@ -1159,13 +1243,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             </div>
             {trip.budgetTotal > 0 ? (
               <div className="mt-1 space-y-1">
-                <div className="flex items-center justify-between text-[10px] text-indigo-800 dark:text-indigo-300 font-mono">
+                <div className="flex items-center justify-between text-[10px] text-slate-600 dark:text-slate-400 font-mono tabular-nums">
                   <span>剩餘 {formatCurrencyAmount(Math.max(0, trip.budgetTotal - totalSpentInBase), baseCurrency)}</span>
                   <span>{totalSpentInBase > trip.budgetTotal ? '已超支' : '可支配'}</span>
                 </div>
-                <div className="w-full h-1.5 rounded-full bg-indigo-100 dark:bg-indigo-950 overflow-hidden">
+                <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
                   <div
-                    className={`h-full transition-all ${totalSpentInBase > trip.budgetTotal ? 'bg-rose-500' : 'bg-indigo-600'}`}
+                    className={`h-full transition-all ${totalSpentInBase > trip.budgetTotal ? 'bg-rose-500' : 'bg-teal-600'}`}
                     style={{ width: `${Math.min(100, (totalSpentInBase / trip.budgetTotal) * 100)}%` }}
                   />
                 </div>
@@ -1216,11 +1300,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           {/* Card 4: Cash on Hand Card (手頭現金餘額) */}
           <div
             onClick={() => {
-              setCashInputAmt(initialCashAmt > 0 ? String(initialCashAmt) : '');
+              setCashInputAmt(hasInitialCash ? String(initialCashAmt) : '');
               setCashInputCur(initialCashCur);
               setShowCashModal(true);
             }}
-            className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-br from-emerald-500/15 via-emerald-500/5 to-transparent border border-emerald-300/80 dark:border-emerald-800/80 cursor-pointer hover:border-emerald-500 hover:shadow-xs transition flex flex-col justify-between group"
+            className="p-3.5 sm:p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/25 border border-emerald-200/80 dark:border-emerald-800/60 cursor-pointer hover:border-emerald-500 hover:shadow-xs transition flex flex-col justify-between group"
             title="點擊設定或修改手頭初始現金"
           >
             <div>
@@ -1231,30 +1315,30 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 </span>
                 <span className="text-[10px] text-emerald-700 dark:text-emerald-400 group-hover:underline flex items-center gap-0.5">
                   <Pencil className="w-2.5 h-2.5" />
-                  <span>{initialCashAmt > 0 ? '修改' : '設定'}</span>
+                  <span>{hasInitialCash ? '修改' : '設定'}</span>
                 </span>
               </div>
-              <div className={`font-black font-mono text-xl sm:text-2xl tracking-tight truncate ${
-                initialCashAmt > 0 && remainingCash < 0
+              <div className={`font-black font-mono tabular-nums text-xl sm:text-2xl tracking-tight truncate ${
+                hasInitialCash && remainingCash < 0
                   ? 'text-rose-600 dark:text-rose-400'
                   : 'text-emerald-950 dark:text-emerald-100'
               }`}>
-                {initialCashAmt > 0
+                {hasInitialCash
                   ? formatCurrencyAmount(remainingCash, initialCashCur)
                   : <span className="text-sm font-bold text-emerald-700 dark:text-emerald-400">+ 輸入初始現金</span>}
               </div>
             </div>
 
-            {initialCashAmt > 0 ? (
+            {hasInitialCash ? (
               <div className="mt-1 space-y-1">
-                <div className="flex items-center justify-between text-[10px] text-emerald-800 dark:text-emerald-300 font-mono">
+                <div className="flex items-center justify-between text-[10px] text-emerald-800 dark:text-emerald-300 font-mono tabular-nums">
                   <span>初始 {initialCashAmt.toLocaleString()}</span>
                   <span>已付 {totalCashSpent.toLocaleString()}</span>
                 </div>
                 <div className="w-full h-1.5 rounded-full bg-emerald-100 dark:bg-emerald-950 overflow-hidden">
                   <div
                     className={`h-full transition-all ${remainingCash < 0 ? 'bg-rose-500' : 'bg-emerald-500'}`}
-                    style={{ width: `${Math.min(100, (totalCashSpent / initialCashAmt) * 100)}%` }}
+                    style={{ width: `${cashSpentPercent}%` }}
                   />
                 </div>
               </div>
@@ -1309,9 +1393,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             <button
               type="button"
               onClick={() => setExpenseSubTab('split')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
                 effectiveSubTab === 'split'
-                  ? 'bg-indigo-600 text-white shadow-xs'
+                  ? 'bg-teal-700 text-white shadow-xs'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
               }`}
             >
@@ -1325,12 +1409,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       {/* ================= SECTION A: FRIEND BILL SPLITTING & SETTLEMENT VIEW ================= */}
       {effectiveSubTab === 'split' && !trip.isSoloTrip && trip.isSplitEnabled && splitsResult && (
         <div className="space-y-4 animate-in fade-in duration-150">
-          {/* Member Management Box (Apple Frosted Glass Container) */}
-          <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl rounded-3xl p-4 sm:p-5 border border-white/60 dark:border-slate-800/80 shadow-xs space-y-3">
+          {/* Member Management Box */}
+          <div className="bg-white dark:bg-[#111827] rounded-3xl p-4 sm:p-5 border border-[#E5E2DC] dark:border-slate-800 shadow-xs space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
                 <h4 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                  <Users className="w-4 h-4 text-indigo-600" />
+                  <Users className="w-4 h-4 text-teal-700 dark:text-teal-400" />
                   <span>同行分帳夥伴</span>
                 </h4>
               </div>
@@ -1339,7 +1423,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 <button
                   type="button"
                   onClick={() => setShowAddCompanionInput(true)}
-                  className="px-3 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 text-indigo-700 dark:text-indigo-300 font-bold text-xs flex items-center gap-1 transition"
+                  className="min-h-[36px] px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 text-teal-800 dark:text-teal-300 font-bold text-xs flex items-center gap-1 transition cursor-pointer"
                 >
                   <UserPlus className="w-3.5 h-3.5" />
                   <span>新增旅伴</span>
@@ -1355,7 +1439,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
             {/* Add Companion Form */}
             {canEdit && showAddCompanionInput && (
-              <form onSubmit={handleAddCompanion} className="flex items-center gap-2 p-2 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-2xl border border-indigo-100 dark:border-indigo-900/40">
+              <form onSubmit={handleAddCompanion} className="flex items-center gap-2 p-2 bg-[#FAF9F6] dark:bg-slate-800/60 rounded-2xl border border-[#E5E2DC] dark:border-slate-700">
                 <input
                   type="text"
                   value={newCompanionName}
@@ -1365,14 +1449,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 />
                 <button
                   type="submit"
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold"
+                  className="px-3 py-1.5 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-bold cursor-pointer"
                 >
                   加入
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowAddCompanionInput(false)}
-                  className="px-2.5 py-1.5 text-slate-400 hover:text-slate-600 text-xs"
+                  className="px-2.5 py-1.5 text-slate-400 hover:text-slate-600 text-xs cursor-pointer"
                 >
                   取消
                 </button>
@@ -1384,17 +1468,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               {splitMembersList.map((m) => (
                 <div
                   key={m}
-                  className="px-3 py-1.5 rounded-2xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2"
+                  className="px-3 py-1.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2"
                 >
-                  <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                  <User className="w-3 h-3 text-teal-600 dark:text-teal-400" />
                   <span>{m}</span>
                   {m === '我' ? (
-                    <span className="text-[10px] text-teal-600 dark:text-teal-400 font-normal">主帳號</span>
+                    <span className="text-[10px] text-teal-700 dark:text-teal-400 font-normal">主帳號</span>
                   ) : canEdit ? (
                     <button
                       type="button"
                       onClick={() => handleRemoveCompanion(m)}
-                      className="p-0.5 rounded-full hover:bg-rose-100 dark:hover:bg-rose-950/60 text-slate-400 hover:text-rose-600 transition"
+                      className="p-1 rounded-full hover:bg-rose-100 dark:hover:bg-rose-950/60 text-slate-400 hover:text-rose-600 transition cursor-pointer"
                       title="移除此旅伴"
                     >
                       <X className="w-3 h-3" />
@@ -1409,18 +1493,18 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {splitsResult.members.map((m) => {
               const summary = splitsResult.summaries[m];
-              const net = Math.round(summary.netBalance);
-              const isCreditor = net > 0;
-              const isDebtor = net < 0;
+              const net = roundForBase(summary.netBalance);
+              const isCreditor = summary.netBalance > 0.005;
+              const isDebtor = summary.netBalance < -0.005;
 
               return (
                 <div
                   key={m}
-                  className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 p-4 shadow-2xs space-y-3"
+                  className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 shadow-2xs space-y-3"
                 >
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center justify-between pb-2 border-b border-[#E5E2DC]/60 dark:border-slate-800">
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold flex items-center justify-center text-xs">
+                      <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 font-bold flex items-center justify-center text-xs">
                         {m.slice(0, 1)}
                       </div>
                       <span className="font-bold text-slate-900 dark:text-white text-sm">
@@ -1429,7 +1513,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                     </div>
 
                     <span
-                      className={`px-2 py-0.5 rounded-full text-xs font-bold font-mono ${
+                      className={`px-2 py-0.5 rounded-full text-xs font-bold font-mono tabular-nums ${
                         isCreditor
                           ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                           : isDebtor
@@ -1444,17 +1528,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+                    <div className="p-2.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800/60">
                       <span className="text-[10px] text-slate-400 block font-medium">公費代墊</span>
-                      <span className="font-bold font-mono text-slate-800 dark:text-slate-100 text-sm mt-0.5 block truncate">
-                        {formatCurrencyAmount(Math.round(summary.groupPaid ?? summary.totalPaid), baseCurrency)}
+                      <span className="font-bold font-mono tabular-nums text-slate-800 dark:text-slate-100 text-sm mt-0.5 block truncate">
+                        {formatCurrencyAmount(roundForBase(summary.groupPaid ?? summary.totalPaid), baseCurrency)}
                       </span>
                     </div>
 
-                    <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/60">
+                    <div className="p-2.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800/60">
                       <span className="text-[10px] text-slate-400 block font-medium">公費應攤</span>
-                      <span className="font-bold font-mono text-slate-800 dark:text-slate-100 text-sm mt-0.5 block truncate">
-                        {formatCurrencyAmount(Math.round(summary.totalShare), baseCurrency)}
+                      <span className="font-bold font-mono tabular-nums text-slate-800 dark:text-slate-100 text-sm mt-0.5 block truncate">
+                        {formatCurrencyAmount(roundForBase(summary.totalShare), baseCurrency)}
                       </span>
                     </div>
                   </div>
@@ -1465,8 +1549,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                         <ShoppingBag className="w-3 h-3 text-slate-500" />
                         <span>個人自費總計</span>
                       </span>
-                      <span className="font-mono font-bold text-slate-600 dark:text-slate-300">
-                        {formatCurrencyAmount(Math.round(summary.personalExpense), baseCurrency)}
+                      <span className="font-mono tabular-nums font-bold text-slate-600 dark:text-slate-300">
+                        {formatCurrencyAmount(roundForBase(summary.personalExpense), baseCurrency)}
                       </span>
                     </div>
                   )}
@@ -1476,11 +1560,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           </div>
 
           {/* Settlement Recommendation Card */}
-          <div className="rounded-3xl bg-gradient-to-br from-indigo-50/70 via-indigo-50/30 to-white dark:from-indigo-950/30 dark:via-slate-900 dark:to-slate-900 border border-indigo-200/80 dark:border-indigo-900/60 p-5 shadow-2xs space-y-4">
+          <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-5 shadow-2xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h4 className="font-bold text-sm sm:text-base text-indigo-950 dark:text-indigo-200 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-amber-500" />
+                <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-teal-600 dark:text-teal-400" />
                   <span>最少轉帳次數 · 還款結算建議</span>
                 </h4>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
@@ -1492,7 +1576,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               <button
                 type="button"
                 onClick={handleCopySplitSummary}
-                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95 shrink-0"
+                className="min-h-[40px] px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition active:scale-95 shrink-0 cursor-pointer"
               >
                 {copiedSplitToast ? (
                   <>
@@ -1510,8 +1594,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
             {/* Transfers List */}
             {splitsResult.transfers.length === 0 ? (
-              <div className="p-6 rounded-2xl bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-center space-y-1">
-                <Sparkles className="w-6 h-6 mx-auto text-amber-500 mb-1" />
+              <div className="p-6 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800/80 border border-[#E5E2DC] dark:border-slate-700 text-center space-y-1">
+                <Sparkles className="w-6 h-6 mx-auto text-teal-600 dark:text-teal-400 mb-1" />
                 <p className="font-bold text-slate-800 dark:text-slate-100 text-sm">
                   太棒了！大家的代墊與消費完全打平，目前無須轉帳！
                 </p>
@@ -1524,7 +1608,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 {splitsResult.transfers.map((t, idx) => (
                   <div
                     key={idx}
-                    className="p-3.5 rounded-2xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3 shadow-2xs"
+                    className="p-3.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800/90 border border-[#E5E2DC] dark:border-slate-700 flex items-center justify-between gap-3 shadow-2xs"
                   >
                     <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
                       <span className="px-2.5 py-1 rounded-xl bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 font-bold">
@@ -1536,7 +1620,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                       </span>
                     </div>
 
-                    <div className="font-black font-mono text-base text-indigo-700 dark:text-indigo-300 shrink-0">
+                    <div className="font-black font-mono tabular-nums text-base text-teal-700 dark:text-teal-300 shrink-0">
                       {formatCurrencyAmount(t.amount, baseCurrency)}
                     </div>
                   </div>
@@ -1550,9 +1634,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       {/* ================= SECTION B: CHARTS & EXPENSES LIST ================= */}
       {effectiveSubTab !== 'split' && (
         <>
-          {/* 2. Charts Section (Apple Frosted Glass Container) */}
+          {/* 2. Charts Section */}
           {effectiveSubTab === 'charts' && (
-      <div className="rounded-3xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-white/60 dark:border-slate-800/80 p-4 sm:p-6 shadow-xs">
+      <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-6 shadow-xs">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
           <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
             <button
@@ -1823,8 +1907,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               </div>
 
               <div className="flex items-center gap-3">
-                <span className="text-xs font-mono font-bold text-slate-800 dark:text-slate-200">
-                  小計: {baseCurrency} {Math.round(chartFilteredTotal).toLocaleString()}
+                <span className="text-xs font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">
+                  小計: {formatCurrencyAmount(chartFilteredTotal, baseCurrency)}
                 </span>
                 <button
                   type="button"
@@ -1878,12 +1962,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                       </div>
 
                       <div className="text-right shrink-0">
-                        <p className="font-black font-mono text-sm text-slate-900 dark:text-white">
-                          {exp.currency} {exp.amount.toLocaleString()}
+                        <p className="font-black font-mono tabular-nums text-sm text-slate-900 dark:text-white">
+                          {formatCurrencyAmount(exp.amount, exp.currency)}
                         </p>
                         {exp.currency !== baseCurrency && (
-                          <p className="text-[10px] font-mono text-teal-600 dark:text-teal-400">
-                            ≈ {baseCurrency} {Math.round(getItemConvertedAmount(exp)).toLocaleString()}
+                          <p className="text-[10px] font-mono tabular-nums text-teal-600 dark:text-teal-400">
+                            ≈ {formatCurrencyAmount(getItemConvertedAmount(exp), baseCurrency)}
                           </p>
                         )}
                       </div>
@@ -1897,9 +1981,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       </div>
           )}
 
-          {/* 2.5 Daily Expense Table Section (Apple Frosted Glass Container) */}
+          {/* 2.5 Daily Expense Table Section */}
           {effectiveSubTab === 'table' && (
-            <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl rounded-3xl p-4 sm:p-6 border border-white/60 dark:border-slate-800/80 shadow-xs space-y-4 animate-in fade-in duration-150">
+            <div className="bg-white dark:bg-[#111827] rounded-3xl p-4 sm:p-6 border border-[#E5E2DC] dark:border-slate-800 shadow-xs space-y-4 animate-in fade-in duration-150">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
                 <div>
                   <h4 className="font-bold text-slate-800 dark:text-slate-200 text-sm sm:text-base flex items-center gap-2">
@@ -1984,9 +2068,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                               {/* Date & Label */}
                               <td className="py-3 px-3.5">
                                 <div className="flex items-center gap-2">
-                                  <span className={`w-2 h-2 rounded-full shrink-0 ${
-                                    row.count > 0 ? (isToday ? 'bg-emerald-500' : 'bg-teal-600') : 'bg-slate-300 dark:bg-slate-600'
-                                  }`} />
                                   <div>
                                     <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
                                       <span>{row.label}</span>
@@ -2200,59 +2281,59 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                                                   </span>
                                                 )}
 
-                                                {canEdit && (
-                                                  <div className="flex items-center gap-1.5 mt-1.5">
-                                                    <button
-                                                      type="button"
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleOpenEditExpense(item);
-                                                      }}
-                                                      className="min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-500 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 flex items-center gap-1 border border-slate-200 dark:border-slate-700 cursor-pointer"
-                                                      title="編輯此筆"
-                                                    >
-                                                      <Pencil className="w-3 h-3" />
-                                                      <span>編輯</span>
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleDeleteExpense(item.id);
-                                                      }}
-                                                      className="min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-800 flex items-center gap-1 border border-slate-200 dark:border-slate-700 cursor-pointer"
-                                                      title="刪除此筆"
-                                                    >
-                                                      <Trash2 className="w-3 h-3" />
-                                                      <span>刪除</span>
-                                                    </button>
-                                                  </div>
-                                                )}
+                                                  {canEdit && (
+                                                    <div className="flex items-center gap-1.5 mt-1.5">
+                                                      <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          handleOpenEditExpense(item);
+                                                        }}
+                                                        className="min-h-[40px] sm:min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-500 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 flex items-center gap-1 border border-slate-200 dark:border-slate-700 cursor-pointer"
+                                                        title="編輯此筆"
+                                                      >
+                                                        <Pencil className="w-3 h-3" />
+                                                        <span>編輯</span>
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        onClick={(e) => {
+                                                          e.stopPropagation();
+                                                          handleDeleteExpense(item.id);
+                                                        }}
+                                                        className="min-h-[40px] sm:min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-800 flex items-center gap-1 border border-slate-200 dark:border-slate-700 cursor-pointer"
+                                                        title="刪除此筆"
+                                                      >
+                                                        <Trash2 className="w-3 h-3" />
+                                                        <span>刪除</span>
+                                                      </button>
+                                                    </div>
+                                                  )}
+                                                </div>
                                               </div>
-                                            </div>
-                                          );
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
-                          </React.Fragment>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
           )}
 
-          {/* ================= SECTION B: APPLE LAYERED CARDS (PIE CHART + RECENT TRANSACTIONS) ================= */}
+          {/* ================= SECTION B: LAYERED CARDS (PIE CHART + RECENT TRANSACTIONS) ================= */}
           {effectiveSubTab === 'records' && (
             <>
-              {/* Card 2: 支出圓餅圖與類別佔比毛玻璃卡 (Apple Frosted Glass Container) */}
-              <div className="rounded-3xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-white/60 dark:border-slate-800/80 p-4 sm:p-6 shadow-xs space-y-4 animate-in fade-in duration-150">
+              {/* Card 2: 支出圓餅圖與類別佔比卡 */}
+              <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-4 animate-in fade-in duration-150">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-slate-100 dark:border-slate-800/80">
                   <div className="flex items-center gap-2">
                     <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 flex items-center justify-center shrink-0">
@@ -2418,8 +2499,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 )}
               </div>
 
-              {/* Card 3: 近期交易明細記錄毛玻璃卡 (Apple Frosted Glass Container) */}
-              <div className="rounded-3xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border border-white/60 dark:border-slate-800/80 p-4 sm:p-6 shadow-xs space-y-3">
+              {/* Card 3: 近期交易明細記錄卡 */}
+              <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-2">
             <h4 className="font-bold text-slate-800 dark:text-slate-200 text-xs sm:text-sm">
@@ -2707,7 +2788,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                               {item.paidBy && !trip.isSoloTrip && trip.isSplitEnabled && (
                                 <>
                                   <span>·</span>
-                                  <span className="text-indigo-600 dark:text-indigo-400 font-medium">
+                                  <span className="text-teal-700 dark:text-teal-400 font-medium">
                                     {item.paidBy} 代墊
                                   </span>
                                 </>
@@ -2742,7 +2823,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                               <button
                                 type="button"
                                 onClick={() => handleOpenEditExpense(item)}
-                                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
+                                className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
                                 title="編輯"
                                 aria-label="編輯"
                               >
@@ -2751,7 +2832,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                               <button
                                 type="button"
                                 onClick={() => handleDeleteExpense(item.id)}
-                                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                                className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
                                 title="刪除"
                                 aria-label="刪除"
                               >
@@ -2778,17 +2859,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       {showAddModal && (
         <div
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-0 sm:p-4"
-          onClick={() => {
-            setShowAddModal(false);
-            setEditingExpenseId(null);
-          }}
+          onClick={closeAddExpenseModal}
         >
           <div
-            className="w-full h-full sm:h-auto sm:max-h-[92vh] sm:max-w-lg bg-white dark:bg-slate-900 sm:rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            className="w-full h-full sm:h-auto sm:max-h-[92vh] sm:max-w-lg bg-white dark:bg-[#111827] sm:rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-slate-800/40">
+            <div className="px-5 py-4 border-b border-[#E5E2DC]/60 dark:border-slate-800 flex items-center justify-between shrink-0 bg-[#FAF9F6] dark:bg-slate-800/40">
               <div className="flex items-center gap-2.5">
                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
                   editingExpenseId
@@ -2808,11 +2886,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
               <button
                 type="button"
-                onClick={() => {
-                  setShowAddModal(false);
-                  setEditingExpenseId(null);
-                }}
-                className="p-2 rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                onClick={closeAddExpenseModal}
+                className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                aria-label="關閉"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -3126,7 +3202,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                         </div>
                         {amount && !isNaN(parseFloat(amount)) && itemSplitWith.length > 0 && (
                           <p className="text-[11px] text-teal-700 dark:text-teal-400 font-mono tabular-nums pt-0.5">
-                            每人應攤約 {formatCurrencyAmount(Math.round(convertAmount(parseFloat(amount), itemCurrency, baseCurrency, trip.customExchangeRates) / itemSplitWith.length), baseCurrency)} ({itemSplitWith.length} 人均分)
+                            每人應攤約 {formatCurrencyAmount(convertAmount(parseFloat(amount), itemCurrency, baseCurrency, trip.customExchangeRates) / itemSplitWith.length, baseCurrency)} ({itemSplitWith.length} 人均分)
                           </p>
                         )}
                       </div>
@@ -3235,19 +3311,15 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowAddModal(false);
-                    setEditingExpenseId(null);
-                    setConfirmingDeleteExpense(false);
-                  }}
-                  className="px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition font-semibold text-xs text-slate-700 dark:text-slate-300 cursor-pointer"
+                  onClick={closeAddExpenseModal}
+                  className="min-h-[44px] sm:min-h-[38px] px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition font-semibold text-xs text-slate-700 dark:text-slate-300 cursor-pointer"
                 >
                   {lang === 'zh' ? '取消' : 'Cancel'}
                 </button>
                 <button
                   type="submit"
                   form="expense-modal-form"
-                  className="px-6 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl shadow-xs transition active:scale-95 flex items-center gap-1.5 text-xs cursor-pointer"
+                  className="min-h-[44px] sm:min-h-[38px] px-6 py-2 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl shadow-xs transition active:scale-95 flex items-center gap-1.5 text-xs cursor-pointer"
                 >
                   <Check className="w-4 h-4" />
                   <span>
@@ -3269,7 +3341,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           onClick={() => setShowRateModal(false)}
         >
           <div
-            className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-4 animate-in fade-in zoom-in-95 duration-100 text-xs"
+            className="w-full max-w-sm bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-5 space-y-4 animate-in fade-in zoom-in-95 duration-100 text-xs"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
@@ -3280,8 +3352,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 </h4>
               </div>
               <button
+                type="button"
                 onClick={() => setShowRateModal(false)}
-                className="p-1 rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                aria-label="關閉"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3290,7 +3364,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             <div className="p-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 text-[11px] text-teal-900 dark:text-teal-200 space-y-1">
               <div className="flex items-center justify-between font-bold">
                 <span className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
                   <span>每日自動更新匯率</span>
                 </span>
                 <button
@@ -3385,7 +3458,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               <button
                 type="button"
                 onClick={() => setShowCashModal(false)}
-                className="p-1.5 rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                aria-label="關閉"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3456,7 +3530,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             </div>
 
             {/* Live Calculation Preview Card */}
-            {parseFloat(cashInputAmt) > 0 && (
+            {cashInputAmt.trim() !== '' && parseFloat(cashInputAmt) >= 0 && (
               <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-1.5">
                 <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-slate-400">
                   <span>初始設定金額：</span>
@@ -3528,8 +3602,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setViewingReceiptGallery(null)}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                aria-label="關閉"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3550,6 +3626,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               {viewingReceiptGallery.images.length > 1 && (
                 <>
                   <button
+                    type="button"
                     onClick={() =>
                       setViewingReceiptGallery((prev) =>
                         prev
@@ -3560,11 +3637,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                           : null
                       )
                     }
-                    className="absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white backdrop-blur-xs transition shadow-md"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 text-white backdrop-blur-xs transition shadow-md cursor-pointer"
+                    aria-label="上一張"
                   >
                     <ChevronLeft className="w-5 h-5" />
                   </button>
                   <button
+                    type="button"
                     onClick={() =>
                       setViewingReceiptGallery((prev) =>
                         prev
@@ -3575,7 +3654,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                           : null
                       )
                     }
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/60 hover:bg-black/80 text-white backdrop-blur-xs transition shadow-md"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 text-white backdrop-blur-xs transition shadow-md cursor-pointer"
+                    aria-label="下一張"
                   >
                     <ChevronRight className="w-5 h-5" />
                   </button>

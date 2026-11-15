@@ -404,6 +404,7 @@ function normalizeTripData(id: string, data: Record<string, any>, fallbackOwnerI
     customExchangeRates: data.customExchangeRates || {},
     emergencyContacts: data.emergencyContacts || [],
     memories: data.memories || [],
+    stickyNotes: data.stickyNotes || undefined,
     deletedItemIds: data.deletedItemIds || undefined,
     isSplitEnabled: data.isSplitEnabled ?? false,
     splitMembers: data.splitMembers || [],
@@ -548,6 +549,7 @@ export async function saveTripToCloud(userId: string, trip: Trip): Promise<Trip>
       customExchangeRates: lightweightTrip.customExchangeRates || {},
       emergencyContacts: lightweightTrip.emergencyContacts || [],
       memories: lightweightTrip.memories || [],
+      stickyNotes: lightweightTrip.stickyNotes || [],
       deletedItemIds: lightweightTrip.deletedItemIds || {},
       isSplitEnabled: lightweightTrip.isSplitEnabled ?? false,
       splitMembers: lightweightTrip.splitMembers || [],
@@ -691,6 +693,7 @@ export async function publishSharedTrip(trip: Trip, ownerUid?: string): Promise<
         customExchangeRates: lightweightTrip.customExchangeRates || {},
         emergencyContacts: lightweightTrip.emergencyContacts || [],
         memories: lightweightTrip.memories || [],
+        stickyNotes: lightweightTrip.stickyNotes || [],
         isSplitEnabled: lightweightTrip.isSplitEnabled ?? false,
         splitMembers: lightweightTrip.splitMembers || [],
         isSoloTrip: lightweightTrip.isSoloTrip ?? false,
@@ -868,6 +871,7 @@ export async function enableTripCollaboration(trip: Trip, currentUser?: User | n
         customExchangeRates: lightweightTrip.customExchangeRates || {},
         emergencyContacts: lightweightTrip.emergencyContacts || [],
         memories: lightweightTrip.memories || [],
+        stickyNotes: lightweightTrip.stickyNotes || [],
         deletedItemIds: lightweightTrip.deletedItemIds || {},
         isSplitEnabled: lightweightTrip.isSplitEnabled ?? false,
         splitMembers: lightweightTrip.splitMembers || [],
@@ -965,14 +969,16 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
       const idx = mergedItems.findIndex((it) => it.id === id);
       if (idx >= 0) {
         const newerItem = mergedItems[idx];
-        const mergedPhotos =
-          newerItem.memoryPhotos && newerItem.memoryPhotos.length > 0
-            ? newerItem.memoryPhotos
-            : olderItem.memoryPhotos || [];
+        const mergedPhotos = Array.from(
+          new Set([
+            ...(newerItem.memoryPhotos || []),
+            ...(olderItem.memoryPhotos || []),
+          ])
+        );
         mergedItems[idx] = {
           ...olderItem,
           ...newerItem,
-          memoryPhotos: mergedPhotos.slice(0, 3),
+          memoryPhotos: mergedPhotos,
         };
       } else {
         // Item exists in older but not newer and has NO deletion tombstone -> preserve concurrently added item
@@ -1057,6 +1063,18 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
   });
   const mergedBookings = Array.from(bookingMap.values());
 
+  // Merge stickyNotes by ID honoring tombstones
+  let mergedStickyNotes = undefined;
+  if (older.stickyNotes !== undefined || newer.stickyNotes !== undefined) {
+    const stickyMap = new Map(
+      (older.stickyNotes || []).filter((n) => !isDeleted(n.id)).map((n) => [n.id, n])
+    );
+    (newer.stickyNotes || []).forEach((n) => {
+      if (!isDeleted(n.id)) stickyMap.set(n.id, n);
+    });
+    mergedStickyNotes = Array.from(stickyMap.values());
+  }
+
   return {
     ...older,
     ...newer,
@@ -1068,6 +1086,7 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
     emergencyContacts: mergedContacts,
     splitMembers: mergedSplitMembers,
     memories: mergedMemories,
+    ...(mergedStickyNotes !== undefined ? { stickyNotes: mergedStickyNotes } : {}),
     deletedItemIds: Object.keys(deletedMap).length > 0 ? deletedMap : undefined,
     updatedAt: Math.max(local.updatedAt || 0, remote.updatedAt || 0, Date.now()),
   };
@@ -1109,7 +1128,7 @@ export async function syncCollaborativeTrip(
       if (snap.exists()) {
         const remoteData = snap.data() as any;
         existingOwnerId = remoteData.ownerId || existingOwnerId;
-        if (remoteData && remoteData.updatedAt && remoteData.updatedAt > (lightweightLocal.updatedAt || 0)) {
+        if (remoteData) {
           tripToSave = mergeTrips(lightweightLocal, normalizeTripData(lightweightLocal.id, remoteData));
         }
       }
@@ -1142,6 +1161,7 @@ export async function syncCollaborativeTrip(
       customExchangeRates: tripToSave.customExchangeRates || {},
       emergencyContacts: tripToSave.emergencyContacts || [],
       memories: tripToSave.memories || [],
+      stickyNotes: tripToSave.stickyNotes || [],
       deletedItemIds: tripToSave.deletedItemIds || {},
       isSplitEnabled: tripToSave.isSplitEnabled ?? false,
       splitMembers: tripToSave.splitMembers || [],

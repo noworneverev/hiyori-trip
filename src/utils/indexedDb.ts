@@ -251,6 +251,34 @@ export async function idbDeleteMediaByTrip(tripId: string): Promise<void> {
   });
 }
 
+export async function idbGetAllMediaIds(): Promise<string[]> {
+  const keys = await runTx<IDBValidKey[]>(STORE_MEDIA, 'readonly', (store) => store.getAllKeys());
+  if (!Array.isArray(keys)) return [];
+  return keys.map((k) => String(k)).filter(Boolean);
+}
+
+export async function idbDeleteMediaBatch(mediaIds: string[]): Promise<void> {
+  if (!mediaIds || mediaIds.length === 0) return;
+  const db = await openDatabase();
+  if (!db) return;
+
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(STORE_MEDIA, 'readwrite');
+      const store = tx.objectStore(STORE_MEDIA);
+      for (const id of mediaIds) {
+        if (!id) continue;
+        memoryMediaCache.delete(id);
+        store.delete(id);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 export async function idbWarmMediaCache(): Promise<void> {
   const all = await runTx<MediaRecord[]>(STORE_MEDIA, 'readonly', (store) => store.getAll());
   if (Array.isArray(all)) {

@@ -9,6 +9,8 @@ import {
   exportTripToMarkdown,
   exportTripToCSV,
 } from '../../utils/storage';
+import { universalParseItinerary } from '../../utils/aiClient';
+import { extractInlineImagesToMediaRefs, rebindTripMediaIds } from '../../utils/image';
 import { TRIP_TEMPLATES } from '../../data/presetTrips';
 import {
   X,
@@ -52,6 +54,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   const [destinationHint, setDestinationHint] = useState('');
   const [tripTitleInput, setTripTitleInput] = useState('');
   const [parsedPreviewTrip, setParsedPreviewTrip] = useState<Trip | null>(null);
+  const [parseSource, setParseSource] = useState<'server_ai' | 'local_fallback' | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiStatusStep, setAiStatusStep] = useState<string>('');
@@ -89,23 +92,45 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     setErrorMessage(null);
     const reader = new FileReader();
 
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const content = event.target?.result as string;
         const fileName = file.name.toLowerCase();
 
         if (fileName.endsWith('.json')) {
-          const parsed = JSON.parse(content);
-          if (parsed && parsed.title && Array.isArray(parsed.days)) {
-            // Standard Trip object
-            parsed.id = `imported-${Date.now()}`;
-            setParsedPreviewTrip(parsed);
+          const rawParsed = JSON.parse(content);
+          let candidate: any = rawParsed;
+          if (Array.isArray(rawParsed)) {
+            if (rawParsed.length === 1 && rawParsed[0]?.title && Array.isArray(rawParsed[0]?.days)) {
+              candidate = rawParsed[0];
+            } else {
+              throw new Error('此 JSON 包含多筆旅程，請上傳單一行程 JSON 檔案');
+            }
+          }
+          if (candidate && typeof candidate.title === 'string' && Array.isArray(candidate.days)) {
+            const newId = `imported-${Date.now()}`;
+            const sanitized: Trip = {
+              ...candidate,
+              id: newId,
+              shareId: undefined,
+              collabId: undefined,
+              isCollaborative: false,
+              ownerId: undefined,
+              ownerEmail: undefined,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            };
+            const { trip: offloaded } = await extractInlineImagesToMediaRefs(sanitized);
+            const rebound = await rebindTripMediaIds(offloaded, newId);
+            setParseSource(null);
+            setParsedPreviewTrip(rebound);
           } else {
             throw new Error('JSON 格式不符合行程結構');
           }
         } else if (fileName.endsWith('.csv')) {
           const trip = parseCSVItinerary(content);
           trip.title = file.name.replace(/\.[^/.]+$/, '');
+          setParseSource('local_fallback');
           setParsedPreviewTrip(trip);
         } else {
           // Plain text / Markdown
@@ -122,49 +147,39 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     reader.readAsText(file);
   };
 
-  // AI Intelligent Parse via backend Gemini API
+  // Universal Smart Parse (uses server proxy when available, seamless local rule fallback offline or on static hosts)
   const handleAiParse = async () => {
     if (!pastedText.trim()) return;
     setErrorMessage(null);
     setIsAiLoading(true);
-    setAiStatusStep('AI 正在閱讀行程與辨識景點...');
+    setAiStatusStep('正在閱讀行程與辨識景點...');
+
+    const stepTimer1 = setTimeout(() => {
+      setAiStatusStep('正在查詢經緯度座標與地理位置...');
+    }, 1500);
+
+    const stepTimer2 = setTimeout(() => {
+      setAiStatusStep('正在優化每日路線與交通指引...');
+    }, 3500);
 
     try {
-      const stepTimer1 = setTimeout(() => {
-        setAiStatusStep('正在查詢真實經緯度座標與地理位置...');
-      }, 1500);
+      const { trip, source } = await universalParseItinerary(
+        pastedText,
+        destinationHint.trim() || undefined,
+        currentTrip.currency
+      );
 
-      const stepTimer2 = setTimeout(() => {
-        setAiStatusStep('正在優化每日路線順序與交通指引...');
-      }, 3500);
-
-      const res = await fetch('/api/parse-itinerary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: pastedText,
-          destinationHint: destinationHint.trim() || undefined,
-          preferredCurrency: currentTrip.currency,
-        }),
-      });
-
-      clearTimeout(stepTimer1);
-      clearTimeout(stepTimer2);
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `伺服器回應異常 (${res.status})`);
-      }
-
-      const trip: Trip = await res.json();
       if (tripTitleInput.trim()) {
         trip.title = tripTitleInput.trim();
       }
+      setParseSource(source);
       setParsedPreviewTrip(trip);
     } catch (err: any) {
-      console.warn('AI parse failed, fallback option available:', err);
-      setErrorMessage(`AI 解析未完成: ${err.message}。您可改用下方「純本地離線規則解析」立即完成匯入。`);
+      console.warn('Universal parse failed:', err);
+      setErrorMessage(`行程解析未完成: ${err?.message || '格式無法辨識'}。請檢查文字格式或改用純本地規則解析。`);
     } finally {
+      clearTimeout(stepTimer1);
+      clearTimeout(stepTimer2);
       setIsAiLoading(false);
       setAiStatusStep('');
     }
@@ -179,6 +194,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
       if (destinationHint.trim()) {
         trip.destination = destinationHint.trim();
       }
+      setParseSource('local_fallback');
       setParsedPreviewTrip(trip);
     } catch (err: any) {
       setErrorMessage(`解析文字失敗: ${err.message}`);
@@ -196,6 +212,14 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     const cloned: Trip = JSON.parse(JSON.stringify(preset));
     cloned.id = `preset-copy-${Date.now()}`;
     cloned.title = `${preset.title} (新副本)`;
+    cloned.collabId = undefined;
+    cloned.isCollaborative = false;
+    cloned.collaborators = undefined;
+    cloned.editorEmails = undefined;
+    cloned.viewerEmails = undefined;
+    cloned.generalAccess = undefined;
+    cloned.ownerId = undefined;
+    cloned.ownerEmail = undefined;
     cloned.createdAt = Date.now();
     cloned.updatedAt = Date.now();
     onImportTrip(cloned);
@@ -216,13 +240,13 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl rounded-2xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-100 dark:border-slate-800 text-slate-800 dark:text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[92vh]"
+        className="w-full max-w-2xl rounded-2xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[92vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-teal-600 text-white flex items-center justify-center font-bold">
+            <div className="w-8 h-8 rounded-lg bg-teal-700 text-white flex items-center justify-center font-bold">
               <Upload className="w-4 h-4" />
             </div>
             <div>
@@ -230,41 +254,46 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer"
+            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:bg-[#EFECE5] dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer"
+            aria-label="關閉"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Tab Switching */}
-        <div className="flex border-b border-slate-200 dark:border-slate-800 px-5 pt-2 bg-slate-50/40 dark:bg-slate-800/30 text-xs font-semibold gap-4">
+        <div className="flex border-b border-[#E5E2DC] dark:border-slate-800 px-5 pt-1 bg-[#FAF9F6] dark:bg-slate-900/40 text-xs font-semibold gap-4 overflow-x-auto no-scrollbar">
           <button
-            onClick={() => { setActiveTab('import'); setParsedPreviewTrip(null); }}
-            className={`pb-2.5 border-b-2 flex items-center gap-1.5 transition ${
-              activeTab === 'import' ? 'border-teal-600 text-teal-700 dark:text-teal-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+            type="button"
+            onClick={() => { setActiveTab('import'); setParsedPreviewTrip(null); setParseSource(null); }}
+            className={`min-h-[44px] pb-2 pt-2 border-b-2 flex items-center gap-1.5 transition whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'import' ? 'border-teal-700 text-teal-700 dark:text-teal-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
             <Upload className="w-4 h-4" />
-            上傳與智慧解析
+            <span>上傳與智慧解析</span>
           </button>
           <button
-            onClick={() => { setActiveTab('presets'); setParsedPreviewTrip(null); }}
-            className={`pb-2.5 border-b-2 flex items-center gap-1.5 transition ${
-              activeTab === 'presets' ? 'border-teal-600 text-teal-700 dark:text-teal-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+            type="button"
+            onClick={() => { setActiveTab('presets'); setParsedPreviewTrip(null); setParseSource(null); }}
+            className={`min-h-[44px] pb-2 pt-2 border-b-2 flex items-center gap-1.5 transition whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'presets' ? 'border-teal-700 text-teal-700 dark:text-teal-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
             <Sparkles className="w-4 h-4 text-amber-500" />
-            載入示範經典行程
+            <span>載入示範經典行程</span>
           </button>
           <button
-            onClick={() => { setActiveTab('export'); setParsedPreviewTrip(null); }}
-            className={`pb-2.5 border-b-2 flex items-center gap-1.5 transition ${
-              activeTab === 'export' ? 'border-teal-600 text-teal-700 dark:text-teal-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+            type="button"
+            onClick={() => { setActiveTab('export'); setParsedPreviewTrip(null); setParseSource(null); }}
+            className={`min-h-[44px] pb-2 pt-2 border-b-2 flex items-center gap-1.5 transition whitespace-nowrap shrink-0 cursor-pointer ${
+              activeTab === 'export' ? 'border-teal-700 text-teal-700 dark:text-teal-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
             }`}
           >
             <Download className="w-4 h-4" />
-            離線備份與匯出
+            <span>離線備份與匯出</span>
           </button>
         </div>
 
@@ -347,17 +376,17 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                     type="button"
                     onClick={handleAiParse}
                     disabled={!pastedText.trim() || isAiLoading}
-                    className="flex-1 px-4 py-2.5 bg-gradient-to-r from-teal-600 via-teal-700 to-cyan-800 hover:opacity-95 disabled:opacity-50 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition active:scale-98"
+                    className="flex-1 min-h-[44px] sm:min-h-[40px] px-4 py-2.5 bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition active:scale-98 cursor-pointer"
                   >
                     {isAiLoading ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin text-teal-200" />
-                        <span>{aiStatusStep || 'AI 智慧解析中...'}</span>
+                        <span>{aiStatusStep || '智慧解析中...'}</span>
                       </>
                     ) : (
                       <>
-                        <Bot className="w-4 h-4 text-cyan-200" />
-                        <span>AI 智慧解析</span>
+                        <Bot className="w-4 h-4 text-teal-100" />
+                        <span>智慧行程解析</span>
                       </>
                     )}
                   </button>
@@ -367,7 +396,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                     type="button"
                     onClick={handleLocalRuleParse}
                     disabled={!pastedText.trim() || isAiLoading}
-                    className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 text-slate-700 dark:text-slate-200 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition"
+                    className="min-h-[44px] sm:min-h-[40px] px-4 py-2.5 bg-[#FAF9F6] dark:bg-slate-800 hover:bg-[#EFECE5] dark:hover:bg-slate-700 border border-[#E5E2DC] dark:border-slate-700 disabled:opacity-40 text-slate-700 dark:text-slate-200 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                     title="無須連網，純本地規則解析"
                   >
                     <Zap className="w-3.5 h-3.5 text-amber-500" />
@@ -381,33 +410,31 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                 <div className="mt-4 p-4 rounded-2xl bg-teal-50/90 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800/80 text-teal-950 dark:text-teal-100 animate-in fade-in zoom-in-95 duration-200 space-y-3">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-teal-200/80 dark:border-teal-800/80">
                     <div>
-                      <span className="px-2 py-0.5 rounded bg-teal-700 text-white font-bold text-[10px] uppercase">
-                        解析完成預覽
+                      <span className="text-teal-700 dark:text-teal-300 font-bold text-[11px]">
+                        {parseSource === 'server_ai'
+                          ? 'AI 雲端智慧解析完成'
+                          : parseSource === 'local_fallback'
+                          ? '本機離線規則解析完成'
+                          : '行程檔案解析完成'}
                       </span>
-                      <h4 className="font-black text-sm text-teal-950 dark:text-teal-100 mt-1">
+                      <h4 className="font-black text-sm text-teal-950 dark:text-teal-100 mt-0.5">
                         {parsedPreviewTrip.title}
                       </h4>
-                      <p className="text-[11px] text-teal-700 dark:text-teal-300 mt-0.5 flex items-center gap-2">
+                      <p className="text-[11px] text-teal-700 dark:text-teal-300 mt-0.5 flex items-center gap-2 flex-wrap">
                         <span className="flex items-center gap-1">
                           <MapPin className="w-3 h-3 text-teal-600" />
                           <span>{parsedPreviewTrip.destination}</span>
                         </span>
-                        <span>•</span>
-                        <span className="flex items-center gap-1">
+                        <span aria-hidden="true">·</span>
+                        <span className="flex items-center gap-1 font-mono tabular-nums">
                           <Calendar className="w-3 h-3 text-teal-600" />
                           <span>{parsedPreviewTrip.startDate} ~ {parsedPreviewTrip.endDate}</span>
                         </span>
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className="px-2.5 py-1 bg-white dark:bg-slate-800 border border-teal-200 dark:border-teal-700 text-teal-800 dark:text-teal-200 rounded-lg text-xs font-bold shadow-2xs">
-                        共 {parsedPreviewTrip.days.length} 天行程
-                      </span>
-                      <span className="px-2.5 py-1 bg-teal-600 text-white rounded-lg text-xs font-bold shadow-2xs flex items-center gap-1">
-                        <MapPin className="w-3 h-3 text-teal-200" />
-                        {parsedPreviewTrip.days.reduce((acc, d) => acc + d.items.length, 0)} 個景點
-                      </span>
+                    <div className="text-xs font-mono tabular-nums font-bold text-teal-800 dark:text-teal-200 shrink-0">
+                      共 {parsedPreviewTrip.days.length} 天 · {parsedPreviewTrip.days.reduce((acc, d) => acc + d.items.length, 0)} 個景點
                     </div>
                   </div>
 
@@ -597,11 +624,11 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex justify-end">
+        <div className="px-5 py-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex justify-end">
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold text-xs transition"
+            className="min-h-[44px] sm:min-h-[38px] px-5 py-2 rounded-xl bg-[#EFECE5] dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold text-xs transition cursor-pointer"
           >
             關閉
           </button>

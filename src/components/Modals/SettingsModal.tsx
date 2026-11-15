@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { getCustomGeminiKey, setCustomGeminiKey } from '../../utils/aiClient';
 import { getStorageUsage, getStorageUsageAsync, exportAllTripsToJSON } from '../../utils/storage';
 import { auth, loginWithGoogle, logoutFirebase, saveTripToCloud } from '../../utils/firebase';
 import { Trip } from '../../types/itinerary';
@@ -11,14 +10,12 @@ import { getSavedAccessibilityScale, applyAccessibilityScale, AccessibilityScale
 import { performAppUpdate, UpdateState } from '../../utils/pwaUpdater';
 import {
   X,
-  Key,
   ShieldCheck,
   HardDrive,
   Download,
   Trash2,
   Github,
   ExternalLink,
-  Check,
   Cloud,
   CloudCheck,
   LogOut,
@@ -46,8 +43,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useBodyScrollLock(true);
   const t = TRANSLATIONS[lang];
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [geminiKey, setGeminiKeyState] = useState(getCustomGeminiKey());
-  const [isSavedKey, setIsSavedKey] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncDone, setSyncDone] = useState(false);
   const [scale, setScale] = useState<AccessibilityScale>(getSavedAccessibilityScale);
@@ -67,13 +62,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       unsubscribe();
     };
   }, []);
-
-  const handleSaveKey = (e: React.FormEvent) => {
-    e.preventDefault();
-    setCustomGeminiKey(geminiKey);
-    setIsSavedKey(true);
-    setTimeout(() => setIsSavedKey(false), 2000);
-  };
 
   const handleManualSync = async () => {
     if (!currentUser) return;
@@ -113,32 +101,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border border-slate-200/90 dark:border-slate-800 text-slate-800 dark:text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[90vh]"
+        className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/70">
           <div>
             <h3 className="font-bold text-base text-slate-900 dark:text-white">
               {t.settings}
             </h3>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             {/* GitHub Project Link Icon */}
             <a
               href="https://github.com/noworneverev/hiyori-trip"
               target="_blank"
               rel="noopener noreferrer"
-              className="p-2 rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/60 dark:hover:bg-slate-800 transition"
+              className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-[#EFECE5] dark:hover:bg-slate-800 transition"
               title="GitHub Repository"
             >
               <Github className="w-4 h-4" />
             </a>
 
             <button
+              type="button"
               onClick={onClose}
-              className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer"
+              className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-[#EFECE5] dark:hover:bg-slate-800 transition cursor-pointer"
+              aria-label={lang === 'zh' ? '關閉' : 'Close'}
             >
               <X className="w-5 h-5" />
             </button>
@@ -148,22 +138,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         {/* Content */}
         <div className="p-5 overflow-y-auto space-y-4 text-xs">
           {/* Cloud Sync & Account Status */}
-          <div className="p-4 rounded-2xl bg-teal-50/60 dark:bg-teal-950/30 border border-teal-200/70 dark:border-teal-900/60 space-y-3">
+          <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/25 border border-teal-200/70 dark:border-teal-900/60 space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-bold text-teal-950 dark:text-teal-200 flex items-center gap-1.5 text-xs">
-                <Cloud className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                <Cloud className="w-4 h-4 text-teal-700 dark:text-teal-400" />
                 {t.syncStatus}
               </span>
               <span
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                className={`text-[11px] font-bold flex items-center gap-1 ${
                   currentUser
-                    ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
-                    : 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
+                    ? 'text-teal-700 dark:text-teal-300'
+                    : 'text-amber-700 dark:text-amber-300'
                 }`}
               >
                 {currentUser ? (
                   <>
-                    <CloudCheck className="w-3 h-3" />
+                    <CloudCheck className="w-3.5 h-3.5" />
                     {t.cloudSynced}
                   </>
                 ) : (
@@ -200,7 +190,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     onClick={handleManualSync}
                     disabled={isSyncing}
-                    className="px-2.5 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-semibold text-xs flex items-center gap-1 shadow-2xs transition"
+                    className="min-h-[38px] px-3 py-1.5 rounded-lg bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-semibold text-xs flex items-center gap-1 shadow-2xs transition cursor-pointer"
                   >
                     <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
                     <span>{syncDone ? (lang === 'zh' ? '已同步' : 'Synced') : t.syncNow}</span>
@@ -208,7 +198,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <button
                     onClick={() => logoutFirebase()}
-                    className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                    className="min-w-[44px] min-h-[44px] sm:min-w-[38px] sm:min-h-[38px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
                     title={lang === 'zh' ? '登出' : 'Sign out'}
                   >
                     <LogOut className="w-4 h-4" />
@@ -222,7 +212,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </p>
                 <button
                   onClick={() => loginWithGoogle()}
-                  className="w-full py-2 px-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-100 font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-2xs transition active:scale-98"
+                  className="w-full min-h-[44px] py-2 px-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-2xs transition active:scale-98 cursor-pointer"
                 >
                   <svg className="w-4 h-4" viewBox="0 0 24 24">
                     <path
@@ -248,14 +238,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             )}
 
             {onSimulateConflict && (
-              <div className="pt-2.5 border-t border-teal-200/50 dark:border-teal-900/40 flex items-center justify-between">
+              <div className="pt-2.5 border-t border-teal-200/50 dark:border-teal-900/40 flex items-center justify-between gap-2">
                 <span className="text-[11px] text-slate-500 dark:text-slate-400">
                   {lang === 'zh' ? '離線狀態衝突解決策略' : 'Conflict Strategy'}
                 </span>
                 <button
                   type="button"
                   onClick={onSimulateConflict}
-                  className="px-2.5 py-1 rounded-lg bg-teal-100 hover:bg-teal-200 dark:bg-teal-900/60 dark:hover:bg-teal-800 text-teal-800 dark:text-teal-200 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
+                  className="min-h-[36px] px-2.5 py-1 rounded-lg bg-teal-100 hover:bg-teal-200 dark:bg-teal-900/60 dark:hover:bg-teal-800 text-teal-800 dark:text-teal-200 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
                 >
                   <RefreshCw className="w-3 h-3" />
                   <span>{lang === 'zh' ? '預覽衝突提示對話框' : 'Preview Conflict Modal'}</span>
@@ -265,19 +255,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Local Storage Status */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/90 dark:border-slate-800 space-y-3">
+          <div className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800/40 border border-[#E5E2DC] dark:border-slate-800 space-y-3">
             <h4 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs">
-              <HardDrive className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+              <HardDrive className="w-4 h-4 text-teal-700 dark:text-teal-400" />
               {lang === 'zh' ? '離線快取與本地儲存' : 'Offline Cache & Local Storage'}
             </h4>
             <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 flex justify-between items-center">
+              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 flex justify-between items-center">
                 <span className="text-slate-500 dark:text-slate-400">{lang === 'zh' ? '旅程總數' : 'Trips'}:</span>
-                <span className="font-bold font-mono text-slate-900 dark:text-white">{trips.length}</span>
+                <span className="font-bold font-mono tabular-nums text-slate-900 dark:text-white">{trips.length}</span>
               </div>
-              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 flex justify-between items-center">
+              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 flex justify-between items-center">
                 <span className="text-slate-500 dark:text-slate-400">{lang === 'zh' ? '快取佔用' : 'Cache'}:</span>
-                <span className="font-bold font-mono text-slate-900 dark:text-white">{storageInfo.formatted}</span>
+                <span className="font-bold font-mono tabular-nums text-slate-900 dark:text-white">{storageInfo.formatted}</span>
               </div>
             </div>
 
@@ -285,7 +275,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 onClick={() => void exportAllTripsToJSON(trips)}
-                className="py-2 px-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-teal-500 rounded-xl font-semibold text-slate-700 dark:text-slate-300 hover:text-teal-700 text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                className="min-h-[44px] sm:min-h-[38px] py-2 px-3 bg-white dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600 rounded-xl font-semibold text-slate-700 dark:text-slate-300 hover:text-teal-700 text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>{lang === 'zh' ? '下載完整備份' : 'Export All JSON'}</span>
@@ -296,14 +286,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={handlePerformReset}
-                    className="flex-1 py-2 px-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-xs transition"
+                    className="flex-1 min-h-[44px] sm:min-h-[38px] py-2 px-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-xs transition cursor-pointer"
                   >
-                    確定清空！
+                    確定清空
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowConfirmReset(false)}
-                    className="px-2.5 py-2 border border-slate-300 dark:border-slate-700 rounded-xl text-slate-500 text-xs"
+                    className="min-h-[44px] sm:min-h-[38px] px-2.5 py-2 border border-[#E5E2DC] dark:border-slate-700 rounded-xl text-slate-500 text-xs cursor-pointer"
                   >
                     取消
                   </button>
@@ -312,7 +302,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowConfirmReset(true)}
-                  className="py-2 px-3 bg-white dark:bg-slate-800 border border-rose-200 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 transition"
+                  className="min-h-[44px] sm:min-h-[38px] py-2 px-3 bg-white dark:bg-slate-800 border border-rose-200 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>{lang === 'zh' ? '重設快取資料' : 'Reset Cache'}</span>
@@ -322,13 +312,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Accessibility & Typography Scale */}
-          <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-200/70 dark:border-teal-900/50 space-y-3">
+          <div className="p-4 rounded-2xl bg-teal-50/40 dark:bg-teal-950/20 border border-teal-200/70 dark:border-teal-900/50 space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-1.5 text-xs">
-                <Eye className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                <Eye className="w-4 h-4 text-teal-700 dark:text-teal-400" />
                 <span>{lang === 'zh' ? '文字大小' : 'Text Size'}</span>
               </span>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-300">
+              <span className="text-[11px] font-bold font-mono tabular-nums text-teal-700 dark:text-teal-400">
                 {scale === 'senior' ? '特大 130%' : scale === 'comfortable' ? '放大 115%' : '標準 100%'}
               </span>
             </div>
@@ -344,15 +334,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   }}
                   className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-1.5 ${
                     scale === opt.id
-                      ? 'border-teal-500 bg-white dark:bg-slate-800 ring-2 ring-teal-500/30 shadow-xs'
-                      : 'border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/60 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      ? 'border-teal-600 bg-white dark:bg-slate-800 ring-2 ring-teal-500/30 shadow-xs'
+                      : 'border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 hover:bg-[#F3F1EC] dark:hover:bg-slate-800'
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-1">
                       {opt.label}
                     </span>
-                    <span className="text-[10px] font-mono font-bold text-teal-600 dark:text-teal-400">
+                    <span className="text-[10px] font-mono tabular-nums font-bold text-teal-700 dark:text-teal-400">
                       {opt.badge}
                     </span>
                   </div>
@@ -365,18 +355,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* System Version & Update Engine */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/90 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800/40 border border-[#E5E2DC] dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-900 dark:text-white text-xs">
                   {lang === 'zh' ? '系統版本資訊' : 'App Version'}
                 </span>
-                <span className="px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-mono text-[10px] font-bold">
+                <span aria-hidden="true" className="text-slate-400">·</span>
+                <span className="text-slate-600 dark:text-slate-300 font-mono tabular-nums text-[11px] font-bold">
                   {APP_VERSION}
                 </span>
               </div>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                {lang === 'zh' ? `構建日期：${BUILD_DATE} • PWA 離線快取支援` : `Build Date: ${BUILD_DATE} • PWA Cache`}
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono tabular-nums">
+                {lang === 'zh' ? `構建日期：${BUILD_DATE} · PWA 離線快取支援` : `Build Date: ${BUILD_DATE} · PWA Cache`}
               </p>
             </div>
 
@@ -386,7 +377,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onClick={async () => {
                 await performAppUpdate((s) => setUpdateState(s));
               }}
-              className="px-3.5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs disabled:opacity-60 cursor-pointer self-start sm:self-auto"
+              className="min-h-[44px] sm:min-h-[38px] px-3.5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs disabled:opacity-60 cursor-pointer self-start sm:self-auto"
             >
               <RotateCcw className={`w-3.5 h-3.5 ${updateState.status === 'checking' || updateState.status === 'updating' ? 'animate-spin' : ''}`} />
               <span>
@@ -399,47 +390,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </button>
           </div>
 
-          {/* AI Parser Key (Optional) */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/90 dark:border-slate-800 space-y-2.5">
-            <div className="flex items-center justify-between">
+          {/* Smart Parser Mode (Read-only Status) */}
+          <div className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800/40 border border-[#E5E2DC] dark:border-slate-800 space-y-2">
+            <div className="flex items-center justify-between gap-2">
               <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs">
-                <Key className="w-4 h-4 text-teal-600 dark:text-teal-400" />
-                {lang === 'zh' ? '自訂 Gemini API Key (選填)' : 'Custom Gemini API Key (Optional)'}
+                <ShieldCheck className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                {lang === 'zh' ? '智慧行程解析模式' : 'Smart Itinerary Parser'}
               </span>
-              <span className="text-[10px] text-slate-400 font-semibold">
-                {lang === 'zh' ? '免費後端預設處理' : 'Free Backend Default'}
+              <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400">
+                {lang === 'zh' ? '雙環境自動切換' : 'Dual-Env Auto'}
               </span>
             </div>
-
             <p className="text-slate-500 dark:text-slate-400 text-[11px] leading-relaxed">
               {lang === 'zh'
-                ? '預設已啟用雲端解析，個人配額可選填。'
-                : 'Free cloud parsing is enabled by default.'}
+                ? '在 AI Studio 預覽環境會自動透過伺服器安全代理執行智慧解析；於靜態網頁或離線環境則自動無縫降級為純本機規則解析，無需輸入任何 API Key。'
+                : 'Uses the secure server proxy in AI Studio preview and falls back automatically to zero-key local rule parsing on static hosts or offline.'}
             </p>
-
-            <form onSubmit={handleSaveKey} className="space-y-1.5">
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={geminiKey}
-                  onChange={(e) => setGeminiKeyState(e.target.value)}
-                  placeholder="AIzaSy... (留空即使用預設免費解析)"
-                  className="flex-1 px-3 py-1.5 bg-white dark:bg-slate-800 rounded-xl border border-slate-300 dark:border-slate-700 font-mono text-xs outline-none focus:border-teal-500 text-slate-800 dark:text-slate-100"
-                />
-                <button
-                  type="submit"
-                  className="px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs flex items-center gap-1 shadow-xs transition"
-                >
-                  {isSavedKey ? <Check className="w-3.5 h-3.5" /> : null}
-                  <span>{isSavedKey ? (lang === 'zh' ? '已儲存' : 'Saved') : (lang === 'zh' ? '儲存' : 'Save')}</span>
-                </button>
-              </div>
-            </form>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50 flex items-center justify-between">
+        <div className="px-5 py-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex items-center justify-between">
           <a
             href="https://github.com/noworneverev/hiyori-trip"
             target="_blank"
@@ -454,7 +425,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-700 dark:text-slate-200 font-semibold text-xs transition"
+            className="min-h-[44px] sm:min-h-[38px] px-4 py-1.5 rounded-xl bg-[#EFECE5] dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold text-xs transition cursor-pointer"
           >
             {lang === 'zh' ? '關閉' : 'Close'}
           </button>

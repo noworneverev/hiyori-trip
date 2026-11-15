@@ -25,6 +25,7 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
   const [syncDone, setSyncDone] = useState(false);
   const [driveConnected, setDriveConnected] = useState<boolean>(() => hasDriveAccessToken());
   const [isConnectingDrive, setIsConnectingDrive] = useState(false);
+  const [driveError, setDriveError] = useState<string | null>(null);
   const authDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -178,10 +179,19 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
             type="button"
             onClick={async () => {
               if (driveConnected || isConnectingDrive) return;
+              setDriveError(null);
               setIsConnectingDrive(true);
               try {
-                await connectGoogleDrive();
-                setDriveConnected(hasDriveAccessToken());
+                const token = await connectGoogleDrive();
+                const ok = Boolean(token) || hasDriveAccessToken();
+                setDriveConnected(ok);
+                if (!ok) {
+                  setDriveError(
+                    lang === 'zh'
+                      ? 'Google Drive 授權已取消或彈窗被封鎖'
+                      : 'Drive authorization cancelled or popup blocked'
+                  );
+                }
               } finally {
                 setIsConnectingDrive(false);
               }
@@ -208,6 +218,12 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
               </span>
             )}
           </button>
+
+          {driveError && (
+            <p className="px-2.5 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-300 leading-snug">
+              {driveError}
+            </p>
+          )}
 
           <div className="pt-1 border-t border-[#E5E2DC] dark:border-slate-800">
             <button

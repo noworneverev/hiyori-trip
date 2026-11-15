@@ -16,6 +16,7 @@ let originalWidth = '';
 let originalOverflow = '';
 let originalOverscrollBehavior = '';
 let originalTouchAction = '';
+let originalPaddingRight = '';
 let originalHtmlOverflow = '';
 let originalHtmlOverscrollBehavior = '';
 let originalHtmlTouchAction = '';
@@ -45,6 +46,7 @@ export function useBodyScrollLock(isLocked: boolean = true) {
       originalOverflow = document.body.style.overflow;
       originalOverscrollBehavior = document.body.style.overscrollBehavior;
       originalTouchAction = document.body.style.touchAction;
+      originalPaddingRight = document.body.style.paddingRight;
 
       originalHtmlOverflow = document.documentElement.style.overflow;
       originalHtmlOverscrollBehavior = document.documentElement.style.overscrollBehavior;
@@ -86,7 +88,7 @@ export function useBodyScrollLock(isLocked: boolean = true) {
         document.body.style.overflow = originalOverflow || '';
         document.body.style.overscrollBehavior = originalOverscrollBehavior || '';
         document.body.style.touchAction = originalTouchAction || '';
-        document.body.style.paddingRight = '';
+        document.body.style.paddingRight = originalPaddingRight || '';
 
         document.documentElement.style.overflow = originalHtmlOverflow || '';
         document.documentElement.style.overscrollBehavior = originalHtmlOverscrollBehavior || '';
@@ -105,8 +107,12 @@ export function useBodyScrollLock(isLocked: boolean = true) {
 
         document.body.removeAttribute('data-scroll-locked');
 
-        // Restore user scroll position smoothly
-        window.scrollTo(0, savedScrollY);
+        // Restore user scroll position immediately
+        try {
+          window.scrollTo({ top: savedScrollY, left: 0, behavior: 'instant' as ScrollBehavior });
+        } catch {
+          window.scrollTo(0, savedScrollY);
+        }
       }
     };
   }, [isLocked]);

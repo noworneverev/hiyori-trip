@@ -23,6 +23,9 @@ import {
   getWeatherDescription,
 } from '../../utils/weather';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
+import { sanitizeExternalUrl } from '../../utils/url';
+import { garbageCollectOrphanedMedia } from '../../utils/image';
+import { getStoredTrips } from '../../utils/storage';
 import { ItineraryOverviewTable } from '../Itinerary/ItineraryOverviewTable';
 import {
   Calendar,
@@ -448,7 +451,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
   const handleSaveOverlayGoogleUrl = () => {
     if (!canEdit || !overlaySpotPhoto) return;
-    const finalUrl = overlayEditUrl.trim();
+    const finalUrl = sanitizeExternalUrl(overlayEditUrl) || '';
     const targetItemId = overlaySpotPhoto.item.id;
 
     // Update spot in trip.days
@@ -637,7 +640,17 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       };
     });
     const updatedMemories = (trip.memories || []).filter((m) => m.spotId !== itemId);
-    onUpdateTrip({ ...trip, days: updatedDays, memories: updatedMemories, deletedItemIds, updatedAt: now });
+    const updatedTrip: Trip = {
+      ...trip,
+      days: updatedDays,
+      memories: updatedMemories,
+      deletedItemIds,
+      updatedAt: now,
+    };
+    onUpdateTrip(updatedTrip);
+    garbageCollectOrphanedMedia(
+      getStoredTrips().map((t) => (t.id === updatedTrip.id ? updatedTrip : t))
+    ).catch(() => {});
   };
 
   const handleMoveItem = (index: number, direction: 'up' | 'down') => {
@@ -1168,10 +1181,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             <button
               type="button"
               onClick={() => setSpotSearchQuery('')}
-              className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
+              className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
               aria-label="清除搜尋"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>
@@ -1569,7 +1582,17 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             // Distance & Travel time to next spot
             const nextItem = activeDay.items[index + 1];
             let distanceInfo = null;
-            if (item.lat && item.lng && nextItem && nextItem.lat && nextItem.lng) {
+            if (
+              typeof item.lat === 'number' &&
+              typeof item.lng === 'number' &&
+              !isNaN(item.lat) &&
+              !isNaN(item.lng) &&
+              nextItem &&
+              typeof nextItem.lat === 'number' &&
+              typeof nextItem.lng === 'number' &&
+              !isNaN(nextItem.lat) &&
+              !isNaN(nextItem.lng)
+            ) {
               const km = calculateDistanceKm(
                 { lat: item.lat, lng: item.lng },
                 { lat: nextItem.lat, lng: nextItem.lng }
@@ -1795,7 +1818,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                             type="button"
                             disabled={index === 0}
                             onClick={() => handleMoveItem(index, 'up')}
-                            className="min-w-[40px] min-h-[40px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition cursor-pointer"
+                            className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition cursor-pointer"
                             title={lang === 'zh' ? '上移' : 'Move up'}
                           >
                             <ArrowUp className="w-3.5 h-3.5" />
@@ -1805,7 +1828,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                             type="button"
                             disabled={index === activeDay.items.length - 1}
                             onClick={() => handleMoveItem(index, 'down')}
-                            className="min-w-[40px] min-h-[40px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition cursor-pointer"
+                            className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition cursor-pointer"
                             title={lang === 'zh' ? '下移' : 'Move down'}
                           >
                             <ArrowDown className="w-3.5 h-3.5" />
@@ -1814,7 +1837,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                           <button
                             type="button"
                             onClick={() => onOpenEditItem(item, selectedDayNumber)}
-                            className="min-w-[40px] min-h-[40px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                            className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
                             title={lang === 'zh' ? '編輯' : 'Edit'}
                           >
                             <Edit2 className="w-3.5 h-3.5" />
@@ -1823,7 +1846,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                           <button
                             type="button"
                             onClick={() => handleDeleteItem(item.id)}
-                            className="min-w-[40px] min-h-[40px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                            className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
                             title={lang === 'zh' ? '刪除' : 'Delete'}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1958,9 +1981,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             </button>
           )}
 
-          {overlaySpotPhoto.item.googlePhotosUrl && (
+          {sanitizeExternalUrl(overlaySpotPhoto.item.googlePhotosUrl) && (
             <a
-              href={overlaySpotPhoto.item.googlePhotosUrl}
+              href={sanitizeExternalUrl(overlaySpotPhoto.item.googlePhotosUrl)}
               target="_blank"
               rel="noopener noreferrer"
               className="min-h-[40px] px-3 py-1.5 rounded-full bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold transition flex items-center gap-1.5 border border-white/20 shadow-md backdrop-blur-md active:scale-95"
@@ -2031,7 +2054,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
           {(() => {
             const currentLocal = overlaySpotPhoto.item.memoryPhotos?.[overlaySpotPhoto.photoIndex];
-            const highResUrl = overlaySpotPhoto.item.googlePhotosUrl;
+            const highResUrl = sanitizeExternalUrl(overlaySpotPhoto.item.googlePhotosUrl);
             const canUseHighRes = Boolean(highResUrl) && !overlayHighResFailed;
             const activeSrc = canUseHighRes ? highResUrl! : (currentLocal || highResUrl || '');
 
@@ -2123,7 +2146,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               )}
             </div>
             {(overlaySpotPhoto.item.notes || overlaySpotPhoto.item.memoryNotes) && (
-              <p className="text-xs text-slate-300 italic truncate">
+              <p className="text-xs text-slate-300 italic whitespace-pre-wrap break-words line-clamp-2 sm:line-clamp-none">
                 「{overlaySpotPhoto.item.memoryNotes || overlaySpotPhoto.item.notes}」
               </p>
             )}

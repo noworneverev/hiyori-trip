@@ -2,6 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Trip, BookingVoucher, BookingCategory, ItineraryItem } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import { copyTextToClipboard } from '../../utils/clipboard';
+import { sanitizeExternalUrl } from '../../utils/url';
 import {
   Ticket,
   Plane,
@@ -71,31 +73,6 @@ function mapItineraryCategoryToBooking(cat: ItineraryItem['category']): BookingC
   if (cat === 'transport') return 'rail';
   if (cat === 'spot' || cat === 'activity') return 'ticket';
   return 'other';
-}
-
-async function copyToClipboardSafe(text: string): Promise<boolean> {
-  try {
-    if (navigator?.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // Fallback below
-  }
-  try {
-    const el = document.createElement('textarea');
-    el.value = text;
-    el.setAttribute('readonly', '');
-    el.style.position = 'fixed';
-    el.style.opacity = '0';
-    document.body.appendChild(el);
-    el.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(el);
-    return ok;
-  } catch {
-    return false;
-  }
 }
 
 export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
@@ -205,6 +182,13 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     const parsedDay = formDayNumber ? parseInt(formDayNumber, 10) : undefined;
     const now = Date.now();
     const existingList = trip.bookings || [];
+    const normalizedUrl = formUrl.trim()
+      ? sanitizeExternalUrl(
+          /^https?:\/\//i.test(formUrl.trim()) || formUrl.trim().startsWith('//')
+            ? formUrl.trim()
+            : `https://${formUrl.trim()}`
+        )
+      : undefined;
 
     if (editingVoucherId) {
       const updated = existingList.map((b) =>
@@ -221,7 +205,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
               timeLabel: formTimeLabel.trim().slice(0, 40) || undefined,
               location: formLocation.trim().slice(0, 200) || undefined,
               dayNumber: parsedDay && !isNaN(parsedDay) ? parsedDay : undefined,
-              url: formUrl.trim().slice(0, 500) || undefined,
+              url: normalizedUrl?.slice(0, 500),
               notes: formNotes.trim().slice(0, 500) || undefined,
               updatedAt: now,
             }
@@ -241,7 +225,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
         timeLabel: formTimeLabel.trim().slice(0, 40) || undefined,
         location: formLocation.trim().slice(0, 200) || undefined,
         dayNumber: parsedDay && !isNaN(parsedDay) ? parsedDay : undefined,
-        url: formUrl.trim().slice(0, 500) || undefined,
+        url: normalizedUrl?.slice(0, 500),
         notes: formNotes.trim().slice(0, 500) || undefined,
         createdAt: now,
         updatedAt: now,
@@ -272,7 +256,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
   };
 
   const handleCopy = async (value: string, keyId: string) => {
-    const ok = await copyToClipboardSafe(value);
+    const ok = await copyTextToClipboard(value);
     if (ok) {
       setCopiedKey(keyId);
       setTimeout(() => {
@@ -759,7 +743,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                             })
                           }
                           title={isZh ? '全螢幕出示給櫃檯' : 'Show fullscreen card'}
-                          className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-teal-700 dark:text-slate-400 dark:hover:text-teal-300 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition cursor-pointer"
+                          className="w-11 h-11 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-teal-700 dark:text-slate-400 dark:hover:text-teal-300 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition cursor-pointer"
                         >
                           <Maximize2 className="w-4 h-4" />
                         </button>
@@ -769,7 +753,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                               type="button"
                               onClick={() => openEditForm(v)}
                               title={isZh ? '編輯憑證' : 'Edit voucher'}
-                              className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition cursor-pointer"
+                              className="w-11 h-11 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition cursor-pointer"
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
@@ -777,7 +761,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                               type="button"
                               onClick={() => setDeletingId(isConfirmingDelete ? null : v.id)}
                               title={isZh ? '刪除憑證' : 'Delete voucher'}
-                              className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"
+                              className="w-11 h-11 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -915,17 +899,20 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                         ) : (
                           <span />
                         )}
-                        {v.url && (
-                          <a
-                            href={v.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-semibold text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1"
-                          >
-                            <span>{isZh ? '開啟電子憑證' : 'Open Link'}</span>
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        )}
+                        {(() => {
+                          const safeUrl = sanitizeExternalUrl(v.url);
+                          return safeUrl ? (
+                            <a
+                              href={safeUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-semibold text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1"
+                            >
+                              <span>{isZh ? '開啟電子憑證' : 'Open Link'}</span>
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          ) : null;
+                        })()}
                       </div>
                     )
                   )}
@@ -975,7 +962,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                         })
                       }
                       title={isZh ? '全螢幕出示給櫃檯' : 'Show fullscreen card'}
-                      className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-teal-700 dark:text-slate-400 dark:hover:text-teal-300 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
+                      className="w-11 h-11 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-teal-700 dark:text-slate-400 dark:hover:text-teal-300 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
                     >
                       <Maximize2 className="w-4 h-4" />
                     </button>

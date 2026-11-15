@@ -12,6 +12,7 @@ import {
   formatBytesLabel,
   getCachedDriveOriginalObjectUrl,
 } from '../../utils/googleDrive';
+import { sanitizeExternalUrl } from '../../utils/url';
 import { MediaImage } from '../UI/MediaImage';
 import { GalleryPhotoItem } from './travelHubTypes';
 import {
@@ -171,6 +172,8 @@ export const TravelHubLightbox: React.FC<TravelHubLightboxProps> = ({
 
   if (!currentPhoto) return null;
 
+  const safeGooglePhotosUrl = sanitizeExternalUrl(currentPhoto.googlePhotosUrl);
+
   // Cap visible progress segments at 24 to keep bar readable on huge albums
   const maxBars = Math.min(photos.length, 24);
   const activeBarIdx =
@@ -319,11 +322,11 @@ export const TravelHubLightbox: React.FC<TravelHubLightboxProps> = ({
                 </>
               )}
             </div>
-            <h4 className="font-bold text-sm sm:text-base text-white truncate">
+            <h4 className="font-bold text-sm sm:text-base text-white break-words">
               {currentPhoto.spotTitle}
             </h4>
             {currentPhoto.caption && (
-              <p className="text-xs text-slate-300 line-clamp-2 leading-relaxed">
+              <p className="text-xs text-slate-300 whitespace-pre-wrap break-words max-h-24 overflow-y-auto leading-relaxed">
                 {currentPhoto.caption}
               </p>
             )}
@@ -385,15 +388,20 @@ export const TravelHubLightbox: React.FC<TravelHubLightboxProps> = ({
                 type="button"
                 disabled={isConnectingDrive}
                 onClick={async () => {
+                  setDriveLoadError(null);
                   setIsConnectingDrive(true);
                   try {
-                    await connectGoogleDrive();
-                    setDriveConnected(hasDriveAccessToken());
+                    const token = await connectGoogleDrive();
+                    const ok = Boolean(token) || hasDriveAccessToken();
+                    setDriveConnected(ok);
+                    if (!ok) {
+                      setDriveLoadError('Google Drive 授權已取消或彈窗被封鎖');
+                    }
                   } finally {
                     setIsConnectingDrive(false);
                   }
                 }}
-                className="min-h-[40px] px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-teal-300 text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap disabled:opacity-50"
+                className="min-h-[44px] sm:min-h-[40px] px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-teal-300 text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap disabled:opacity-50"
               >
                 <HardDrive className="w-3.5 h-3.5" />
                 <span>{isConnectingDrive ? '授權中...' : '載入 Drive 原圖'}</span>
@@ -405,12 +413,17 @@ export const TravelHubLightbox: React.FC<TravelHubLightboxProps> = ({
                 type="button"
                 disabled={isDownloadingOriginal}
                 onClick={async () => {
+                  setDriveLoadError(null);
                   let token = getDriveAccessToken();
                   if (!token) {
                     token = await connectGoogleDrive();
-                    setDriveConnected(hasDriveAccessToken());
+                    setDriveConnected(Boolean(token) || hasDriveAccessToken());
+                    if (!token) {
+                      setDriveLoadError('Google Drive 授權已取消或彈窗被封鎖');
+                      return;
+                    }
                   }
-                  if (!token || !currentPhoto.driveFileId) return;
+                  if (!currentPhoto.driveFileId) return;
                   setIsDownloadingOriginal(true);
                   try {
                     const ext =
@@ -430,7 +443,7 @@ export const TravelHubLightbox: React.FC<TravelHubLightboxProps> = ({
                     setIsDownloadingOriginal(false);
                   }
                 }}
-                className="min-h-[40px] px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap disabled:opacity-50"
+                className="min-h-[44px] sm:min-h-[40px] px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap disabled:opacity-50"
                 title="從 Google Drive 下載未壓縮原始照片"
               >
                 {isDownloadingOriginal ? (
@@ -442,12 +455,12 @@ export const TravelHubLightbox: React.FC<TravelHubLightboxProps> = ({
               </button>
             )}
 
-            {currentPhoto.googlePhotosUrl && (
+            {safeGooglePhotosUrl && (
               <a
-                href={currentPhoto.googlePhotosUrl}
+                href={safeGooglePhotosUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="min-h-[40px] px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-amber-200 text-xs font-semibold inline-flex items-center gap-1 transition whitespace-nowrap"
+                className="min-h-[44px] sm:min-h-[40px] px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-amber-200 text-xs font-semibold inline-flex items-center gap-1 transition whitespace-nowrap"
               >
                 <span>Google 相簿</span>
                 <ExternalLink className="w-3 h-3" />

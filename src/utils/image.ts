@@ -2,6 +2,8 @@ import { Trip } from '../types/itinerary';
 import {
   MediaRecord,
   getMemoryCachedMedia,
+  idbDeleteMediaBatch,
+  idbGetAllMediaIds,
   idbGetMedia,
   idbSaveMedia,
   setMemoryCachedMedia,
@@ -402,6 +404,130 @@ export async function hydrateTripMediaForExport(trip: Trip): Promise<Trip> {
 
   return {
     ...trip,
+    days: nextDays,
+    memories: nextMemories,
+    expenses: nextExpenses,
+  };
+}
+
+/**
+ * Collect all media:// IDs referenced across a list of trips
+ */
+export function collectReferencedMediaIdsFromTrips(trips: Trip[]): Set<string> {
+  const referenced = new Set<string>();
+  const addRef = (src?: string | null) => {
+    if (isMediaRef(src)) {
+      const id = extractMediaId(src);
+      if (id) referenced.add(id);
+    }
+  };
+
+  (trips || []).forEach((trip) => {
+    (trip.days || []).forEach((d) => {
+      (d.items || []).forEach((it) => {
+        (it.memoryPhotos || []).forEach(addRef);
+      });
+    });
+    (trip.memories || []).forEach((m) => addRef(m.imageUrl));
+    (trip.expenses || []).forEach((e) => {
+      addRef(e.receiptImage);
+      (e.receiptImages || []).forEach(addRef);
+    });
+  });
+
+  return referenced;
+}
+
+/**
+ * Remove orphaned IndexedDB media records not referenced by any current trip (or excludeIds)
+ */
+export async function garbageCollectOrphanedMedia(
+  trips: Trip[],
+  excludeIds?: Iterable<string>
+): Promise<number> {
+  try {
+    const allIds = await idbGetAllMediaIds();
+    if (allIds.length === 0) return 0;
+
+    const referenced = collectReferencedMediaIdsFromTrips(trips);
+    if (excludeIds) {
+      for (const id of excludeIds) {
+        if (id) referenced.add(extractMediaId(id));
+      }
+    }
+
+    const orphans = allIds.filter((id) => !referenced.has(id));
+    if (orphans.length > 0) {
+      await idbDeleteMediaBatch(orphans);
+    }
+    return orphans.length;
+  } catch (err) {
+    console.warn('[Media GC] Cleanup skipped:', err);
+    return 0;
+  }
+}
+
+/**
+ * Clone/rebind media:// references onto a newly assigned trip ID so imported/copied trips
+ * own independent IndexedDB media records.
+ */
+export async function rebindTripMediaIds(trip: Trip, newTripId: string): Promise<Trip> {
+  const hint = { tripId: trip.id, ownerId: trip.ownerId, collabId: trip.collabId };
+  const refMap = new Map<string, string>();
+
+  const cloneRef = async (src?: string): Promise<string | undefined> => {
+    if (!src) return src;
+    if (!isMediaRef(src)) return src;
+    if (refMap.has(src)) return refMap.get(src)!;
+
+    const dataUrl = await resolveMediaSrc(src, hint);
+    if (!dataUrl || !isInlineDataImage(dataUrl)) {
+      return src;
+    }
+    const freshRef = await storeImageAsMediaRef(newTripId, dataUrl);
+    refMap.set(src, freshRef);
+    return freshRef;
+  };
+
+  const nextDays = await Promise.all(
+    (trip.days || []).map(async (day) => ({
+      ...day,
+      items: await Promise.all(
+        (day.items || []).map(async (item) => {
+          if (!item.memoryPhotos || item.memoryPhotos.length === 0) return item;
+          const nextPhotos = await Promise.all(
+            item.memoryPhotos.map((p) => cloneRef(p).then((v) => v || p))
+          );
+          return { ...item, memoryPhotos: nextPhotos };
+        })
+      ),
+    }))
+  );
+
+  const nextMemories = await Promise.all(
+    (trip.memories || []).map(async (mem) => ({
+      ...mem,
+      imageUrl: (await cloneRef(mem.imageUrl)) || mem.imageUrl,
+    }))
+  );
+
+  const nextExpenses = await Promise.all(
+    (trip.expenses || []).map(async (exp) => {
+      const nextReceiptImage = await cloneRef(exp.receiptImage);
+      const nextReceiptImages = exp.receiptImages
+        ? await Promise.all(exp.receiptImages.map((r) => cloneRef(r).then((v) => v || r)))
+        : undefined;
+      return {
+        ...exp,
+        ...(nextReceiptImage !== undefined ? { receiptImage: nextReceiptImage } : {}),
+        ...(nextReceiptImages !== undefined ? { receiptImages: nextReceiptImages } : {}),
+      };
+    })
+  );
+
+  return {
+    ...trip,
+    id: newTripId,
     days: nextDays,
     memories: nextMemories,
     expenses: nextExpenses,

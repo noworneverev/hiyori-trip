@@ -1,5 +1,5 @@
-import { ExpenseItem, Trip } from '../types/itinerary';
-import { formatCurrencyAmount, convertAmount } from './currency';
+import { Trip } from '../types/itinerary';
+import { formatCurrencyAmount, convertAmount, CURRENCY_MAP } from './currency';
 
 export interface SplitMemberSummary {
   name: string;
@@ -35,6 +35,10 @@ export const calculateTripSplits = (
 ): SplitCalculationResult => {
   const baseCur = targetCurrency || trip.currency || 'TWD';
   const rates = customExchangeRates || trip.customExchangeRates;
+  const decimals = CURRENCY_MAP[baseCur]?.decimals ?? 0;
+  const factor = Math.pow(10, decimals);
+  const roundCur = (val: number) => Math.round(val * factor) / factor;
+  const minStep = 1 / factor;
 
   const rawMembers = trip.splitMembers && trip.splitMembers.length > 0
     ? trip.splitMembers
@@ -61,7 +65,6 @@ export const calculateTripSplits = (
     const cost = convertAmount(exp.amount, exp.currency, baseCur, rates);
     if (!cost || isNaN(cost)) return;
 
-    // If marked as strictly personal expense
     if (exp.isPersonal) {
       totalPersonalExpense += cost;
       const payer = exp.paidBy && summaries[exp.paidBy] ? exp.paidBy : members[0];
@@ -79,7 +82,6 @@ export const calculateTripSplits = (
       summaries[payer].groupPaid += cost;
     }
 
-    // Determine who shares this expense
     let participants = (exp.splitWith && exp.splitWith.length > 0)
       ? exp.splitWith.map((m) => m.trim()).filter((m) => summaries[m] !== undefined)
       : members;
@@ -96,25 +98,27 @@ export const calculateTripSplits = (
     });
   });
 
-  // Calculate net balance for each person strictly based on groupPaid vs totalShare
   members.forEach((m) => {
-    summaries[m].netBalance = summaries[m].groupPaid - summaries[m].totalShare;
+    summaries[m].totalPaid = roundCur(summaries[m].totalPaid);
+    summaries[m].groupPaid = roundCur(summaries[m].groupPaid);
+    summaries[m].totalShare = roundCur(summaries[m].totalShare);
+    summaries[m].personalExpense = roundCur(summaries[m].personalExpense);
+    summaries[m].netBalance = roundCur(summaries[m].groupPaid - summaries[m].totalShare);
   });
 
-  // Calculate minimal cash transfers (greedy settlement with integer amounts)
+  // Calculate minimal cash transfers preserving currency precision
   const debtors: { name: string; amount: number }[] = [];
   const creditors: { name: string; amount: number }[] = [];
 
   members.forEach((m) => {
-    const net = Math.round(summaries[m].netBalance);
-    if (net < 0) {
-      debtors.push({ name: m, amount: -net });
-    } else if (net > 0) {
+    const net = roundCur(summaries[m].netBalance);
+    if (net <= -minStep) {
+      debtors.push({ name: m, amount: roundCur(-net) });
+    } else if (net >= minStep) {
       creditors.push({ name: m, amount: net });
     }
   });
 
-  // Sort descending
   debtors.sort((a, b) => b.amount - a.amount);
   creditors.sort((a, b) => b.amount - a.amount);
 
@@ -125,28 +129,28 @@ export const calculateTripSplits = (
   while (dIdx < debtors.length && cIdx < creditors.length) {
     const debtor = debtors[dIdx];
     const creditor = creditors[cIdx];
-    const settleAmt = Math.min(debtor.amount, creditor.amount);
+    const settleAmt = roundCur(Math.min(debtor.amount, creditor.amount));
 
-    if (settleAmt >= 1) {
+    if (settleAmt >= minStep) {
       transfers.push({
         from: debtor.name,
         to: creditor.name,
-        amount: Math.round(settleAmt),
+        amount: settleAmt,
       });
 
-      debtor.amount -= settleAmt;
-      creditor.amount -= settleAmt;
+      debtor.amount = roundCur(debtor.amount - settleAmt);
+      creditor.amount = roundCur(creditor.amount - settleAmt);
     }
 
-    if (debtor.amount < 1) dIdx++;
-    if (creditor.amount < 1) cIdx++;
+    if (debtor.amount < minStep) dIdx++;
+    if (creditor.amount < minStep) cIdx++;
   }
 
   return {
     members,
     targetCurrency: baseCur,
-    totalGroupExpense,
-    totalPersonalExpense,
+    totalGroupExpense: roundCur(totalGroupExpense),
+    totalPersonalExpense: roundCur(totalPersonalExpense),
     summaries,
     transfers,
   };
@@ -161,6 +165,10 @@ export const formatSplitsForSharing = (
   customExchangeRates?: Record<string, number>
 ): string => {
   const cur = targetCurrency || trip.currency || 'TWD';
+  const decimals = CURRENCY_MAP[cur]?.decimals ?? 0;
+  const factor = Math.pow(10, decimals);
+  const roundCur = (val: number) => Math.round(val * factor) / factor;
+  const minStep = 1 / factor;
   const result = calculateTripSplits(trip, cur, customExchangeRates);
 
   let text = `✈️【${trip.title}】旅程朋友分帳結算清單\n`;
@@ -174,15 +182,15 @@ export const formatSplitsForSharing = (
   text += `【代墊與分攤明細】\n`;
   result.members.forEach((m) => {
     const s = result.summaries[m];
-    const diff = s.netBalance;
-    const diffText = diff > 0
-      ? `應收回 ${formatCurrencyAmount(Math.round(diff), cur)}`
-      : diff < 0
-      ? `應補付 ${formatCurrencyAmount(Math.round(-diff), cur)}`
+    const diff = roundCur(s.netBalance);
+    const diffText = diff >= minStep
+      ? `應收回 ${formatCurrencyAmount(diff, cur)}`
+      : diff <= -minStep
+      ? `應補付 ${formatCurrencyAmount(roundCur(-diff), cur)}`
       : `已平衡`;
-    let line = `・${m}：公費代墊 ${formatCurrencyAmount(Math.round(s.groupPaid), cur)} / 應攤 ${formatCurrencyAmount(Math.round(s.totalShare), cur)}`;
+    let line = `・${m}：公費代墊 ${formatCurrencyAmount(roundCur(s.groupPaid), cur)} / 應攤 ${formatCurrencyAmount(roundCur(s.totalShare), cur)}`;
     if (s.personalExpense > 0) {
-      line += ` (個人自費 ${formatCurrencyAmount(Math.round(s.personalExpense), cur)})`;
+      line += ` (個人自費 ${formatCurrencyAmount(roundCur(s.personalExpense), cur)})`;
     }
     line += ` ➜ ${diffText}\n`;
     text += line;

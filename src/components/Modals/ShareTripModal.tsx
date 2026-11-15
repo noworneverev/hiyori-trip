@@ -5,6 +5,7 @@ import { Language } from '../../utils/i18n';
 import { formatDateSlash } from '../../utils/date';
 import { enableTripCollaboration } from '../../utils/firebase';
 import { getPublicShareBaseUrl } from '../../utils/url';
+import { copyTextToClipboard } from '../../utils/clipboard';
 import { User } from 'firebase/auth';
 import {
   X,
@@ -93,14 +94,18 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
     }
   };
 
-  const handleCopyLink = () => {
+  const handleCopyLink = async () => {
     if (!shareUrl) return;
-    navigator.clipboard.writeText(shareUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    const ok = await copyTextToClipboard(shareUrl);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } else {
+      setShareError('無法複製連結，請長按或全選上方連結複製');
+    }
   };
 
-  const handleCopyTextItinerary = () => {
+  const handleCopyTextItinerary = async () => {
     let text = `【${trip.title}】\n目的地：${trip.destination}\n日期：${trip.startDate} ~ ${trip.endDate}\n`;
     trip.days.forEach((day) => {
       text += `\nDay ${day.dayNumber}（${day.theme || '當日行程'}）：\n`;
@@ -108,9 +113,13 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
         text += `• ${item.startTime} ${item.title}${item.locationName ? ` (${item.locationName})` : ''}\n`;
       });
     });
-    navigator.clipboard.writeText(text);
-    setCopiedText(true);
-    setTimeout(() => setCopiedText(false), 2500);
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
+      setCopiedText(true);
+      setTimeout(() => setCopiedText(false), 2500);
+    } else {
+      setShareError('複製失敗，請確認瀏覽器剪貼簿權限');
+    }
   };
 
   const handleNativeShare = async () => {
@@ -146,11 +155,11 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#1C1C1E] shadow-2xl border border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-100 my-auto animate-in fade-in zoom-in-95 duration-150 overflow-hidden flex flex-col max-h-[90vh]"
+        className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-zinc-100 my-auto animate-in fade-in zoom-in-95 duration-150 overflow-hidden flex flex-col max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-2xl bg-teal-100 dark:bg-teal-950 text-teal-700 dark:text-teal-300 flex items-center justify-center">
               <Share2 className="w-4 h-4" />
@@ -162,8 +171,10 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition cursor-pointer"
+            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-[#EFECE5] dark:hover:bg-slate-800 transition cursor-pointer"
+            aria-label="關閉"
           >
             <X className="w-5 h-5" />
           </button>
@@ -311,11 +322,11 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-100 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/40 flex items-center justify-end">
+        <div className="px-5 py-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex items-center justify-end">
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2 rounded-xl bg-slate-200 dark:bg-zinc-700 hover:bg-slate-300 dark:hover:bg-zinc-600 text-slate-700 dark:text-zinc-200 font-semibold text-xs transition cursor-pointer"
+            className="min-h-[44px] sm:min-h-[38px] px-5 py-2 rounded-xl bg-[#EFECE5] dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-zinc-200 font-semibold text-xs transition cursor-pointer"
           >
             關閉
           </button>

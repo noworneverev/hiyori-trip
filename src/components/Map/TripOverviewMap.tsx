@@ -3,8 +3,19 @@ import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import L from 'leaflet';
 import { Trip, ItineraryItem } from '../../types/itinerary';
 import { getGoogleMapsNavigationUrl, getAppleMapsUrl } from '../../utils/geo';
+import { sanitizeExternalUrl } from '../../utils/url';
 import { formatDateSlash, getDayOfWeek } from '../../utils/date';
 import { Language } from '../../utils/i18n';
+
+function escapeHtml(str?: string | number | null): string {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 import {
   MapPin,
   Calendar,
@@ -263,13 +274,19 @@ export const TripOverviewMap: React.FC<TripOverviewMapProps> = ({
           ? DAY_PALETTE[(spot.dayNumber - 1) % DAY_PALETTE.length]
           : CATEGORY_COLORS[spot.item.category] || '#0d9488';
 
+      const safeTitle = escapeHtml(spot.item.title);
+      const safeLocation = escapeHtml(spot.item.locationName);
+      const safeNotes = escapeHtml(spot.item.notes);
+      const safeStart = escapeHtml(spot.item.startTime);
+      const safeEnd = escapeHtml(spot.item.endTime);
+
       const customIcon = L.divIcon({
         className: 'custom-trip-overview-marker',
         html: `
           <div class="relative flex flex-col items-center group cursor-pointer">
             <div class="px-2 py-0.5 mb-1 rounded-md text-[10.5px] font-bold bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-md border border-slate-200 dark:border-slate-700 truncate max-w-[130px] pointer-events-none transition-transform group-hover:scale-105">
               <span class="text-[9px] font-extrabold mr-1 px-1 rounded text-white" style="background-color: ${DAY_PALETTE[(spot.dayNumber - 1) % DAY_PALETTE.length]}">D${spot.dayNumber}</span>
-              ${spot.item.title}
+              ${safeTitle}
             </div>
             <div style="background-color: ${markerColor};" class="w-8 h-8 rounded-full text-white flex items-center justify-center font-black text-xs shadow-lg border-2 border-white dark:border-slate-900 transition-all ${
               isSelected ? 'scale-125 ring-4 ring-teal-400 marker-pulse' : 'hover:scale-110'
@@ -286,8 +303,8 @@ export const TripOverviewMap: React.FC<TripOverviewMapProps> = ({
 
       const marker = L.marker([lat, lng], { icon: customIcon });
 
-      const googleMapsUrl = getGoogleMapsNavigationUrl(spot.item);
-      const appleMapsUrl = getAppleMapsUrl(spot.item);
+      const googleMapsUrl = escapeHtml(sanitizeExternalUrl(getGoogleMapsNavigationUrl(spot.item)) || '#');
+      const appleMapsUrl = escapeHtml(sanitizeExternalUrl(getAppleMapsUrl(spot.item)) || '#');
       const categoryMeta = CATEGORY_LABELS[spot.item.category] || CATEGORY_LABELS.other;
 
       const popupDiv = document.createElement('div');
@@ -299,18 +316,18 @@ export const TripOverviewMap: React.FC<TripOverviewMapProps> = ({
               Day ${spot.dayNumber}
             </span>
             <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
-              ${lang === 'zh' ? categoryMeta.zh : categoryMeta.en}
+              ${escapeHtml(lang === 'zh' ? categoryMeta.zh : categoryMeta.en)}
             </span>
           </div>
-          ${spot.item.startTime ? `<span class="text-[10px] font-mono font-semibold text-slate-500">${spot.item.startTime}${spot.item.endTime ? `~${spot.item.endTime}` : ''}</span>` : ''}
+          ${safeStart ? `<span class="text-[10px] font-mono font-semibold text-slate-500">${safeStart}${safeEnd ? `~${safeEnd}` : ''}</span>` : ''}
         </div>
 
-        <h4 class="font-bold text-sm text-slate-900 dark:text-white leading-tight mb-1 truncate">${spot.item.title}</h4>
-        ${spot.item.locationName ? `<p class="text-[11px] text-slate-500 dark:text-slate-400 truncate mb-1.5">📍 ${spot.item.locationName}</p>` : ''}
-        ${spot.item.notes ? `<p class="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2 mb-2 leading-relaxed bg-slate-50 dark:bg-slate-800/60 p-1.5 rounded">${spot.item.notes}</p>` : ''}
+        <h4 class="font-bold text-sm text-slate-900 dark:text-white leading-tight mb-1 truncate">${safeTitle}</h4>
+        ${safeLocation ? `<p class="text-[11px] text-slate-500 dark:text-slate-400 truncate mb-1.5">📍 ${safeLocation}</p>` : ''}
+        ${safeNotes ? `<p class="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2 mb-2 leading-relaxed bg-slate-50 dark:bg-slate-800/60 p-1.5 rounded">${safeNotes}</p>` : ''}
 
         <div class="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-700">
-          <button id="view-spot-btn-${spot.id}" type="button" class="col-span-2 w-full py-1.5 px-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-center font-bold text-[11px] shadow-2xs transition flex items-center justify-center gap-1">
+          <button data-view-spot-btn="true" type="button" class="col-span-2 w-full py-1.5 px-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-center font-bold text-[11px] shadow-2xs transition flex items-center justify-center gap-1">
             <span>查看完整景點詳情</span>
             <span>➔</span>
           </button>
@@ -323,22 +340,19 @@ export const TripOverviewMap: React.FC<TripOverviewMapProps> = ({
         </div>
       `;
 
+      const viewBtn = popupDiv.querySelector('[data-view-spot-btn="true"]') as HTMLButtonElement | null;
+      if (viewBtn) {
+        viewBtn.onclick = (e) => {
+          e.stopPropagation();
+          setSelectedSpot(spot);
+        };
+      }
+
       marker.bindPopup(popupDiv);
 
       // On Marker Click: Select Spot & Open Details
       marker.on('click', () => {
         setSelectedSpot(spot);
-      });
-
-      // Hook click on "查看完整景點詳情" inside popup
-      marker.on('popupopen', () => {
-        const btn = document.getElementById(`view-spot-btn-${spot.id}`);
-        if (btn) {
-          btn.onclick = (e) => {
-            e.stopPropagation();
-            setSelectedSpot(spot);
-          };
-        }
       });
 
       markersGroup.addLayer(marker);
@@ -356,7 +370,13 @@ export const TripOverviewMap: React.FC<TripOverviewMapProps> = ({
   const handleSpotCardClick = (spot: OverviewSpot) => {
     setSelectedSpot(spot);
     const map = mapInstanceRef.current;
-    if (map && spot.item.lat && spot.item.lng) {
+    if (
+      map &&
+      typeof spot.item.lat === 'number' &&
+      typeof spot.item.lng === 'number' &&
+      !isNaN(spot.item.lat) &&
+      !isNaN(spot.item.lng)
+    ) {
       map.setView([spot.item.lat, spot.item.lng], Math.max(map.getZoom(), 14), {
         animate: true,
       });

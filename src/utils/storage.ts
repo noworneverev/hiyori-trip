@@ -151,8 +151,11 @@ export async function hydrateStorageFromIndexedDB(): Promise<Trip[]> {
 export function saveTrips(trips: Trip[]): void {
   const uniqueMap = new Map<string, Trip>();
   (trips || []).forEach((t) => {
-    if (t && t.id && !uniqueMap.has(t.id)) {
-      uniqueMap.set(t.id, t);
+    if (t && t.id) {
+      const existing = uniqueMap.get(t.id);
+      if (!existing || (t.updatedAt || 0) >= (existing.updatedAt || 0)) {
+        uniqueMap.set(t.id, t);
+      }
     }
   });
   const deduped = Array.from(uniqueMap.values());

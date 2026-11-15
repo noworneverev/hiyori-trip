@@ -139,6 +139,16 @@ export interface BookingVoucher {
   updatedAt?: number;
 }
 
+export interface StickyNoteItem {
+  id: string;
+  category: string;
+  label: string;
+  content: string;
+  createdAt: number;
+  updatedAt?: number;
+  completed?: boolean;
+}
+
 export interface Trip {
   id: string;
   title: string;
@@ -154,6 +164,7 @@ export interface Trip {
   todos?: TodoItem[];
   expenses: ExpenseItem[];
   bookings?: BookingVoucher[];
+  stickyNotes?: StickyNoteItem[];
   customExpenseCategories?: string[];
   customCategoryLabels?: Record<string, string>;
   customExchangeRates?: Record<string, number>;

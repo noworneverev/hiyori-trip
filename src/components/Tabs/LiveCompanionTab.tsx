@@ -10,7 +10,8 @@ import {
   geocodeCity,
   getWeatherDescription,
 } from '../../utils/weather';
-import { detectTripCurrency, convertAmount } from '../../utils/currency';
+import { detectTripCurrency, convertAmount, formatCurrencyAmount } from '../../utils/currency';
+import { copyTextToClipboard } from '../../utils/clipboard';
 import {
   Navigation,
   Clock,
@@ -54,6 +55,7 @@ interface LiveCompanionTabProps {
   onUpdateTrip: (updatedTrip: Trip) => void;
   onNavigateToTimelineDay?: (dayNumber: number) => void;
   onOpenQuickAction?: (tab: 'expense' | 'todos') => void;
+  requireAuth?: (action: () => void, reason?: string) => boolean;
 }
 
 const CATEGORY_TAGS: Record<CategoryType, { label: string; Icon: React.ComponentType<{ className?: string }> }> = {
@@ -72,6 +74,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   canEdit = true,
   onUpdateTrip,
   onOpenQuickAction,
+  requireAuth,
 }) => {
   const t = TRANSLATIONS[lang];
 
@@ -117,12 +120,10 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   const [copiedBookingKey, setCopiedBookingKey] = useState<string | null>(null);
 
   const handleCopyBookingCode = async (code: string, keyId: string) => {
-    try {
-      await navigator.clipboard.writeText(code);
+    const ok = await copyTextToClipboard(code);
+    if (ok) {
       setCopiedBookingKey(keyId);
       setTimeout(() => setCopiedBookingKey((prev) => (prev === keyId ? null : prev)), 1800);
-    } catch {
-      // Clipboard unsupported
     }
   };
 
@@ -235,6 +236,9 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
       e.stopPropagation();
     }
     if (!canEdit) return;
+    if (requireAuth && !requireAuth(() => handleToggleComplete(itemId), lang === 'zh' ? '打卡完成景點' : 'Check off spot')) {
+      return;
+    }
     const updatedDays = trip.days.map((day) => ({
       ...day,
       items: day.items.map((it) => (it.id === itemId ? { ...it, completed: !it.completed } : it)),
@@ -297,10 +301,12 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
               </div>
               <div>
                 <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tabular-nums">
-                  今日支出 ({todayExpenses.length})
+                  {todayDateStr.slice(0, 10).replace(/\//g, '-') === getTodayLocal()
+                    ? `今日支出 (${todayExpenses.length})`
+                    : `Day ${activeDay.dayNumber} · ${formatMonthDaySlash(todayDateStr)} 支出 (${todayExpenses.length})`}
                 </div>
                 <div className="text-base sm:text-lg font-black font-mono tabular-nums text-slate-900 dark:text-white">
-                  {tripCurrency} {todayTotalSpent.toLocaleString()}
+                  {formatCurrencyAmount(todayTotalSpent, tripCurrency)}
                 </div>
               </div>
             </div>
@@ -557,7 +563,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
               {typeof nextItem.cost === 'number' && nextItem.cost > 0 && (
                 <span className="inline-flex items-center gap-1 text-slate-200 font-semibold">
                   <DollarSign className="w-3.5 h-3.5 text-teal-400" />
-                  <span>預估 {trip.currency} {nextItem.cost.toLocaleString()}</span>
+                  <span>預估 {formatCurrencyAmount(nextItem.cost, trip.currency || tripCurrency)}</span>
                 </span>
               )}
             </div>
@@ -756,8 +762,10 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                       </div>
 
                       <h5
-                        onClick={(e) => handleToggleComplete(item.id, e)}
-                        className={`text-sm sm:text-base font-bold cursor-pointer hover:text-teal-700 dark:hover:text-teal-300 transition ${
+                        onClick={(e) => canEdit && handleToggleComplete(item.id, e)}
+                        className={`text-sm sm:text-base font-bold transition ${
+                          canEdit ? 'cursor-pointer hover:text-teal-700 dark:hover:text-teal-300' : 'cursor-default'
+                        } ${
                           item.completed
                             ? 'line-through text-slate-400 dark:text-slate-500'
                             : 'text-slate-900 dark:text-white'
@@ -829,7 +837,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                     {typeof item.cost === 'number' && item.cost > 0 && (
                       <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
                         <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                        <span>{lang === 'zh' ? '預估費用' : 'Cost'} · <strong className="text-slate-800 dark:text-slate-200 font-mono tabular-nums">{trip.currency} {item.cost.toLocaleString()}</strong></span>
+                        <span>{lang === 'zh' ? '預估費用' : 'Cost'} · <strong className="text-slate-800 dark:text-slate-200 font-mono tabular-nums">{formatCurrencyAmount(item.cost, trip.currency || tripCurrency)}</strong></span>
                       </div>
                     )}
 

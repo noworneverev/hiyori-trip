@@ -181,6 +181,34 @@ export async function exportElementToPDF(
       onclone: (clonedDoc) => {
         clonedDoc.documentElement.classList.remove('dark');
         clonedDoc.body.classList.remove('dark');
+        try {
+          const probeCanvas = document.createElement('canvas');
+          probeCanvas.width = 1;
+          probeCanvas.height = 1;
+          const probeCtx = probeCanvas.getContext('2d');
+          const convertColorFn = (raw: string) => {
+            if (!probeCtx) return '#0f172a';
+            probeCtx.fillStyle = '#0f172a';
+            probeCtx.fillStyle = raw;
+            return probeCtx.fillStyle || '#0f172a';
+          };
+          clonedDoc.querySelectorAll('style').forEach((styleTag) => {
+            if (styleTag.textContent && /(oklch|oklab|color-mix)\(/i.test(styleTag.textContent)) {
+              styleTag.textContent = styleTag.textContent.replace(
+                /(?:oklch|oklab|color-mix)\([^()]*(?:\([^()]*\)[^()]*)*\)/gi,
+                (match) => {
+                  try {
+                    return convertColorFn(match);
+                  } catch {
+                    return '#0f172a';
+                  }
+                }
+              );
+            }
+          });
+        } catch {
+          // Safe fallback handled by catch block
+        }
       },
     });
 

@@ -1139,7 +1139,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                   </div>
 
                   {/* 7-column Grid */}
-                  <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 overflow-hidden">
+                  <div className="bg-white dark:bg-[#111827] rounded-2xl border border-[#E5E2DC] dark:border-slate-800 overflow-hidden">
                     <div className="grid grid-cols-7 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/40 text-center py-2.5 text-[11px] font-bold text-slate-500 dark:text-slate-400">
                       <span className="text-rose-500">週日</span>
                       <span>週一</span>
@@ -1209,8 +1209,8 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
 
                   {/* Selected Date Details */}
                   {selectedCalendarDate && (
-                    <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-5 border border-teal-500/40 space-y-4">
-                      <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+                    <div className="bg-white dark:bg-[#111827] rounded-2xl p-4 sm:p-5 border border-teal-500/40 space-y-4">
+                      <div className="flex items-center justify-between border-b border-[#E5E2DC]/80 dark:border-slate-800 pb-3">
                         <div>
                           <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white font-mono tabular-nums">
                             {formatDateSlash(selectedCalendarDate)} ({getDayOfWeek(selectedCalendarDate, lang)})
@@ -1222,7 +1222,8 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                         <button
                           type="button"
                           onClick={() => setSelectedCalendarDate(null)}
-                          className="min-w-[36px] min-h-[36px] rounded-xl text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer"
+                          className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] rounded-xl text-slate-400 hover:text-slate-600 flex items-center justify-center cursor-pointer"
+                          aria-label="關閉當日明細"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -1360,7 +1361,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                     timelineGrouped.map(({ trip, days }) => (
                       <article
                         key={trip.id}
-                        className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 overflow-hidden"
+                        className="bg-white dark:bg-[#111827] rounded-2xl border border-[#E5E2DC] dark:border-slate-800 overflow-hidden"
                       >
                         <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                           <div>
@@ -1552,19 +1553,20 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
           onClick={() => setShowMobileFilters(false)}
         >
           <div
-            className="w-full max-h-[82vh] rounded-t-3xl bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
+            className="w-full max-h-[82vh] rounded-t-3xl bg-white dark:bg-[#111827] border-t border-[#E5E2DC] dark:border-slate-800 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="pt-3 pb-1 flex flex-col items-center shrink-0">
               <div className="w-10 h-1.5 rounded-full bg-slate-300 dark:bg-slate-700 mb-2" />
-              <div className="w-full px-5 pb-2 flex items-center justify-between border-b border-slate-100 dark:border-slate-800">
+              <div className="w-full px-5 pb-2 flex items-center justify-between border-b border-[#E5E2DC]/80 dark:border-slate-800">
                 <h3 className="font-bold text-sm text-slate-900 dark:text-white">
                   篩選與搜尋條件
                 </h3>
                 <button
                   type="button"
                   onClick={() => setShowMobileFilters(false)}
-                  className="min-w-[40px] min-h-[40px] rounded-xl text-slate-400 flex items-center justify-center"
+                  className="min-w-[44px] min-h-[44px] sm:min-w-[40px] sm:min-h-[40px] rounded-xl text-slate-400 flex items-center justify-center cursor-pointer"
+                  aria-label="關閉篩選條件"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1573,7 +1575,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
 
             <div className="flex-1 overflow-y-auto p-5">{renderFilterControls()}</div>
 
-            <div className="p-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+            <div className="p-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] border-t border-[#E5E2DC]/80 dark:border-slate-800 bg-white dark:bg-[#111827] shrink-0">
               <button
                 type="button"
                 onClick={() => setShowMobileFilters(false)}

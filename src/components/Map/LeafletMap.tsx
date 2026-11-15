@@ -2,7 +2,18 @@ import React, { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import { ItineraryItem } from '../../types/itinerary';
 import { getGoogleMapsNavigationUrl, getAppleMapsUrl } from '../../utils/geo';
+import { sanitizeExternalUrl } from '../../utils/url';
 import { Navigation, ExternalLink, MapPin } from 'lucide-react';
+
+function escapeHtml(str?: string | number | null): string {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 interface LeafletMapProps {
   items: ItineraryItem[];
@@ -161,13 +172,20 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       const isSelected = item.id === selectedItemId;
       const color = CATEGORY_COLORS[item.category] || '#0d9488';
 
+      const safeTitle = escapeHtml(item.title);
+      const safeLocation = escapeHtml(item.locationName);
+      const safeTransport = escapeHtml(item.transportNote);
+      const safeNotes = escapeHtml(item.notes);
+      const safeStart = escapeHtml(item.startTime);
+      const safeEnd = escapeHtml(item.endTime);
+
       // Create Custom HTML Pin
       const customIcon = L.divIcon({
         className: 'custom-itinerary-marker',
         html: `
           <div class="relative flex flex-col items-center group cursor-pointer">
             <div class="px-2 py-0.5 mb-0.5 rounded-md text-[11px] font-bold bg-white/95 text-slate-800 shadow-md border border-slate-200 truncate max-w-[120px] pointer-events-none">
-              ${index + 1}. ${item.title}
+              ${index + 1}. ${safeTitle}
             </div>
             <div style="background-color: ${color};" class="w-8 h-8 rounded-full text-white flex items-center justify-center font-black text-xs shadow-lg border-2 border-white transition-transform transform ${
               isSelected ? 'scale-125 ring-4 ring-teal-400 marker-pulse' : 'hover:scale-110'
@@ -184,8 +202,8 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
 
       const marker = L.marker([lat, lng], { icon: customIcon });
 
-      const googleMapsUrl = getGoogleMapsNavigationUrl(item);
-      const appleMapsUrl = getAppleMapsUrl(item);
+      const googleMapsUrl = escapeHtml(sanitizeExternalUrl(getGoogleMapsNavigationUrl(item)) || '#');
+      const appleMapsUrl = escapeHtml(sanitizeExternalUrl(getAppleMapsUrl(item)) || '#');
 
       const popupContent = document.createElement('div');
       popupContent.className = 'p-3 text-slate-800 text-xs w-[265px]';
@@ -194,13 +212,13 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
           <span class="w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] shrink-0" style="background-color: ${color};">
             ${index + 1}
           </span>
-          <span class="truncate">${item.title}</span>
+          <span class="truncate">${safeTitle}</span>
         </div>
         <div class="text-[11px] text-slate-600 space-y-1 mb-2.5">
-          ${item.startTime ? `<div>預定時間：<b class="text-slate-800">${item.startTime}${item.endTime ? ` ~ ${item.endTime}` : ''}</b></div>` : ''}
-          ${item.locationName ? `<div class="truncate text-slate-700">${item.locationName}</div>` : ''}
-          ${item.transportNote ? `<div class="text-teal-700 bg-teal-50 p-1.5 rounded"><span class="font-bold">[交通]</span> ${item.transportNote}</div>` : ''}
-          ${item.notes ? `<div class="text-slate-500 line-clamp-2">${item.notes}</div>` : ''}
+          ${safeStart ? `<div>預定時間：<b class="text-slate-800">${safeStart}${safeEnd ? ` ~ ${safeEnd}` : ''}</b></div>` : ''}
+          ${safeLocation ? `<div class="truncate text-slate-700">${safeLocation}</div>` : ''}
+          ${safeTransport ? `<div class="text-teal-700 bg-teal-50 p-1.5 rounded"><span class="font-bold">[交通]</span> ${safeTransport}</div>` : ''}
+          ${safeNotes ? `<div class="text-slate-500 line-clamp-2">${safeNotes}</div>` : ''}
         </div>
         <div class="grid grid-cols-2 gap-1.5 pt-2 border-t border-slate-100">
           <a href="${googleMapsUrl}" target="_blank" rel="noopener noreferrer" style="background-color: #2563eb !important; color: #ffffff !important; text-decoration: none !important; white-space: nowrap !important;" class="flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg font-bold text-[11px] shadow-2xs hover:opacity-90 transition">
