@@ -39,6 +39,7 @@ import { AuthButton } from './components/Auth/AuthButton';
 import { AppMenu } from './components/Navigation/AppMenu';
 import {
   auth,
+  resolveAuthRedirect,
   subscribeUserTrips,
   saveTripToCloud,
   deleteTripFromCloud,
@@ -386,6 +387,7 @@ export default function App() {
     return () => unsubscribe();
   }, [activeCollabId, activeId]);
 
+  const [authReady, setAuthReady] = useState<boolean>(() => Boolean(auth.currentUser));
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [authModalReason, setAuthModalReason] = useState<string>('');
   const pendingActionRef = useRef<(() => void) | null>(null);
@@ -426,9 +428,28 @@ export default function App() {
     let unsubscribeFirestore: (() => void) | null = null;
     let isEffectMounted = true;
 
+    // Resolve any pending mobile/PWA redirect sign-in result on app startup
+    resolveAuthRedirect()
+      .then((res) => {
+        if (!isEffectMounted) return;
+        if (res.errorMessage) {
+          showToast(res.errorMessage);
+        }
+      })
+      .catch(() => {});
+
+    const handleGlobalAuthError = (evt: Event) => {
+      const detail = (evt as CustomEvent<{ message?: string }>).detail;
+      if (detail?.message) {
+        showToast(detail.message);
+      }
+    };
+    window.addEventListener('hiyori_auth_error', handleGlobalAuthError);
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
       currentUserRef.current = user;
+      setAuthReady(true);
 
       // Clean up previous Firestore listener if user switched or logged out
       if (unsubscribeFirestore) {
@@ -605,6 +626,7 @@ export default function App() {
 
     return () => {
       isEffectMounted = false;
+      window.removeEventListener('hiyori_auth_error', handleGlobalAuthError);
       if (unsubscribeFirestore) {
         unsubscribeFirestore();
         unsubscribeFirestore = null;
@@ -1571,7 +1593,7 @@ export default function App() {
         )}
 
         {/* Unauthenticated Read-Only Preview Notice Banner (Theme-paired hairline surface) */}
-        {!currentUser && (
+        {authReady && !currentUser && (
           <div className="bg-white dark:bg-[#111827] text-slate-800 dark:text-slate-100 px-3.5 py-2 rounded-2xl border border-[#E5E2DC] dark:border-slate-800 text-xs flex items-center justify-between gap-2 animate-in fade-in duration-150">
             <div className="flex items-center gap-2 min-w-0">
               <Eye className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />

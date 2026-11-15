@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { getStorageUsage, getStorageUsageAsync, exportAllTripsToJSON } from '../../utils/storage';
-import { auth, loginWithGoogle, logoutFirebase, saveTripToCloud } from '../../utils/firebase';
+import { auth, loginWithGoogleDetailed, logoutFirebase, saveTripToCloud } from '../../utils/firebase';
 import { Trip } from '../../types/itinerary';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -42,7 +42,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   useBodyScrollLock(true);
   const t = TRANSLATIONS[lang];
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(() => auth.currentUser);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncDone, setSyncDone] = useState(false);
   const [scale, setScale] = useState<AccessibilityScale>(getSavedAccessibilityScale);
@@ -211,7 +212,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   {t.loginPrompt}
                 </p>
                 <button
-                  onClick={() => loginWithGoogle()}
+                  onClick={async () => {
+                    setAuthError(null);
+                    const res = await loginWithGoogleDetailed();
+                    if (!res.user && !res.redirected && !res.cancelled && res.errorMessage) {
+                      setAuthError(res.errorMessage);
+                    }
+                  }}
                   className="w-full min-h-[44px] py-2 px-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-2xs transition active:scale-98 cursor-pointer"
                 >
                   <svg className="w-4 h-4" viewBox="0 0 24 24">
@@ -234,6 +241,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </svg>
                   <span>{t.googleLogin}</span>
                 </button>
+                {authError && (
+                  <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400 leading-relaxed">
+                    {authError}
+                  </p>
+                )}
               </div>
             )}
 

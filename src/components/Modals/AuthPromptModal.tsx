@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { loginWithGoogle } from '../../utils/firebase';
+import { isEmbeddedInAppBrowser, loginWithGoogleDetailed } from '../../utils/firebase';
 import { Language } from '../../utils/i18n';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { X, Cloud, Check } from 'lucide-react';
@@ -20,12 +20,17 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
   lang = 'zh',
 }) => {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const inAppBrowser = isEmbeddedInAppBrowser();
 
   useBodyScrollLock(isOpen);
 
   useEffect(() => {
     if (!isOpen) return;
+    setErrorMessage(null);
+    setStatusMessage(null);
+    setIsLoggingIn(false);
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isLoggingIn) onClose();
     };
@@ -40,16 +45,24 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
   const handleGoogleSignIn = async () => {
     setIsLoggingIn(true);
     setErrorMessage(null);
+    setStatusMessage(null);
     try {
-      const user = await loginWithGoogle();
-      if (user) {
+      const res = await loginWithGoogleDetailed();
+      if (res.user) {
         onClose();
         if (onLoginSuccess) {
           onLoginSuccess();
         }
-      } else {
-        setIsLoggingIn(false);
+        return;
       }
+      if (res.redirected) {
+        setStatusMessage(isZh ? '正在前往 Google 登入頁面…' : 'Redirecting to Google Sign-In...');
+        return;
+      }
+      if (!res.cancelled && res.errorMessage) {
+        setErrorMessage(res.errorMessage);
+      }
+      setIsLoggingIn(false);
     } catch (err) {
       console.error('Google Sign In failed:', err);
       setErrorMessage(
@@ -69,19 +82,19 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
       aria-modal="true"
       aria-labelledby="auth-modal-title"
     >
-      <div className="relative w-full max-w-sm bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-200/80 dark:border-slate-800 p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] sm:pb-6 overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200 text-slate-900 dark:text-slate-100">
+      <div className="relative w-full max-w-sm bg-white dark:bg-[#111827] rounded-t-3xl sm:rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] sm:pb-6 overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200 text-slate-900 dark:text-slate-100">
         {/* Close Button */}
         <button
           onClick={onClose}
           disabled={isLoggingIn}
-          className="absolute top-4 right-4 min-w-[40px] min-h-[40px] rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition"
+          className="absolute top-4 right-4 min-w-[44px] min-h-[44px] rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center transition cursor-pointer"
           aria-label="關閉"
         >
           <X className="w-5 h-5" />
         </button>
 
         {/* Header */}
-        <div className="flex items-center gap-3 mb-4 pr-8">
+        <div className="flex items-center gap-3 mb-4 pr-10">
           <div className="w-11 h-11 rounded-2xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 flex items-center justify-center text-teal-600 dark:text-teal-400 shrink-0">
             <Cloud className="w-5 h-5" />
           </div>
@@ -95,21 +108,21 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
                   ? `操作「${reason}」前請先登入`
                   : `Sign in required to ${reason}`
                 : isZh
-                ? '登入後自動上傳本機行程並跨裝置同步'
-                : 'Auto-sync local trips across devices'}
+                ? '登入後可跨裝置長期保持登入並同步行程'
+                : 'Stay signed in and auto-sync trips across devices'}
             </p>
           </div>
         </div>
 
         {/* Minimal 1-row benefit strip */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-5 px-3 py-2 rounded-2xl bg-slate-50 dark:bg-slate-800/60 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mb-4 px-3 py-2 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800/60 border border-[#E5E2DC]/60 dark:border-slate-800 text-[11px] font-medium text-slate-600 dark:text-slate-300">
           <span className="flex items-center gap-1">
             <Check className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
             {isZh ? '即時雲端同步' : 'Cloud sync'}
           </span>
           <span className="flex items-center gap-1">
             <Check className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-            {isZh ? '相片安全保存' : 'Photo backup'}
+            {isZh ? '長效保持登入' : 'Stay signed in'}
           </span>
           <span className="flex items-center gap-1">
             <Check className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
@@ -117,9 +130,22 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
           </span>
         </div>
 
-        {/* Error message */}
+        {inAppBrowser && (
+          <div className="mb-3 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+            {isZh
+              ? '偵測到目前為 App 內建瀏覽器，Google 登入可能會受限或無法保留登入狀態，建議改用 Safari / Chrome 開啟。'
+              : 'In-app browser detected. Open in Safari or Chrome for reliable persistent login.'}
+          </div>
+        )}
+
+        {/* Status or Error message */}
+        {statusMessage && (
+          <p className="text-xs text-teal-700 dark:text-teal-300 font-semibold mb-3 text-center leading-relaxed">
+            {statusMessage}
+          </p>
+        )}
         {errorMessage && (
-          <p className="text-xs text-rose-500 font-semibold mb-3 text-center">
+          <p className="text-xs text-rose-600 dark:text-rose-400 font-medium mb-3 text-center leading-relaxed bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-xl px-3 py-2">
             {errorMessage}
           </p>
         )}

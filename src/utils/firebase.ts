@@ -1,10 +1,17 @@
 import { initializeApp } from 'firebase/app';
 import {
+  initializeAuth,
   getAuth,
+  indexedDBLocalPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  browserPopupRedirectResolver,
+  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   reauthenticateWithPopup,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   User,
 } from 'firebase/auth';
@@ -71,11 +78,26 @@ function createFirestoreInstance(): Firestore {
 }
 
 export const db: Firestore = createFirestoreInstance();
-export const auth = getAuth(app);
+
+function createAuthInstance() {
+  try {
+    return initializeAuth(app, {
+      persistence: [
+        indexedDBLocalPersistence,
+        browserLocalPersistence,
+        browserSessionPersistence,
+      ],
+      popupRedirectResolver: browserPopupRedirectResolver,
+    });
+  } catch {
+    return getAuth(app);
+  }
+}
+
+export const auth = createAuthInstance();
 export const googleProvider = new GoogleAuthProvider();
-googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
 googleProvider.setCustomParameters({
-  include_granted_scopes: 'true',
+  prompt: 'select_account',
 });
 
 // Strict in-memory-only Google Drive OAuth access token (never persisted to localStorage/sessionStorage)
@@ -177,20 +199,233 @@ export function handleFirestoreError(
   throw new Error(JSON.stringify(errInfo));
 }
 
-// 4. Auth Helpers
-export async function loginWithGoogle(): Promise<User | null> {
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (credential?.accessToken) {
-      cachedDriveAccessToken = credential.accessToken;
-      notifyDriveAuthChanged();
-    }
-    return result.user;
-  } catch (error) {
-    console.error('Google Sign-in Error:', error);
-    return null;
+// 4. Auth Helpers & Diagnostics
+const REDIRECT_PENDING_KEY = 'hiyori_auth_redirect_pending';
+
+export interface GoogleLoginResult {
+  user: User | null;
+  redirected: boolean;
+  cancelled: boolean;
+  errorCode?: string;
+  errorMessage?: string;
+}
+
+export function isEmbeddedInAppBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /Line\/|FBAN|FBAV|Instagram|MicroMessenger|; wv\)/i.test(ua);
+}
+
+function isStandalonePwa(): boolean {
+  if (typeof window === 'undefined') return false;
+  const nav = window.navigator as Navigator & { standalone?: boolean };
+  return (
+    window.matchMedia?.('(display-mode: standalone)').matches === true ||
+    nav.standalone === true
+  );
+}
+
+export function formatFirebaseAuthError(error: unknown): {
+  code: string;
+  message: string;
+  isCancellation: boolean;
+} {
+  const errObj = error as { code?: string; message?: string } | null;
+  const code = errObj?.code || '';
+  const rawMessage = errObj?.message || (error instanceof Error ? error.message : String(error || ''));
+  const host = typeof window !== 'undefined' ? window.location.hostname : '';
+
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return {
+      code,
+      message: '已取消 Google 登入',
+      isCancellation: true,
+    };
   }
+
+  if (code === 'auth/unauthorized-domain') {
+    return {
+      code,
+      message: `目前網址（${host}）尚未加入 Firebase Authentication「已授權網域」，請至 Firebase Console 新增後即可長期保持登入。`,
+      isCancellation: false,
+    };
+  }
+
+  if (code === 'auth/popup-blocked') {
+    return {
+      code,
+      message: '瀏覽器封鎖了登入彈窗，正在嘗試同頁跳轉登入…',
+      isCancellation: false,
+    };
+  }
+
+  if (code === 'auth/operation-not-supported-in-this-environment') {
+    return {
+      code,
+      message: '目前瀏覽環境不支援彈窗登入，請改用 Safari 或 Chrome 系統瀏覽器開啟。',
+      isCancellation: false,
+    };
+  }
+
+  if (code === 'auth/network-request-failed') {
+    return {
+      code,
+      message: '網路連線不穩，請確認連線後再試一次。',
+      isCancellation: false,
+    };
+  }
+
+  if (
+    code === 'auth/invalid-action-code' ||
+    /requested action is invalid/i.test(rawMessage)
+  ) {
+    return {
+      code: code || 'auth/invalid-action',
+      message: `驗證狀態無效（常見於網域「${host}」未授權或 App 內建瀏覽器限制）。建議改用 Safari / Chrome 開啟或檢查 Firebase 已授權網域。`,
+      isCancellation: false,
+    };
+  }
+
+  return {
+    code: code || 'auth/unknown',
+    message: `Google 登入未完成（${code || rawMessage || '請稍後再試'}）。若在手機 App 內開啟，建議改用 Safari / Chrome。`,
+    isCancellation: false,
+  };
+}
+
+function dispatchAuthError(message: string, code?: string) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('hiyori_auth_error', {
+        detail: { message, code },
+      })
+    );
+  }
+}
+
+let redirectCheckPromise: Promise<{ user: User | null; errorMessage?: string }> | null = null;
+
+export function resolveAuthRedirect(): Promise<{ user: User | null; errorMessage?: string }> {
+  if (redirectCheckPromise) return redirectCheckPromise;
+
+  redirectCheckPromise = (async () => {
+    let hadPendingRedirect = false;
+    try {
+      const raw = sessionStorage.getItem(REDIRECT_PENDING_KEY);
+      if (raw) {
+        const ts = Number(raw);
+        hadPendingRedirect = Number.isFinite(ts) && Date.now() - ts < 180000;
+        sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    try {
+      const result = await getRedirectResult(auth, browserPopupRedirectResolver);
+      if (result?.user) {
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        if (credential?.accessToken) {
+          cachedDriveAccessToken = credential.accessToken;
+          notifyDriveAuthChanged();
+        }
+        return { user: result.user };
+      }
+      if (hadPendingRedirect && !auth.currentUser) {
+        return {
+          user: null,
+          errorMessage: isEmbeddedInAppBrowser()
+            ? 'App 內建瀏覽器無法保留跨網域登入狀態，請點選右上角「以 Safari / Chrome 開啟」。'
+            : '瀏覽器封鎖了跨網域跳轉登入狀態，請允許彈窗後再點一次登入（或確認網域已加入 Firebase 白名單）。',
+        };
+      }
+      return { user: null };
+    } catch (error) {
+      const formatted = formatFirebaseAuthError(error);
+      if (!formatted.isCancellation) {
+        console.error('Google Redirect Sign-in Error:', error);
+        return { user: null, errorMessage: formatted.message };
+      }
+      return { user: null };
+    }
+  })();
+
+  return redirectCheckPromise;
+}
+
+export async function loginWithGoogleDetailed(): Promise<GoogleLoginResult> {
+  try {
+    sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+  } catch {}
+
+  try {
+    const result = await signInWithPopup(auth, googleProvider, browserPopupRedirectResolver);
+    return {
+      user: result.user,
+      redirected: false,
+      cancelled: false,
+    };
+  } catch (error) {
+    const formatted = formatFirebaseAuthError(error);
+    console.error('Google Sign-in Error:', error);
+
+    if (formatted.isCancellation) {
+      return {
+        user: null,
+        redirected: false,
+        cancelled: true,
+        errorCode: formatted.code,
+        errorMessage: formatted.message,
+      };
+    }
+
+    const shouldTryRedirect =
+      formatted.code === 'auth/popup-blocked' ||
+      formatted.code === 'auth/operation-not-supported-in-this-environment' ||
+      (isStandalonePwa() && formatted.code !== 'auth/unauthorized-domain' && formatted.code !== 'auth/network-request-failed');
+
+    if (shouldTryRedirect) {
+      try {
+        try {
+          sessionStorage.setItem(REDIRECT_PENDING_KEY, String(Date.now()));
+        } catch {}
+        await signInWithRedirect(auth, googleProvider, browserPopupRedirectResolver);
+        return {
+          user: null,
+          redirected: true,
+          cancelled: false,
+        };
+      } catch (redirectError) {
+        try {
+          sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+        } catch {}
+        const redirectFormatted = formatFirebaseAuthError(redirectError);
+        return {
+          user: null,
+          redirected: false,
+          cancelled: redirectFormatted.isCancellation,
+          errorCode: redirectFormatted.code,
+          errorMessage: redirectFormatted.message,
+        };
+      }
+    }
+
+    return {
+      user: null,
+      redirected: false,
+      cancelled: false,
+      errorCode: formatted.code,
+      errorMessage: formatted.message,
+    };
+  }
+}
+
+export async function loginWithGoogle(): Promise<User | null> {
+  const res = await loginWithGoogleDetailed();
+  if (!res.user && !res.redirected && !res.cancelled && res.errorMessage) {
+    dispatchAuthError(res.errorMessage, res.errorCode);
+  }
+  return res.user;
 }
 
 export async function connectGoogleDrive(): Promise<string | null> {
@@ -199,13 +434,14 @@ export async function connectGoogleDrive(): Promise<string | null> {
     driveProvider.addScope('https://www.googleapis.com/auth/drive.file');
     driveProvider.setCustomParameters({
       include_granted_scopes: 'true',
+      prompt: 'consent',
     });
 
     const result = auth.currentUser
-      ? await reauthenticateWithPopup(auth.currentUser, driveProvider).catch(async () => {
-          return await signInWithPopup(auth, driveProvider);
+      ? await reauthenticateWithPopup(auth.currentUser, driveProvider, browserPopupRedirectResolver).catch(async () => {
+          return await signInWithPopup(auth, driveProvider, browserPopupRedirectResolver);
         })
-      : await signInWithPopup(auth, driveProvider);
+      : await signInWithPopup(auth, driveProvider, browserPopupRedirectResolver);
 
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (credential?.accessToken) {

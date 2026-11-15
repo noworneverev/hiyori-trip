@@ -8,6 +8,7 @@ import { idbDeleteMedia } from '../../utils/indexedDb';
 import { getStoredTrips } from '../../utils/storage';
 import { copyTextToClipboard } from '../../utils/clipboard';
 import { MediaImage } from '../UI/MediaImage';
+import { SwipeableExpenseRow } from '../UI/SwipeableExpenseRow';
 import {
   SUPPORTED_CURRENCIES,
   CURRENCY_MAP,
@@ -218,8 +219,30 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     expenseId?: string;
   } | null>(null);
 
+  const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
+  const [pendingDeleteExpense, setPendingDeleteExpense] = useState<ExpenseItem | null>(null);
+  const [hasSeenSwipeHint, setHasSeenSwipeHint] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('hiyori_expense_swipe_hint_seen') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  const dismissSwipeHint = () => {
+    if (hasSeenSwipeHint) return;
+    setHasSeenSwipeHint(true);
+    try {
+      localStorage.setItem('hiyori_expense_swipe_hint_seen', '1');
+    } catch {}
+  };
+
+  useEffect(() => {
+    setOpenSwipeId(null);
+  }, [trip.id, selectedCategoryFilter, selectedDateFilter, expenseSearchQuery, effectiveSubTab, showAddModal, pendingDeleteExpense]);
+
   // Lock background scroll when any modal or receipt viewer in ExpensesTab is open
-  useBodyScrollLock(Boolean(showAddModal || showRateModal || showCashModal || showCategoryManageModal || viewingReceiptGallery));
+  useBodyScrollLock(Boolean(showAddModal || showRateModal || showCashModal || showCategoryManageModal || viewingReceiptGallery || pendingDeleteExpense));
 
   const closeAddExpenseModal = () => {
     const stagedAdded = receiptImages.filter(
@@ -240,11 +263,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   };
 
   useEffect(() => {
-    const hasOverlay = showAddModal || showRateModal || showCashModal || Boolean(viewingReceiptGallery);
+    const hasOverlay = showAddModal || showRateModal || showCashModal || Boolean(viewingReceiptGallery) || Boolean(pendingDeleteExpense);
     if (!hasOverlay) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (viewingReceiptGallery) setViewingReceiptGallery(null);
+        if (pendingDeleteExpense) setPendingDeleteExpense(null);
+        else if (viewingReceiptGallery) setViewingReceiptGallery(null);
         else if (showCashModal) setShowCashModal(false);
         else if (showRateModal) setShowRateModal(false);
         else if (showAddModal) {
@@ -254,7 +278,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showAddModal, showRateModal, showCashModal, viewingReceiptGallery, receiptImages]);
+  }, [showAddModal, showRateModal, showCashModal, viewingReceiptGallery, pendingDeleteExpense, receiptImages]);
 
   // Custom categories list from trip
   const customCategories = trip.customExpenseCategories || [];
@@ -856,6 +880,15 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     setConfirmingDeleteExpense(false);
     setShowAddModal(false);
     setEditingExpenseId(null);
+  };
+
+  const requestDeleteExpense = (item: ExpenseItem) => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(() => requestDeleteExpense(item), lang === 'zh' ? '刪除支出紀錄' : 'Delete expense')) {
+      return;
+    }
+    setOpenSwipeId(null);
+    setPendingDeleteExpense(item);
   };
 
   // Add a companion to splitting list
@@ -2711,6 +2744,25 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           </div>
         ) : (
           <div className="space-y-4 pt-1">
+            {canEdit && !hasSeenSwipeHint && (
+              <div className="md:hidden flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-[#F3F1EC] dark:bg-slate-800/75 border border-[#E5E2DC] dark:border-slate-700/80 text-xs text-slate-600 dark:text-slate-300">
+                <div className="flex items-center gap-2 min-w-0">
+                  <ChevronLeft className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
+                  <span className="truncate">
+                    {lang === 'zh'
+                      ? '向左滑動任一支出列，可快速編輯或刪除'
+                      : 'Swipe left on any row to edit or delete'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={dismissSwipeHint}
+                  className="min-h-[36px] px-2.5 py-1 rounded-lg font-semibold text-teal-700 dark:text-teal-300 hover:bg-white/70 dark:hover:bg-slate-700/60 transition shrink-0 cursor-pointer"
+                >
+                  {lang === 'zh' ? '知道了' : 'Got it'}
+                </button>
+              </div>
+            )}
             {groupedDailyExpenses.map((group) => (
               <div key={group.date} className="space-y-1.5">
                 {/* Apple Wallet Style Date Group Header */}
@@ -2738,9 +2790,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                     const isDiffCurrency = item.currency !== baseCurrency;
 
                     return (
-                      <div
+                      <SwipeableExpenseRow
                         key={item.id}
-                        onClick={() => {
+                        id={item.id}
+                        isOpen={openSwipeId === item.id}
+                        canEdit={canEdit}
+                        onOpenChange={setOpenSwipeId}
+                        onSwipeRevealed={dismissSwipeHint}
+                        onRowClick={() => {
                           if (canEdit) {
                             handleOpenEditExpense(item);
                           } else if (allImages.length > 0) {
@@ -2754,16 +2811,20 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                             });
                           }
                         }}
-                        className={`p-3 sm:px-4 hover:bg-slate-50/80 dark:hover:bg-white/5 transition flex items-center justify-between gap-3 group ${canEdit || allImages.length > 0 ? 'cursor-pointer' : ''}`}
+                        onEdit={() => handleOpenEditExpense(item)}
+                        onDelete={() => requestDeleteExpense(item)}
+                        editLabel={lang === 'zh' || lang === 'zh-CN' ? '編輯' : 'Edit'}
+                        deleteLabel={lang === 'zh' || lang === 'zh-CN' ? '刪除' : 'Delete'}
+                        className={`p-3 sm:px-4 md:hover:bg-slate-50/80 md:dark:hover:bg-white/5 transition-colors flex items-center justify-between gap-3 group ${canEdit || allImages.length > 0 ? 'cursor-pointer' : ''}`}
                       >
                         <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 text-slate-700 dark:text-slate-200 group-hover:scale-105 transition-transform">
+                          <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-white/10 flex items-center justify-center shrink-0 text-slate-700 dark:text-slate-200 md:group-hover:scale-105 transition-transform">
                             <catMeta.Icon className="w-5 h-5" />
                           </div>
 
                           <div className="min-w-0 space-y-0.5 flex-1">
                             <div className="flex items-center gap-2">
-                              <span className="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm truncate group-hover:text-teal-600 dark:group-hover:text-teal-400 transition">
+                              <span className="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm truncate md:group-hover:text-teal-600 md:dark:group-hover:text-teal-400 transition">
                                 {item.title}
                               </span>
                               {allImages.length > 0 && (
@@ -2805,7 +2866,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                           </div>
                         </div>
 
-                        {/* Right Amount Display & Action Buttons */}
+                        {/* Right Amount Display & Desktop Hover Action Buttons */}
                         <div className="flex items-center gap-3 shrink-0">
                           <div className="text-right font-mono">
                             <div className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-slate-100 tabular-nums">
@@ -2819,11 +2880,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                           </div>
 
                           {canEdit && (
-                            <div className="flex items-center gap-1 opacity-85 sm:opacity-70 group-hover:opacity-100 transition" onClick={(e) => e.stopPropagation()}>
+                            <div className="hidden md:flex items-center gap-1 md:opacity-70 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
                                 onClick={() => handleOpenEditExpense(item)}
-                                className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
+                                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
                                 title="編輯"
                                 aria-label="編輯"
                               >
@@ -2831,8 +2892,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                               </button>
                               <button
                                 type="button"
-                                onClick={() => handleDeleteExpense(item.id)}
-                                className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                                onClick={() => requestDeleteExpense(item)}
+                                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
                                 title="刪除"
                                 aria-label="刪除"
                               >
@@ -2841,7 +2902,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                             </div>
                           )}
                         </div>
-                      </div>
+                      </SwipeableExpenseRow>
                     );
                   })}
                 </div>
@@ -3738,6 +3799,55 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         }}
         lang={lang}
       />
+
+      {/* Safe Delete Confirmation Modal */}
+      {pendingDeleteExpense && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150"
+          onClick={() => setPendingDeleteExpense(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-6 text-center space-y-4 my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto">
+              <Trash2 className="w-6 h-6" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h3 className="font-bold text-base text-slate-900 dark:text-white">
+                {lang === 'zh' ? '確定要刪除此筆支出？' : 'Delete this expense?'}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                {lang === 'zh'
+                  ? `「${pendingDeleteExpense.title}」（${formatCurrencyAmount(pendingDeleteExpense.amount, pendingDeleteExpense.currency)}）刪除後將同步移除且無法復原。`
+                  : `"${pendingDeleteExpense.title}" (${formatCurrencyAmount(pendingDeleteExpense.amount, pendingDeleteExpense.currency)}) will be permanently removed.`}
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteExpense(null)}
+                className="w-full min-h-[44px] py-2.5 px-4 rounded-xl border border-[#E5E2DC] dark:border-slate-700 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs transition active:scale-95 cursor-pointer"
+              >
+                {lang === 'zh' ? '取消' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const idToDelete = pendingDeleteExpense.id;
+                  setPendingDeleteExpense(null);
+                  handleDeleteExpense(idToDelete);
+                }}
+                className="w-full min-h-[44px] py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition active:scale-95 cursor-pointer"
+              >
+                {lang === 'zh' ? '確認刪除' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
