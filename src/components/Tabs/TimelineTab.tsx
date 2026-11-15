@@ -13,7 +13,15 @@ import {
   sortItineraryItemsByTime,
   getSuggestedNextStartTime,
   parseTimeToMinutes,
+  detectDayTimeConflicts,
+  autoShiftDayConflicts,
+  DayConflictReport,
 } from '../../utils/date';
+import {
+  fetchTripWeatherByDay,
+  DayWeatherStatus,
+  getWeatherDescription,
+} from '../../utils/weather';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
 import { ItineraryOverviewTable } from '../Itinerary/ItineraryOverviewTable';
 import {
@@ -50,6 +58,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Check,
+  AlertTriangle,
+  Umbrella,
+  CloudSun,
+  Wand2,
 } from 'lucide-react';
 import { MediaImage } from '../UI/MediaImage';
 
@@ -67,6 +79,7 @@ interface TimelineTabProps {
   onOpenMemories?: (spotId?: string) => void;
   requireAuth?: (action: () => void, reason?: string) => boolean;
   isNavHidden?: boolean;
+  requestedDay?: { dayNumber: number; nonce: number } | null;
 }
 
 const CATEGORY_MAP: Record<string, { labelKey: string; icon: React.ComponentType<{ className?: string }>; text: string }> = {
@@ -114,6 +127,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   onOpenMemories,
   requireAuth,
   isNavHidden = false,
+  requestedDay = null,
 }) => {
   const t = TRANSLATIONS[lang];
   const [timelineViewMode, setTimelineViewMode] = useState<'daily' | 'overview'>('daily');
@@ -121,6 +135,72 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [spotSearchQuery, setSpotSearchQuery] = useState('');
+  const [dayWeatherMap, setDayWeatherMap] = useState<Record<number, DayWeatherStatus>>({});
+  const [isWeatherLoading, setIsWeatherLoading] = useState(false);
+
+  // Jump cleanly when another tab requests a specific day
+  useEffect(() => {
+    if (requestedDay && requestedDay.dayNumber > 0) {
+      setSelectedDayNumber(requestedDay.dayNumber);
+      setTimelineViewMode('daily');
+    }
+  }, [requestedDay?.dayNumber, requestedDay?.nonce]);
+
+  // Multi-day Open-Meteo Weather Forecast (Free, zero API key, cached locally)
+  const weatherSignature = useMemo(() => {
+    return (trip.days || [])
+      .map((d) => {
+        const firstGeo = (d.items || []).find((it) => typeof it.lat === 'number' && typeof it.lng === 'number');
+        return `${d.dayNumber}:${d.date}:${firstGeo ? `${firstGeo.lat?.toFixed(2)},${firstGeo.lng?.toFixed(2)}` : 'none'}`;
+      })
+      .join('|');
+  }, [trip.days]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!trip.days || trip.days.length === 0) return;
+    setIsWeatherLoading(true);
+    fetchTripWeatherByDay(
+      trip.days.map((d) => ({ dayNumber: d.dayNumber, date: d.date, items: d.items || [] })),
+      trip.destination
+    )
+      .then((res) => {
+        if (!cancelled) setDayWeatherMap(res);
+      })
+      .catch(() => {
+        // Silent graceful degradation
+      })
+      .finally(() => {
+        if (!cancelled) setIsWeatherLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [trip.id, trip.destination, weatherSignature]);
+
+  // Per-day time conflict analysis
+  const dayConflictReports = useMemo<Record<number, DayConflictReport>>(() => {
+    const map: Record<number, DayConflictReport> = {};
+    (trip.days || []).forEach((d) => {
+      map[d.dayNumber] = detectDayTimeConflicts(d.items || [], lang === 'zh' || lang === 'zh-CN' ? 'zh' : 'en');
+    });
+    return map;
+  }, [trip.days, lang]);
+
+  const handleAutoResolveDayConflicts = (dayNumber: number) => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(() => handleAutoResolveDayConflicts(dayNumber), lang === 'zh' ? '自動順延衝突時段' : 'Auto-resolve schedule conflicts')) {
+      return;
+    }
+    const updatedDays = trip.days.map((d) => {
+      if (d.dayNumber !== dayNumber) return d;
+      return {
+        ...d,
+        items: autoShiftDayConflicts(d.items || [], 15),
+      };
+    });
+    onUpdateTrip({ ...trip, days: updatedDays, updatedAt: Date.now() });
+  };
 
   // Horizontal Day Filter Bar scroll state & auto-centering
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -723,6 +803,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             const dateStr = formatMonthDaySlash(day.date);
             const isToday = isDateToday(day.date);
             const isEmpty = totalCount === 0;
+            const chipWeather = dayWeatherMap[day.dayNumber];
+            const chipForecast = chipWeather?.status === 'ok' ? chipWeather.forecast : undefined;
+            const chipWeatherIcon = chipForecast ? getWeatherDescription(chipForecast.weatherCode, lang).icon : null;
+            const chipConflictCount = dayConflictReports[day.dayNumber]?.conflicts.length || 0;
 
             return (
               <motion.button
@@ -751,7 +835,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 className={`rounded-xl text-left shrink-0 snap-center snap-always cursor-pointer select-none transition-all duration-200 relative ${
                   isCompact
                     ? 'min-w-[88px] px-2.5 py-1.5 h-9 flex items-center justify-between gap-1.5'
-                    : 'min-w-[110px] px-3.5 py-2.5 h-[56px] flex flex-col justify-between'
+                    : 'min-w-[116px] px-3.5 py-2.5 h-[56px] flex flex-col justify-between'
                 } ${
                   isCurrent
                     ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-sm z-1'
@@ -768,6 +852,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                       <span className={`text-xs font-black font-mono tabular-nums ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
                         D{day.dayNumber}
                       </span>
+                      {chipConflictCount > 0 && (
+                        <AlertTriangle className={`w-3 h-3 shrink-0 ${isCurrent ? 'text-amber-200' : 'text-amber-600 dark:text-amber-400'}`} />
+                      )}
                       {isToday && (
                         <span className={`text-[9px] font-bold ${isCurrent ? 'text-teal-200' : 'text-teal-700 dark:text-teal-400'}`}>
                           ·今
@@ -786,9 +873,17 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 ) : (
                   <>
                     <div className="flex items-center justify-between gap-1.5">
-                      <span className={`text-xs font-black font-mono tabular-nums ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
-                        Day {day.dayNumber}
-                      </span>
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className={`text-xs font-black font-mono tabular-nums ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                          Day {day.dayNumber}
+                        </span>
+                        {chipConflictCount > 0 && (
+                          <AlertTriangle
+                            className={`w-3 h-3 shrink-0 ${isCurrent ? 'text-amber-200' : 'text-amber-600 dark:text-amber-400'}`}
+                            aria-label="時間衝突"
+                          />
+                        )}
+                      </div>
                       {totalCount > 0 ? (
                         <span
                           className={`text-[10px] font-mono tabular-nums font-semibold ${
@@ -812,16 +907,20 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                       )}
                     </div>
 
-                    <div className="flex items-center justify-between mt-1 text-[10px] font-mono tabular-nums opacity-85">
-                      <div className="flex items-center gap-1">
+                    <div className="flex items-center justify-between gap-1.5 mt-1 text-[10px] font-mono tabular-nums opacity-90">
+                      <div className="flex items-center gap-1 truncate">
                         <span>{dateStr}</span>
                         {weekday && <span>({weekday})</span>}
                       </div>
-                      {isToday && (
+                      {chipForecast ? (
+                        <span className={`text-[10px] font-mono tabular-nums shrink-0 ${isCurrent ? 'text-teal-100' : 'text-slate-500 dark:text-slate-400'}`}>
+                          {chipWeatherIcon} {chipForecast.maxTemp}°
+                        </span>
+                      ) : isToday ? (
                         <span className={`text-[9px] font-bold shrink-0 ${isCurrent ? 'text-teal-200' : 'text-teal-700 dark:text-teal-400'}`}>
                           {lang === 'zh' ? '今日' : 'Today'}
                         </span>
-                      )}
+                      ) : null}
                     </div>
                   </>
                 )}
@@ -1228,6 +1327,113 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 </div>
               </div>
 
+              {/* Per-Day Open-Meteo Weather Strip (Zero API key, city-aware per day) */}
+              {(() => {
+                const dayWeather = dayWeatherMap[activeDay.dayNumber];
+                if (!dayWeather && !isWeatherLoading) return null;
+
+                if (isWeatherLoading && !dayWeather) {
+                  return (
+                    <div className="rounded-2xl px-4 py-2.5 bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 flex items-center gap-2 text-xs text-slate-400">
+                      <CloudSun className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
+                      <span>{lang === 'zh' ? '正在取得當日城市天氣預報...' : 'Fetching daily city weather...'}</span>
+                    </div>
+                  );
+                }
+
+                if (dayWeather?.status === 'ok' && dayWeather.forecast) {
+                  const f = dayWeather.forecast;
+                  const desc = getWeatherDescription(f.weatherCode, lang);
+                  return (
+                    <div className="rounded-2xl px-4 py-2.5 bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-2 flex-wrap text-slate-700 dark:text-slate-300">
+                        <span className="text-base leading-none select-none">{desc.icon}</span>
+                        <span className="font-bold text-slate-900 dark:text-white">{desc.label}</span>
+                        <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">·</span>
+                        <span className="font-mono tabular-nums font-bold text-slate-900 dark:text-slate-100">
+                          {f.minTemp}° ~ {f.maxTemp}°C
+                        </span>
+                        {f.source === 'forecast' && (
+                          <>
+                            <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">·</span>
+                            <span className="inline-flex items-center gap-1 font-mono tabular-nums text-teal-700 dark:text-teal-400 font-semibold">
+                              <Umbrella className="w-3.5 h-3.5" />
+                              <span>{lang === 'zh' ? `降雨 ${f.rainProbability}%` : `${f.rainProbability}% rain`}</span>
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                        <MapPin className="w-3 h-3 shrink-0" />
+                        <span className="truncate max-w-[180px]">{f.locationName}</span>
+                        <span>·</span>
+                        <span>{f.source === 'archive' ? (lang === 'zh' ? '歷史氣候實測' : 'Historical') : 'Open-Meteo'}</span>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (dayWeather?.status === 'too_far_future') {
+                  return (
+                    <div className="rounded-2xl px-4 py-2 bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span className="flex items-center gap-1.5">
+                        <CloudSun className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+                        <span>
+                          {lang === 'zh'
+                            ? `出發前 16 天開放免費每日天氣預報（預計約 ${dayWeather.daysUntilForecast} 天後可查詢）`
+                            : `Daily forecast unlocks 16 days prior (${dayWeather.daysUntilForecast}d left)`}
+                        </span>
+                      </span>
+                    </div>
+                  );
+                }
+
+                return null;
+              })()}
+
+              {/* Schedule Time-Conflict Detection & One-Click Shift Bar */}
+              {(() => {
+                const report = dayConflictReports[activeDay.dayNumber];
+                if (!report || report.conflicts.length === 0) return null;
+                return (
+                  <div className="rounded-2xl p-3.5 sm:p-4 bg-amber-50/75 dark:bg-amber-950/25 border border-amber-300/80 dark:border-amber-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900 dark:text-amber-200">
+                        <AlertTriangle className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
+                        <span className="font-mono tabular-nums">
+                          {lang === 'zh'
+                            ? `偵測到 ${report.conflicts.length} 項排程時間提醒`
+                            : `${report.conflicts.length} schedule conflict(s) detected`}
+                        </span>
+                      </div>
+                      <ul className="space-y-0.5 text-[11px] text-amber-800 dark:text-amber-300 font-mono tabular-nums">
+                        {report.conflicts.slice(0, 3).map((c) => (
+                          <li key={c.id} className="truncate">
+                            · {c.message}
+                          </li>
+                        ))}
+                        {report.conflicts.length > 3 && (
+                          <li className="opacity-80">
+                            · {lang === 'zh' ? `還有 ${report.conflicts.length - 3} 項時間衝突...` : `+${report.conflicts.length - 3} more...`}
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+
+                    {canEdit && report.hasFixableOverlap && (
+                      <button
+                        type="button"
+                        onClick={() => handleAutoResolveDayConflicts(activeDay.dayNumber)}
+                        className="min-h-[40px] px-3.5 py-2 rounded-xl bg-amber-700 hover:bg-amber-800 dark:bg-amber-600 dark:hover:bg-amber-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer"
+                      >
+                        <Wand2 className="w-3.5 h-3.5" />
+                        <span>{lang === 'zh' ? '自動順延重疊時段' : 'Auto-Shift Overlaps'}</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
       {/* Timeline Items List */}
       {activeDay.items.length === 0 ? (
         <div className="p-8 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 text-center">
@@ -1334,6 +1540,15 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                               <span aria-hidden="true">·</span>
                               <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 font-semibold">
                                 #{item.bookingCode}
+                              </span>
+                            </>
+                          )}
+                          {dayConflictReports[activeDay.dayNumber]?.conflictedItemIds.includes(item.id) && (
+                            <>
+                              <span aria-hidden="true">·</span>
+                              <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-400">
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                <span>{lang === 'zh' ? '時段衝突' : 'Conflict'}</span>
                               </span>
                             </>
                           )}

@@ -111,6 +111,26 @@ export interface CollaboratorMember {
   addedAt: number;
 }
 
+export type BookingCategory = 'flight' | 'hotel' | 'rail' | 'ticket' | 'connectivity' | 'other';
+
+export interface BookingVoucher {
+  id: string;
+  category: BookingCategory;
+  title: string;
+  bookingCode: string;
+  secondaryCode?: string;
+  provider?: string;
+  startDate?: string;
+  endDate?: string;
+  timeLabel?: string;
+  location?: string;
+  dayNumber?: number;
+  url?: string;
+  notes?: string;
+  createdAt: number;
+  updatedAt?: number;
+}
+
 export interface Trip {
   id: string;
   title: string;
@@ -125,6 +145,7 @@ export interface Trip {
   packingList: PackingItem[];
   todos?: TodoItem[];
   expenses: ExpenseItem[];
+  bookings?: BookingVoucher[];
   customExpenseCategories?: string[];
   customCategoryLabels?: Record<string, string>;
   customExchangeRates?: Record<string, number>;

@@ -61,6 +61,7 @@ service cloud.firestore {
              isValidOptionalList(data, 'packingList', 300) &&
              isValidOptionalList(data, 'todos', 300) &&
              isValidOptionalList(data, 'expenses', 500) &&
+             isValidOptionalList(data, 'bookings', 100) &&
              isValidOptionalList(data, 'emergencyContacts', 100) &&
              isValidOptionalList(data, 'memories', 500) &&
              isValidOptionalList(data, 'collaborators', 30) &&
@@ -74,7 +75,7 @@ service cloud.firestore {
              data.keys().hasOnly([
                'id', 'ownerId', 'ownerEmail', 'title', 'destination', 'startDate', 'endDate',
                'currency', 'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
-               'todos', 'expenses', 'customExpenseCategories', 'customCategoryLabels',
+               'todos', 'expenses', 'bookings', 'customExpenseCategories', 'customCategoryLabels',
                'customExchangeRates', 'emergencyContacts', 'memories', 'deletedItemIds',
                'isSplitEnabled', 'splitMembers', 'initialCashAmount', 'initialCashCurrency',
                'isSoloTrip', 'googlePhotosAlbumUrl', 'isCollaborative', 'collabId',
@@ -108,7 +109,7 @@ service cloud.firestore {
              data.keys().hasOnly([
                'id', 'originalTripId', 'ownerId', 'title', 'destination', 'startDate', 'endDate',
                'currency', 'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
-               'todos', 'expenses', 'customExpenseCategories', 'customCategoryLabels',
+               'todos', 'expenses', 'bookings', 'customExpenseCategories', 'customCategoryLabels',
                'customExchangeRates', 'emergencyContacts', 'memories', 'isSplitEnabled',
                'splitMembers', 'isSoloTrip', 'googlePhotosAlbumUrl', 'publishedAt', 'updatedAt'
              ]);
@@ -120,7 +121,7 @@ service cloud.firestore {
                'id', 'collabId', 'isCollaborative', 'originalTripId', 'ownerId', 'ownerEmail',
                'ownerName', 'generalAccess', 'collaborators', 'editorEmails', 'viewerEmails',
                'title', 'destination', 'startDate', 'endDate', 'currency', 'budgetTotal',
-               'coverGradient', 'notes', 'days', 'packingList', 'todos', 'expenses',
+               'coverGradient', 'notes', 'days', 'packingList', 'todos', 'expenses', 'bookings',
                'customExpenseCategories', 'customCategoryLabels', 'customExchangeRates',
                'emergencyContacts', 'memories', 'deletedItemIds', 'isSplitEnabled',
                'splitMembers', 'initialCashAmount', 'initialCashCurrency', 'isSoloTrip',
@@ -234,7 +235,7 @@ service cloud.firestore {
                            incoming().diff(existing()).affectedKeys().hasOnly([
                              'title', 'destination', 'startDate', 'endDate', 'currency',
                              'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
-                             'todos', 'expenses', 'customExpenseCategories', 'customCategoryLabels',
+                             'todos', 'expenses', 'bookings', 'customExpenseCategories', 'customCategoryLabels',
                              'customExchangeRates', 'emergencyContacts', 'memories', 'deletedItemIds',
                              'isSplitEnabled', 'splitMembers', 'initialCashAmount',
                              'initialCashCurrency', 'isSoloTrip', 'googlePhotosAlbumUrl',

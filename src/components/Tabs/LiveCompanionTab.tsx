@@ -42,6 +42,8 @@ import {
   Hotel,
   ShoppingBag,
   Ticket,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { MediaImage } from '../UI/MediaImage';
 
@@ -112,6 +114,17 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   const [weatherMode, setWeatherMode] = useState<'destination' | 'gps'>('destination');
   const [userGpsCoords, setUserGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [isWeatherExpanded, setIsWeatherExpanded] = useState(false);
+  const [copiedBookingKey, setCopiedBookingKey] = useState<string | null>(null);
+
+  const handleCopyBookingCode = async (code: string, keyId: string) => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedBookingKey(keyId);
+      setTimeout(() => setCopiedBookingKey((prev) => (prev === keyId ? null : prev)), 1800);
+    } catch {
+      // Clipboard unsupported
+    }
+  };
 
   const activeDay = trip.days.find((d) => d.dayNumber === selectedDayNumber) || trip.days[0] || {
     id: 'empty',
@@ -582,6 +595,92 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
           </h3>
         </div>
       )}
+
+      {/* Today's Key Booking Codes Quick-Copy Strip */}
+      {(() => {
+        const dayBookings: Array<{ id: string; title: string; code: string; sub?: string }> = [];
+        activeDay.items.forEach((it) => {
+          if (it.bookingCode && it.bookingCode.trim()) {
+            dayBookings.push({
+              id: `it-${it.id}`,
+              title: it.title,
+              code: it.bookingCode.trim(),
+              sub: it.startTime || undefined,
+            });
+          }
+        });
+        (trip.bookings || []).forEach((b) => {
+          const matchesDay = b.dayNumber === activeDay.dayNumber || (b.startDate && b.startDate === activeDay.date);
+          const spansDay =
+            b.startDate &&
+            b.endDate &&
+            activeDay.date &&
+            activeDay.date >= b.startDate &&
+            activeDay.date <= b.endDate;
+          if (matchesDay || spansDay || (!b.dayNumber && !b.startDate)) {
+            dayBookings.push({
+              id: `bk-${b.id}`,
+              title: b.title,
+              code: b.bookingCode,
+              sub: b.secondaryCode || b.timeLabel,
+            });
+          }
+        });
+
+        if (dayBookings.length === 0) return null;
+        return (
+          <div className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 shadow-2xs space-y-2.5">
+            <div className="flex items-center justify-between text-xs font-bold text-slate-900 dark:text-white">
+              <span className="flex items-center gap-1.5">
+                <Ticket className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                <span>{lang === 'zh' ? '今日訂位代號速查' : "Today's Booking Codes"}</span>
+              </span>
+              <span className="font-mono tabular-nums text-[11px] text-slate-400">
+                {dayBookings.length}
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {dayBookings.slice(0, 5).map((entry) => (
+                <div
+                  key={entry.id}
+                  className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800 text-xs"
+                >
+                  <div className="min-w-0">
+                    <div className="font-semibold text-slate-800 dark:text-slate-100 truncate">
+                      {entry.title}
+                    </div>
+                    <div className="font-mono tabular-nums text-[11px] text-teal-700 dark:text-teal-400 font-bold truncate">
+                      {entry.code}
+                      {entry.sub ? ` · ${entry.sub}` : ''}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyBookingCode(entry.code, entry.id)}
+                    className={`min-h-[36px] px-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1 shrink-0 transition cursor-pointer ${
+                      copiedBookingKey === entry.id
+                        ? 'bg-teal-700 text-white'
+                        : 'bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-teal-600'
+                    }`}
+                  >
+                    {copiedBookingKey === entry.id ? (
+                      <>
+                        <Check className="w-3 h-3" />
+                        <span>{lang === 'zh' ? '已複製' : 'Copied'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                        <span>{lang === 'zh' ? '複製' : 'Copy'}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
         </div>
 
       {/* 5. Progress & Complete Day Itinerary Checklist with Full Descriptions */}

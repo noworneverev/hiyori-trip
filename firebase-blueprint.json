@@ -76,6 +76,10 @@
           "type": "array",
           "description": "List of tracked expenses."
         },
+        "bookings": {
+          "type": "array",
+          "description": "List of standalone flight, hotel, rail, and pass booking vouchers."
+        },
         "emergencyContacts": {
           "type": "array",
           "description": "List of emergency contacts."

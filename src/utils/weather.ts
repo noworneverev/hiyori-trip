@@ -217,3 +217,292 @@ export async function fetchCurrentWeather(
     fetchedAt: Date.now(),
   };
 }
+
+export interface DailyWeatherForecast {
+  date: string; // YYYY-MM-DD
+  weatherCode: number;
+  maxTemp: number;
+  minTemp: number;
+  rainProbability: number;
+  windSpeedMax: number;
+  locationName: string;
+  source: 'forecast' | 'archive';
+}
+
+export interface DayWeatherStatus {
+  status: 'ok' | 'too_far_future' | 'no_coords' | 'error';
+  forecast?: DailyWeatherForecast;
+  daysUntilForecast?: number;
+}
+
+const DAILY_WEATHER_CACHE_KEY = 'hiyori_daily_weather_cache_v1';
+const FORECAST_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+const ARCHIVE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+interface CachedDailyWeatherEntry {
+  fetchedAt: number;
+  source: 'forecast' | 'archive';
+  days: Record<string, DailyWeatherForecast>;
+}
+
+const memoryWeatherCache = new Map<string, CachedDailyWeatherEntry>();
+
+function readWeatherCache(): Record<string, CachedDailyWeatherEntry> {
+  try {
+    const raw = localStorage.getItem(DAILY_WEATHER_CACHE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeWeatherCache(key: string, entry: CachedDailyWeatherEntry): void {
+  memoryWeatherCache.set(key, entry);
+  try {
+    const existing = readWeatherCache();
+    existing[key] = entry;
+    // Keep at most 24 cache entries to keep localStorage lightweight
+    const entries = Object.entries(existing)
+      .sort((a, b) => b[1].fetchedAt - a[1].fetchedAt)
+      .slice(0, 24);
+    localStorage.setItem(DAILY_WEATHER_CACHE_KEY, JSON.stringify(Object.fromEntries(entries)));
+  } catch {
+    // Ignore storage quota issues
+  }
+}
+
+function getLocalTodayYYYYMMDD(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function diffDaysYYYYMMDD(fromDate: string, toDate: string): number {
+  const a = new Date(`${fromDate.slice(0, 10)}T00:00:00Z`).getTime();
+  const b = new Date(`${toDate.slice(0, 10)}T00:00:00Z`).getTime();
+  if (isNaN(a) || isNaN(b)) return 0;
+  return Math.round((b - a) / (1000 * 60 * 60 * 24));
+}
+
+function addDaysYYYYMMDD(base: string, offset: number): string {
+  const dt = new Date(`${base.slice(0, 10)}T00:00:00Z`);
+  if (isNaN(dt.getTime())) return base;
+  dt.setUTCDate(dt.getUTCDate() + offset);
+  return dt.toISOString().slice(0, 10);
+}
+
+/**
+ * Fetch Open-Meteo daily forecast (up to +15 days from today) or historical archive (< today)
+ * for a rounded coordinate bucket and date range, using memory + localStorage caching.
+ */
+async function fetchOpenMeteoRange(
+  lat: number,
+  lng: number,
+  startDate: string,
+  endDate: string,
+  locationName: string,
+  mode: 'forecast' | 'archive'
+): Promise<Record<string, DailyWeatherForecast>> {
+  const bucketKey = `${mode}:${lat.toFixed(2)},${lng.toFixed(2)}:${startDate}:${endDate}`;
+  const ttl = mode === 'forecast' ? FORECAST_CACHE_TTL_MS : ARCHIVE_CACHE_TTL_MS;
+
+  const memHit = memoryWeatherCache.get(bucketKey);
+  if (memHit && Date.now() - memHit.fetchedAt < ttl) {
+    return memHit.days;
+  }
+
+  const diskAll = readWeatherCache();
+  const diskHit = diskAll[bucketKey];
+  if (diskHit && Date.now() - diskHit.fetchedAt < ttl) {
+    memoryWeatherCache.set(bucketKey, diskHit);
+    return diskHit.days;
+  }
+
+  const baseUrl =
+    mode === 'forecast'
+      ? 'https://api.open-meteo.com/v1/forecast'
+      : 'https://archive-api.open-meteo.com/v1/archive';
+
+  const params = new URLSearchParams({
+    latitude: lat.toFixed(4),
+    longitude: lng.toFixed(4),
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max',
+    timezone: 'auto',
+    start_date: startDate,
+    end_date: endDate,
+  });
+
+  const res = await fetch(`${baseUrl}?${params.toString()}`);
+  if (!res.ok) {
+    // If diskHit exists even slightly stale, return gracefully
+    if (diskHit) return diskHit.days;
+    throw new Error(`Open-Meteo ${mode} failed: ${res.status}`);
+  }
+
+  const json = await res.json();
+  const daily = json?.daily;
+  const result: Record<string, DailyWeatherForecast> = {};
+
+  if (daily && Array.isArray(daily.time)) {
+    for (let i = 0; i < daily.time.length; i++) {
+      const date = daily.time[i];
+      const maxT = daily.temperature_2m_max?.[i];
+      const minT = daily.temperature_2m_min?.[i];
+      const code = daily.weather_code?.[i];
+      if (typeof maxT !== 'number' || typeof minT !== 'number') continue;
+
+      result[date] = {
+        date,
+        weatherCode: typeof code === 'number' ? code : 1,
+        maxTemp: Math.round(maxT),
+        minTemp: Math.round(minT),
+        rainProbability: Math.round(daily.precipitation_probability_max?.[i] ?? 0),
+        windSpeedMax: Math.round(daily.wind_speed_10m_max?.[i] ?? 0),
+        locationName,
+        source: mode,
+      };
+    }
+  }
+
+  writeWeatherCache(bucketKey, {
+    fetchedAt: Date.now(),
+    source: mode,
+    days: result,
+  });
+
+  return result;
+}
+
+export interface DayWeatherQueryInput {
+  dayNumber: number;
+  date: string;
+  items: Array<{ lat?: number; lng?: number; locationName?: string; title?: string }>;
+}
+
+/**
+ * Resolve per-day weather across an entire multi-day itinerary (supporting cross-city trips
+ * where Day 1 is Tokyo and Day 3 is Kyoto) using free, keyless Open-Meteo APIs.
+ */
+export async function fetchTripWeatherByDay(
+  days: DayWeatherQueryInput[],
+  fallbackDestination: string
+): Promise<Record<number, DayWeatherStatus>> {
+  const output: Record<number, DayWeatherStatus> = {};
+  if (!days || days.length === 0) return output;
+
+  const todayStr = getLocalTodayYYYYMMDD();
+  const maxForecastDate = addDaysYYYYMMDD(todayStr, 15);
+  const yesterdayStr = addDaysYYYYMMDD(todayStr, -1);
+
+  // Find trip-wide fallback coordinates from any spot or geocode destination
+  let globalCoords: { lat: number; lng: number; name: string } | null = null;
+  for (const d of days) {
+    const withCoords = d.items.find((it) => typeof it.lat === 'number' && typeof it.lng === 'number');
+    if (withCoords) {
+      globalCoords = {
+        lat: withCoords.lat!,
+        lng: withCoords.lng!,
+        name: withCoords.locationName || fallbackDestination,
+      };
+      break;
+    }
+  }
+
+  if (!globalCoords && fallbackDestination) {
+    const geo = await geocodeCity(fallbackDestination);
+    if (geo) {
+      globalCoords = geo;
+    }
+  }
+
+  // Group day requests by coordinate bucket + mode ('forecast' | 'archive') to minimize HTTP requests
+  interface BucketGroup {
+    lat: number;
+    lng: number;
+    locationName: string;
+    mode: 'forecast' | 'archive';
+    minDate: string;
+    maxDate: string;
+    dayEntries: Array<{ dayNumber: number; date: string }>;
+  }
+
+  const groups = new Map<string, BucketGroup>();
+
+  for (const d of days) {
+    const cleanDate = (d.date || '').slice(0, 10).replace(/\//g, '-');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) continue;
+
+    const daySpot = d.items.find((it) => typeof it.lat === 'number' && typeof it.lng === 'number');
+    const coords = daySpot
+      ? {
+          lat: daySpot.lat!,
+          lng: daySpot.lng!,
+          name: daySpot.locationName || daySpot.title || fallbackDestination,
+        }
+      : globalCoords;
+
+    if (!coords) {
+      output[d.dayNumber] = { status: 'no_coords' };
+      continue;
+    }
+
+    if (cleanDate > maxForecastDate) {
+      const daysUntilForecast = Math.max(1, diffDaysYYYYMMDD(maxForecastDate, cleanDate));
+      output[d.dayNumber] = { status: 'too_far_future', daysUntilForecast };
+      continue;
+    }
+
+    const mode: 'forecast' | 'archive' = cleanDate < todayStr ? 'archive' : 'forecast';
+    const clampedEnd = mode === 'archive' && cleanDate > yesterdayStr ? yesterdayStr : cleanDate;
+    const bucketKey = `${mode}:${coords.lat.toFixed(2)},${coords.lng.toFixed(2)}`;
+
+    const existing = groups.get(bucketKey);
+    if (existing) {
+      if (clampedEnd < existing.minDate) existing.minDate = clampedEnd;
+      if (clampedEnd > existing.maxDate) existing.maxDate = clampedEnd;
+      existing.dayEntries.push({ dayNumber: d.dayNumber, date: cleanDate });
+    } else {
+      groups.set(bucketKey, {
+        lat: coords.lat,
+        lng: coords.lng,
+        locationName: coords.name,
+        mode,
+        minDate: clampedEnd,
+        maxDate: clampedEnd,
+        dayEntries: [{ dayNumber: d.dayNumber, date: cleanDate }],
+      });
+    }
+  }
+
+  await Promise.all(
+    Array.from(groups.values()).map(async (group) => {
+      try {
+        const rangeMap = await fetchOpenMeteoRange(
+          group.lat,
+          group.lng,
+          group.minDate,
+          group.maxDate,
+          group.locationName,
+          group.mode
+        );
+        for (const entry of group.dayEntries) {
+          const hit = rangeMap[entry.date];
+          if (hit) {
+            output[entry.dayNumber] = { status: 'ok', forecast: hit };
+          } else {
+            output[entry.dayNumber] = { status: 'error' };
+          }
+        }
+      } catch {
+        for (const entry of group.dayEntries) {
+          output[entry.dayNumber] = { status: 'error' };
+        }
+      }
+    })
+  );
+
+  return output;
+}

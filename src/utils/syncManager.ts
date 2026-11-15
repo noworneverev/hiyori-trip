@@ -248,6 +248,7 @@ export function hasTripContentDifference(a: Trip, b: Trip): boolean {
     a.generalAccess !== b.generalAccess ||
     (a.collaborators || []).length !== (b.collaborators || []).length ||
     (a.memories || []).length !== (b.memories || []).length ||
+    (a.bookings || []).length !== (b.bookings || []).length ||
     Object.keys(a.deletedItemIds || {}).length !== Object.keys(b.deletedItemIds || {}).length
   ) {
     return true;

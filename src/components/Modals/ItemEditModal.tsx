@@ -4,7 +4,7 @@ import { ItineraryItem, CategoryType } from '../../types/itinerary';
 import { searchLocationOSM } from '../../utils/geo';
 import { compressImageFile, storeImageAsMediaRef } from '../../utils/image';
 import { canUploadImages } from '../../utils/userPermissions';
-import { findInsertionPosition } from '../../utils/date';
+import { findInsertionPosition, checkItemTimeOverlap } from '../../utils/date';
 import { MediaImage } from '../UI/MediaImage';
 import {
   X,
@@ -35,6 +35,7 @@ import {
   Sparkle,
   Footprints,
   ExternalLink,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface ItemEditModalProps {
@@ -252,6 +253,14 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   const insertionPreview = useMemo(() => {
     return findInsertionPosition(othersInDay, startTime);
   }, [othersInDay, startTime]);
+
+  const timeWarnings = useMemo(() => {
+    return checkItemTimeOverlap(
+      { id: item?.id, title: title || '此行程', startTime, endTime: showEndTimeInput ? endTime : undefined },
+      othersInDay,
+      'zh'
+    );
+  }, [item?.id, title, startTime, endTime, showEndTimeInput, othersInDay]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -484,6 +493,18 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                 晚餐 18:00
               </button>
             </div>
+
+            {/* Live Schedule Time Conflict Warning */}
+            {timeWarnings.length > 0 && (
+              <div className="p-2.5 rounded-xl bg-amber-50/90 dark:bg-amber-950/30 border border-amber-300/80 dark:border-amber-800/60 text-amber-800 dark:text-amber-200 text-[11px] space-y-1">
+                {timeWarnings.map((warn, idx) => (
+                  <div key={idx} className="flex items-start gap-1.5 font-medium">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                    <span className="font-mono tabular-nums">{warn}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* 4. Progressive Disclosure Accordion: 更多詳細資訊 (地點、交通、預約、花費、照片) */}

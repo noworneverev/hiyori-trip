@@ -317,6 +317,7 @@ function normalizeTripData(id: string, data: Record<string, any>, fallbackOwnerI
     packingList: data.packingList || [],
     todos: data.todos || [],
     expenses: data.expenses || [],
+    bookings: data.bookings || [],
     customExpenseCategories: data.customExpenseCategories || [],
     customCategoryLabels: data.customCategoryLabels || {},
     customExchangeRates: data.customExchangeRates || {},
@@ -456,6 +457,7 @@ export async function saveTripToCloud(userId: string, trip: Trip): Promise<Trip>
       packingList: lightweightTrip.packingList || [],
       todos: lightweightTrip.todos || [],
       expenses: lightweightTrip.expenses || [],
+      bookings: lightweightTrip.bookings || [],
       customExpenseCategories: lightweightTrip.customExpenseCategories || [],
       customCategoryLabels: lightweightTrip.customCategoryLabels || {},
       customExchangeRates: lightweightTrip.customExchangeRates || {},
@@ -594,6 +596,7 @@ export async function publishSharedTrip(trip: Trip, ownerUid?: string): Promise<
         packingList: lightweightTrip.packingList || [],
         todos: lightweightTrip.todos || [],
         expenses: lightweightTrip.expenses || [],
+        bookings: lightweightTrip.bookings || [],
         customExpenseCategories: lightweightTrip.customExpenseCategories || [],
         customCategoryLabels: lightweightTrip.customCategoryLabels || {},
         customExchangeRates: lightweightTrip.customExchangeRates || {},
@@ -766,6 +769,7 @@ export async function enableTripCollaboration(trip: Trip, currentUser?: User | n
         packingList: lightweightTrip.packingList || [],
         todos: lightweightTrip.todos || [],
         expenses: lightweightTrip.expenses || [],
+        bookings: lightweightTrip.bookings || [],
         customExpenseCategories: lightweightTrip.customExpenseCategories || [],
         customCategoryLabels: lightweightTrip.customCategoryLabels || {},
         customExchangeRates: lightweightTrip.customExchangeRates || {},
@@ -947,6 +951,15 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
   });
   const mergedMemories = Array.from(memoryMap.values());
 
+  // Merge bookings by ID honoring tombstones
+  const bookingMap = new Map(
+    (older.bookings || []).filter((b) => !isDeleted(b.id)).map((b) => [b.id, b])
+  );
+  (newer.bookings || []).forEach((b) => {
+    if (!isDeleted(b.id)) bookingMap.set(b.id, b);
+  });
+  const mergedBookings = Array.from(bookingMap.values());
+
   return {
     ...older,
     ...newer,
@@ -954,6 +967,7 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
     todos: mergedTodos,
     packingList: mergedPacking,
     expenses: mergedExpenses,
+    bookings: mergedBookings,
     emergencyContacts: mergedContacts,
     splitMembers: mergedSplitMembers,
     memories: mergedMemories,
@@ -1025,6 +1039,7 @@ export async function syncCollaborativeTrip(
       packingList: tripToSave.packingList || [],
       todos: tripToSave.todos || [],
       expenses: tripToSave.expenses || [],
+      bookings: tripToSave.bookings || [],
       customExpenseCategories: tripToSave.customExpenseCategories || [],
       customCategoryLabels: tripToSave.customCategoryLabels || {},
       customExchangeRates: tripToSave.customExchangeRates || {},

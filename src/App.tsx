@@ -114,6 +114,7 @@ export default function App() {
   });
   const [activeTab, setActiveTab] = useState<TabType>('timeline');
   const [memoriesSpotId, setMemoriesSpotId] = useState<string | undefined>(undefined);
+  const [requestedTimelineDay, setRequestedTimelineDay] = useState<{ dayNumber: number; nonce: number } | null>(null);
 
   // i18n & Theme
   const [lang, setLang] = useState<Language>(getStoredLanguage);
@@ -1574,6 +1575,7 @@ export default function App() {
               lang={lang}
               canEdit={permission.canEdit}
               isNavHidden={isNavHidden}
+              requestedDay={requestedTimelineDay}
               onUpdateTrip={handleUpdateTrip}
               onOpenAddItem={(dayNumber, suggestedStartTime) => {
                 if (currentTrip.isCollaborative && !permission.canEdit) {
@@ -1644,6 +1646,10 @@ export default function App() {
               canEdit={permission.canEdit}
               onUpdateTrip={handleUpdateTrip}
               requireAuth={requireAuth}
+              onJumpToDay={(dayNumber) => {
+                setRequestedTimelineDay({ dayNumber, nonce: Date.now() });
+                setActiveTab('timeline');
+              }}
             />
           )}
 
@@ -1689,13 +1695,11 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Mobile Bottom Thumb Navigation Bar (Unified single-accent Teal focus) */}
+      {/* Mobile Bottom Thumb Navigation Bar (Unified single-accent Teal focus, permanently anchored) */}
       <nav
         aria-label="主要分頁導覽"
         style={{ position: 'fixed', zIndex: 45 }}
-        className={`sm:hidden fixed bottom-0 inset-x-0 bg-white/90 dark:bg-[#111827]/90 backdrop-blur-xl border-t border-[#E5E2DC] dark:border-slate-800 grid grid-cols-5 items-stretch h-[calc(3.5rem+env(safe-area-inset-bottom,0px))] pb-[env(safe-area-inset-bottom,0px)] px-1 shadow-[0_-4px_20px_rgba(0,0,0,0.04)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.35)] select-none max-sm:transition-transform max-sm:duration-300 max-sm:ease-in-out ${
-          isNavHidden ? 'max-sm:translate-y-full' : 'max-sm:translate-y-0'
-        }`}
+        className="sm:hidden fixed bottom-0 inset-x-0 bg-white/90 dark:bg-[#111827]/90 backdrop-blur-xl border-t border-[#E5E2DC] dark:border-slate-800 grid grid-cols-5 items-stretch h-[calc(3.5rem+env(safe-area-inset-bottom,0px))] pb-[env(safe-area-inset-bottom,0px)] px-1 shadow-[0_-4px_20px_rgba(0,0,0,0.04)] dark:shadow-[0_-4px_24px_rgba(0,0,0,0.35)] select-none"
       >
         <button
           onClick={() => setActiveTab('timeline')}
@@ -1974,15 +1978,11 @@ export default function App() {
         lang={lang}
       />
 
-      {/* Floating Travel Quick Action Button (Single Clean FAB, hidden for read-only collaborators) */}
+      {/* Floating Travel Quick Action Button (Single Clean FAB, anchored above bottom nav) */}
       {(!currentTrip.isCollaborative || permission.canEdit) && (
         <div
           style={{ position: 'fixed', zIndex: 40 }}
-          className={`fixed right-4 sm:bottom-8 sm:right-8 flex flex-col items-end gap-2 animate-in fade-in select-none max-sm:transition-all max-sm:duration-300 max-sm:ease-in-out ${
-            isNavHidden
-              ? 'max-sm:bottom-[calc(1.25rem+env(safe-area-inset-bottom,0px))]'
-              : 'max-sm:bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))]'
-          }`}
+          className="fixed right-4 max-sm:bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] sm:bottom-8 sm:right-8 flex flex-col items-end gap-2 animate-in fade-in select-none"
         >
           {/* Optional Secondary Todos Pill if expanded */}
           {showFabNote && (
