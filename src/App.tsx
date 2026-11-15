@@ -124,6 +124,7 @@ export default function App() {
   // Modals
   const [showTripModal, setShowTripModal] = useState(false);
   const [tripModalData, setTripModalData] = useState<Trip | null>(null);
+  const [tripModalInitialMode, setTripModalInitialMode] = useState<'planner' | 'memory'>('planner');
 
   const [showItemModal, setShowItemModal] = useState(false);
   const [editingItemData, setEditingItemData] = useState<{
@@ -742,6 +743,13 @@ export default function App() {
     setCurrentTripIdState(id);
     setCurrentTripId(id);
     setShowTripSwitcher(false);
+    setMemoriesSpotId(undefined);
+    const found = trips.find((t) => t.id === id);
+    if (found?.tripMode === 'memory') {
+      setActiveTab('memories');
+    } else if (found && activeTab === 'memories') {
+      setActiveTab('timeline');
+    }
   };
 
   const currentTrip = trips.find((t) => t.id === currentTripId) || trips[0] || PRESET_TRIPS[0];
@@ -821,6 +829,11 @@ export default function App() {
       setCurrentTripIdState(newTrip.id);
       setCurrentTripId(newTrip.id);
 
+      if (newTrip.tripMode === 'memory') {
+        setMemoriesSpotId(undefined);
+        setActiveTab('memories');
+      }
+
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         enqueueTripSave(user.uid, newTrip);
       } else {
@@ -832,6 +845,7 @@ export default function App() {
     }
     setShowTripModal(false);
     setTripModalData(null);
+    setTripModalInitialMode('planner');
   };
 
   const handleDeleteCurrentTrip = () => {
@@ -1776,10 +1790,12 @@ export default function App() {
       {showTripModal && (
         <TripEditModal
           trip={tripModalData}
+          initialMode={tripModalInitialMode}
           onSave={handleSaveTripModal}
           onClose={() => {
             setShowTripModal(false);
             setTripModalData(null);
+            setTripModalInitialMode('planner');
           }}
         />
       )}
@@ -1936,16 +1952,28 @@ export default function App() {
           lang={lang}
           onUpdateTrip={handleUpdateTrip}
           requireAuth={requireAuth}
+          onCreateMemoryTrip={() => {
+            setShowGlobalHubModal(false);
+            requireAuth(() => {
+              setTripModalData(null);
+              setTripModalInitialMode('memory');
+              setShowTripModal(true);
+            }, lang === 'zh' ? '補登過往回憶旅程' : 'Archive past trip');
+          }}
           onSelectTrip={(selectedId, targetSpotId) => {
+            const found = trips.find((t) => t.id === selectedId);
             handleSelectTrip(selectedId);
-            if (targetSpotId) {
+            if (targetSpotId && !targetSpotId.startsWith('mem-cluster-')) {
               setMemoriesSpotId(targetSpotId);
               setActiveTab('memories');
+            } else if (targetSpotId || found?.tripMode === 'memory') {
+              setMemoriesSpotId(undefined);
+              setActiveTab('memories');
             } else {
+              setMemoriesSpotId(undefined);
               setActiveTab('timeline');
             }
             setShowGlobalHubModal(false);
-            const found = trips.find((t) => t.id === selectedId);
             if (found) {
               showToast(lang === 'zh' ? `已切換至旅程：【${found.title}】` : `Switched to ${found.title}`);
             }

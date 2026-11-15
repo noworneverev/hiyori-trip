@@ -34,6 +34,7 @@ import {
   Image as ImageIcon,
   Map as MapIcon,
   MapPin,
+  Plus,
   Route,
   Search,
   SlidersHorizontal,
@@ -47,6 +48,7 @@ interface GlobalTravelHubModalProps {
   lang: Language;
   onSelectTrip: (tripId: string, targetSpotId?: string) => void;
   onUpdateTrip?: (updatedTrip: Trip) => void;
+  onCreateMemoryTrip?: () => void;
   onClose: () => void;
   requireAuth?: (action: () => void, reason?: string) => boolean;
 }
@@ -58,6 +60,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   lang,
   onSelectTrip,
   onUpdateTrip,
+  onCreateMemoryTrip,
   onClose,
   requireAuth,
 }) => {
@@ -208,8 +211,13 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
         }
       });
 
+      const tripSpotIds = new Set<string>();
+      let totalSpotItems = 0;
+
       (trip.days || []).forEach((day) => {
         (day.items || []).forEach((spot) => {
+          tripSpotIds.add(spot.id);
+          totalSpotItems++;
           const key = `${trip.id}::${day.dayNumber}::${spot.id}`;
           if (seenKeys.has(key)) return;
           seenKeys.add(key);
@@ -248,6 +256,113 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
           });
         });
       });
+
+      // Project standalone memories (especially for Memory-Archive trips & free snapshots) onto map & timeline
+      const standaloneMems = (trip.memories || []).filter(
+        (mem) => !mem.spotId || !tripSpotIds.has(mem.spotId)
+      );
+
+      if (standaloneMems.length > 0) {
+        const clusterMap = new Map<string, typeof standaloneMems>();
+        standaloneMems.forEach((mem) => {
+          const hasGps =
+            typeof mem.lat === 'number' &&
+            typeof mem.lng === 'number' &&
+            Number.isFinite(mem.lat) &&
+            Number.isFinite(mem.lng);
+          const dateKey = mem.date || trip.startDate || '';
+          const clusterKey = hasGps
+            ? `gps::${Math.round(mem.lat! * 500) / 500}_${Math.round(mem.lng! * 500) / 500}::${dateKey}`
+            : `nogps::${dateKey}`;
+          const existing = clusterMap.get(clusterKey) || [];
+          existing.push(mem);
+          clusterMap.set(clusterKey, existing);
+        });
+
+        let clusterIdx = 0;
+        clusterMap.forEach((group) => {
+          clusterIdx++;
+          const first = group[0];
+          const gpsMems = group.filter(
+            (m) => typeof m.lat === 'number' && typeof m.lng === 'number'
+          );
+          const avgLat =
+            gpsMems.length > 0
+              ? Math.round((gpsMems.reduce((s, m) => s + m.lat!, 0) / gpsMems.length) * 1000000) / 1000000
+              : trip.destinationLat;
+          const avgLng =
+            gpsMems.length > 0
+              ? Math.round((gpsMems.reduce((s, m) => s + m.lng!, 0) / gpsMems.length) * 1000000) / 1000000
+              : trip.destinationLng;
+
+          const dateStr = first.date || trip.startDate || '';
+          const dayNum =
+            first.dayNumber ||
+            trip.days?.find((d) => d.date === dateStr)?.dayNumber ||
+            1;
+          const photos = Array.from(
+            new Set(group.map((m) => m.imageUrl).filter((u): u is string => Boolean(u)))
+          );
+          const titleCandidate =
+            first.spotTitle && first.spotTitle !== '自由隨拍打卡'
+              ? first.spotTitle
+              : first.location || trip.destination || trip.title;
+
+          list.push({
+            tripId: trip.id,
+            tripTitle: trip.title,
+            tripDestination: trip.destination,
+            tripCoverGradient: trip.coverGradient,
+            tripCurrency: trip.currency || 'JPY',
+            tripStartDate: trip.startDate,
+            tripEndDate: trip.endDate,
+            ownerId: trip.ownerId,
+            collabId: trip.collabId,
+            dayNumber: dayNum,
+            date: dateStr,
+            spotId: `mem-cluster-${trip.id}-${clusterIdx}`,
+            spotTitle: titleCandidate,
+            category: 'spot',
+            locationName: first.location || trip.destination,
+            lat: avgLat,
+            lng: avgLng,
+            notes: first.caption || trip.notes,
+            mood: first.mood,
+            photos,
+            googlePhotosUrl: first.googlePhotosUrl || trip.googlePhotosAlbumUrl,
+            completed: true,
+          });
+        });
+      } else if (
+        trip.tripMode === 'memory' &&
+        totalSpotItems === 0 &&
+        typeof trip.destinationLat === 'number' &&
+        typeof trip.destinationLng === 'number'
+      ) {
+        list.push({
+          tripId: trip.id,
+          tripTitle: trip.title,
+          tripDestination: trip.destination,
+          tripCoverGradient: trip.coverGradient,
+          tripCurrency: trip.currency || 'JPY',
+          tripStartDate: trip.startDate,
+          tripEndDate: trip.endDate,
+          ownerId: trip.ownerId,
+          collabId: trip.collabId,
+          dayNumber: 1,
+          date: trip.startDate || '',
+          spotId: `mem-cluster-dest-${trip.id}`,
+          spotTitle: trip.destination || trip.title,
+          category: 'spot',
+          locationName: trip.destination,
+          lat: trip.destinationLat,
+          lng: trip.destinationLng,
+          notes: trip.notes,
+          photos: [],
+          googlePhotosUrl: trip.googlePhotosAlbumUrl,
+          completed: true,
+        });
+      }
     });
 
     return list;
@@ -266,6 +381,9 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       if (tr.startDate && tr.startDate.length >= 4) years.add(tr.startDate.slice(0, 4));
       (tr.days || []).forEach((d) => {
         if (d.date && d.date.length >= 4) years.add(d.date.slice(0, 4));
+      });
+      (tr.memories || []).forEach((m) => {
+        if (m.date && m.date.length >= 4) years.add(m.date.slice(0, 4));
       });
     });
     return Array.from(years).sort((a, b) => b.localeCompare(a));
@@ -307,6 +425,40 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     selectedCategory,
   ]);
 
+  // Lookup Drive original metadata by (tripId::imageUrl) so Map, Calendar, Timeline & Gallery lightboxes all get HD originals
+  const driveMetaByTripUrl = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        driveFileId?: string;
+        originalBytes?: number;
+        originalWidth?: number;
+        originalHeight?: number;
+        originalMimeType?: string;
+      }
+    >();
+    uniqueTrips.forEach((tr) => {
+      (tr.memories || []).forEach((mem) => {
+        if (mem.imageUrl && mem.driveFileId) {
+          map.set(`${tr.id}::${mem.imageUrl}`, {
+            driveFileId: mem.driveFileId,
+            originalBytes: mem.originalBytes,
+            originalWidth: mem.originalWidth,
+            originalHeight: mem.originalHeight,
+            originalMimeType: mem.originalMimeType,
+          });
+        }
+      });
+    });
+    return map;
+  }, [uniqueTrips]);
+
+  const enrichGalleryPhoto = (item: GalleryPhotoItem): GalleryPhotoItem => {
+    if (item.driveFileId) return item;
+    const driveMeta = driveMetaByTripUrl.get(`${item.tripId}::${item.url}`);
+    return driveMeta ? { ...item, ...driveMeta } : item;
+  };
+
   // Unified Gallery Photos (both Spot photos and standalone trip.memories)
   const filteredGalleryPhotos = useMemo<GalleryPhotoItem[]>(() => {
     const result: GalleryPhotoItem[] = [];
@@ -318,6 +470,8 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
         const key = `${s.tripId}::${url}`;
         if (seen.has(key)) return;
         seen.add(key);
+        const isMemoryCluster = s.spotId.startsWith('mem-cluster-');
+        const driveMeta = driveMetaByTripUrl.get(key);
         result.push({
           id: `${s.tripId}-${s.spotId}-${idx}`,
           url,
@@ -326,7 +480,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
           tripDestination: s.tripDestination,
           ownerId: s.ownerId,
           collabId: s.collabId,
-          spotId: s.spotId,
+          spotId: isMemoryCluster ? undefined : s.spotId,
           spotTitle: s.spotTitle,
           dayNumber: s.dayNumber,
           date: s.date,
@@ -335,7 +489,8 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
           mood: s.mood,
           caption: s.notes,
           googlePhotosUrl: s.googlePhotosUrl,
-          isFeaturedSpot: true,
+          ...driveMeta,
+          isFeaturedSpot: !isMemoryCluster,
         });
       });
     });
@@ -374,6 +529,11 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
             mood: mem.mood,
             caption: mem.caption,
             googlePhotosUrl: mem.googlePhotosUrl,
+            driveFileId: mem.driveFileId,
+            originalBytes: mem.originalBytes,
+            originalWidth: mem.originalWidth,
+            originalHeight: mem.originalHeight,
+            originalMimeType: mem.originalMimeType,
             isFeaturedSpot: Boolean(mem.spotId),
           });
         });
@@ -554,25 +714,30 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   };
 
   const openSpotPhotosLightbox = (spot: FlattenedSpotMemory, startIndex: number) => {
-    const items: GalleryPhotoItem[] = spot.photos.map((url, idx) => ({
-      id: `${spot.tripId}-${spot.spotId}-${idx}`,
-      url,
-      tripId: spot.tripId,
-      tripTitle: spot.tripTitle,
-      tripDestination: spot.tripDestination,
-      ownerId: spot.ownerId,
-      collabId: spot.collabId,
-      spotId: spot.spotId,
-      spotTitle: spot.spotTitle,
-      dayNumber: spot.dayNumber,
-      date: spot.date,
-      category: spot.category,
-      locationName: spot.locationName,
-      mood: spot.mood,
-      caption: spot.notes,
-      googlePhotosUrl: spot.googlePhotosUrl,
-      isFeaturedSpot: true,
-    }));
+    const isMemoryCluster = spot.spotId.startsWith('mem-cluster-');
+    const items: GalleryPhotoItem[] = spot.photos.map((url, idx) => {
+      const driveMeta = driveMetaByTripUrl.get(`${spot.tripId}::${url}`);
+      return {
+        id: `${spot.tripId}-${spot.spotId}-${idx}`,
+        url,
+        tripId: spot.tripId,
+        tripTitle: spot.tripTitle,
+        tripDestination: spot.tripDestination,
+        ownerId: spot.ownerId,
+        collabId: spot.collabId,
+        spotId: isMemoryCluster ? undefined : spot.spotId,
+        spotTitle: spot.spotTitle,
+        dayNumber: spot.dayNumber,
+        date: spot.date,
+        category: spot.category,
+        locationName: spot.locationName,
+        mood: spot.mood,
+        caption: spot.notes,
+        googlePhotosUrl: spot.googlePhotosUrl,
+        ...driveMeta,
+        isFeaturedSpot: !isMemoryCluster,
+      };
+    });
     setLightboxState({ photos: items, index: startIndex, autoPlay: false });
   };
 
@@ -775,14 +940,26 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={onClose}
-              className="md:hidden min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-              aria-label="關閉足跡時光庫"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-1 md:hidden">
+              {onCreateMemoryTrip && (
+                <button
+                  type="button"
+                  onClick={onCreateMemoryTrip}
+                  className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold flex items-center gap-1 transition cursor-pointer shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>補登回憶</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onClose}
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                aria-label="關閉足跡時光庫"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center justify-between md:justify-end gap-2.5 min-w-0">
@@ -809,6 +986,17 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 );
               })}
             </nav>
+
+            {onCreateMemoryTrip && (
+              <button
+                type="button"
+                onClick={onCreateMemoryTrip}
+                className="hidden md:inline-flex min-h-[40px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold items-center gap-1.5 transition cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>補登過往回憶</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -868,7 +1056,11 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                   onSelectTrip={onSelectTrip}
                   onToggleSpotVisited={handleToggleSpotVisited}
                   onOpenLightbox={(items, index) =>
-                    setLightboxState({ photos: items, index, autoPlay: false })
+                    setLightboxState({
+                      photos: items.map(enrichGalleryPhoto),
+                      index,
+                      autoPlay: false,
+                    })
                   }
                   onCloseHub={onClose}
                 />
@@ -878,7 +1070,11 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 <TravelHubGalleryView
                   photos={filteredGalleryPhotos}
                   onOpenLightbox={(items, index, autoPlay) =>
-                    setLightboxState({ photos: items, index, autoPlay })
+                    setLightboxState({
+                      photos: items.map(enrichGalleryPhoto),
+                      index,
+                      autoPlay,
+                    })
                   }
                   onSelectTrip={onSelectTrip}
                   onCloseHub={onClose}
@@ -1076,7 +1272,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                                             {spot.startTime}
                                           </span>
                                         )}
-                                        {onUpdateTrip && (canEditMap.get(spot.tripId) ?? true) && (
+                                        {onUpdateTrip && !spot.spotId.startsWith('mem-cluster-') && (canEditMap.get(spot.tripId) ?? true) && (
                                           <button
                                             type="button"
                                             onClick={(e) =>
@@ -1224,7 +1420,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                                         </h4>
                                       </div>
 
-                                      {onUpdateTrip && (canEditMap.get(spot.tripId) ?? true) && (
+                                      {onUpdateTrip && !spot.spotId.startsWith('mem-cluster-') && (canEditMap.get(spot.tripId) ?? true) && (
                                         <button
                                           type="button"
                                           onClick={(e) =>
@@ -1306,7 +1502,11 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                   onSelectTrip={onSelectTrip}
                   onOpenShareStudio={() => setShowShareStudio(true)}
                   onOpenLightbox={(items, idx) =>
-                    setLightboxState({ photos: items, index: idx, autoPlay: false })
+                    setLightboxState({
+                      photos: items.map(enrichGalleryPhoto),
+                      index: idx,
+                      autoPlay: false,
+                    })
                   }
                   onCloseHub={onClose}
                 />

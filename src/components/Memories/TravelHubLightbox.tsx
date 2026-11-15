@@ -1,12 +1,27 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { formatDateSlash } from '../../utils/date';
+import {
+  connectGoogleDrive,
+  getDriveAccessToken,
+  hasDriveAccessToken,
+} from '../../utils/firebase';
+import {
+  downloadDriveOriginalFile,
+  DriveAuthExpiredError,
+  fetchDriveOriginalObjectUrl,
+  formatBytesLabel,
+  getCachedDriveOriginalObjectUrl,
+} from '../../utils/googleDrive';
 import { MediaImage } from '../UI/MediaImage';
 import { GalleryPhotoItem } from './travelHubTypes';
 import {
   ArrowRight,
   ChevronLeft,
   ChevronRight,
+  Download,
   ExternalLink,
+  HardDrive,
+  Loader2,
   MapPin,
   Pause,
   Play,
@@ -35,10 +50,75 @@ export const TravelHubLightbox: React.FC<TravelHubLightboxProps> = ({
   );
   const [isPlaying, setIsPlaying] = useState(initialAutoPlay && photos.length > 1);
   const [progress, setProgress] = useState(0);
+  const [driveConnected, setDriveConnected] = useState<boolean>(() => hasDriveAccessToken());
+  const [driveOriginalUrl, setDriveOriginalUrl] = useState<string | null>(() =>
+    getCachedDriveOriginalObjectUrl(photos[initialIndex]?.driveFileId)
+  );
+  const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
+  const [isConnectingDrive, setIsConnectingDrive] = useState(false);
+  const [isDownloadingOriginal, setIsDownloadingOriginal] = useState(false);
+  const [driveLoadError, setDriveLoadError] = useState<string | null>(null);
 
   const touchStartXRef = useRef<number | null>(null);
 
   const currentPhoto = photos[currentIndex];
+
+  useEffect(() => {
+    const syncDrive = () => setDriveConnected(hasDriveAccessToken());
+    window.addEventListener('hiyori_drive_auth_changed', syncDrive);
+    return () => window.removeEventListener('hiyori_drive_auth_changed', syncDrive);
+  }, []);
+
+  useEffect(() => {
+    setDriveLoadError(null);
+    const fileId = currentPhoto?.driveFileId;
+    if (!fileId) {
+      setDriveOriginalUrl(null);
+      setIsLoadingOriginal(false);
+      return;
+    }
+
+    const cached = getCachedDriveOriginalObjectUrl(fileId);
+    if (cached) {
+      setDriveOriginalUrl(cached);
+      setIsLoadingOriginal(false);
+      return;
+    }
+
+    setDriveOriginalUrl(null);
+    const token = getDriveAccessToken();
+    if (!token) {
+      setIsLoadingOriginal(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingOriginal(true);
+    fetchDriveOriginalObjectUrl(fileId, token)
+      .then((url) => {
+        if (!cancelled) {
+          setDriveOriginalUrl(url);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          if (err instanceof DriveAuthExpiredError) {
+            setDriveConnected(false);
+          } else {
+            setDriveLoadError(err instanceof Error ? err.message : '原圖載入失敗');
+          }
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingOriginal(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentPhoto?.driveFileId, driveConnected]);
 
   const handleNext = () => {
     setProgress(0);
@@ -194,12 +274,12 @@ export const TravelHubLightbox: React.FC<TravelHubLightboxProps> = ({
         )}
 
         <MediaImage
-          src={currentPhoto.url}
+          src={driveOriginalUrl || currentPhoto.url}
           tripId={currentPhoto.tripId}
           ownerId={currentPhoto.ownerId}
           collabId={currentPhoto.collabId}
           alt={currentPhoto.spotTitle || '旅行回憶'}
-          className="max-w-full max-h-[68vh] object-contain rounded-2xl shadow-2xl border border-white/10"
+          className="max-w-full max-h-[68vh] object-contain rounded-2xl shadow-2xl border border-white/10 transition-opacity duration-200"
         />
 
         {photos.length > 1 && (
@@ -247,9 +327,38 @@ export const TravelHubLightbox: React.FC<TravelHubLightboxProps> = ({
                 {currentPhoto.caption}
               </p>
             )}
+            {currentPhoto.driveFileId && (
+              <div className="text-[11px] font-mono tabular-nums text-slate-300 flex items-center gap-1.5 flex-wrap pt-0.5">
+                <HardDrive className="w-3 h-3 text-teal-400 shrink-0" />
+                {currentPhoto.originalWidth && currentPhoto.originalHeight && (
+                  <span>
+                    {currentPhoto.originalWidth} × {currentPhoto.originalHeight}
+                  </span>
+                )}
+                {currentPhoto.originalBytes && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>{formatBytesLabel(currentPhoto.originalBytes)}</span>
+                  </>
+                )}
+                <span aria-hidden="true">·</span>
+                {isLoadingOriginal ? (
+                  <span className="font-sans text-teal-300 inline-flex items-center gap-1">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>載入 Drive 原圖中...</span>
+                  </span>
+                ) : driveOriginalUrl ? (
+                  <span className="font-sans text-teal-300">Drive 原圖畫質</span>
+                ) : driveLoadError ? (
+                  <span className="font-sans text-amber-300">{driveLoadError}</span>
+                ) : (
+                  <span className="font-sans text-slate-400">1440px 高清預覽</span>
+                )}
+              </div>
+            )}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
             {photos.length > 1 && (
               <div className="flex sm:hidden items-center gap-1 mr-auto">
                 <button
@@ -269,6 +378,68 @@ export const TravelHubLightbox: React.FC<TravelHubLightboxProps> = ({
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
+            )}
+
+            {currentPhoto.driveFileId && !driveOriginalUrl && !isLoadingOriginal && !driveConnected && (
+              <button
+                type="button"
+                disabled={isConnectingDrive}
+                onClick={async () => {
+                  setIsConnectingDrive(true);
+                  try {
+                    await connectGoogleDrive();
+                    setDriveConnected(hasDriveAccessToken());
+                  } finally {
+                    setIsConnectingDrive(false);
+                  }
+                }}
+                className="min-h-[40px] px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-teal-300 text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap disabled:opacity-50"
+              >
+                <HardDrive className="w-3.5 h-3.5" />
+                <span>{isConnectingDrive ? '授權中...' : '載入 Drive 原圖'}</span>
+              </button>
+            )}
+
+            {currentPhoto.driveFileId && (
+              <button
+                type="button"
+                disabled={isDownloadingOriginal}
+                onClick={async () => {
+                  let token = getDriveAccessToken();
+                  if (!token) {
+                    token = await connectGoogleDrive();
+                    setDriveConnected(hasDriveAccessToken());
+                  }
+                  if (!token || !currentPhoto.driveFileId) return;
+                  setIsDownloadingOriginal(true);
+                  try {
+                    const ext =
+                      currentPhoto.originalMimeType === 'image/png'
+                        ? 'png'
+                        : currentPhoto.originalMimeType === 'image/webp'
+                        ? 'webp'
+                        : 'jpg';
+                    const safeName = `${currentPhoto.date || 'hiyori'}_${currentPhoto.spotTitle || 'photo'}.${ext}`.replace(
+                      /[\\/:*?"<>|]/g,
+                      '_'
+                    );
+                    await downloadDriveOriginalFile(currentPhoto.driveFileId, safeName, token);
+                  } catch (err) {
+                    setDriveLoadError(err instanceof Error ? err.message : '下載失敗');
+                  } finally {
+                    setIsDownloadingOriginal(false);
+                  }
+                }}
+                className="min-h-[40px] px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap disabled:opacity-50"
+                title="從 Google Drive 下載未壓縮原始照片"
+              >
+                {isDownloadingOriginal ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Download className="w-3.5 h-3.5 text-teal-300" />
+                )}
+                <span>下載原圖</span>
+              </button>
             )}
 
             {currentPhoto.googlePhotosUrl && (

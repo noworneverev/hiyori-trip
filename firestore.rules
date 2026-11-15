@@ -58,6 +58,10 @@ service cloud.firestore {
              isValidOptionalString(data, 'collabId', 128) &&
              isValidOptionalString(data, 'lastUpdatedBy', 128) &&
              isValidOptionalString(data, 'generalAccess', 30) &&
+             isValidOptionalString(data, 'tripMode', 20) &&
+             isValidOptionalString(data, 'driveFolderId', 128) &&
+             (!('destinationLat' in data) || data.destinationLat == null || data.destinationLat is number) &&
+             (!('destinationLng' in data) || data.destinationLng == null || data.destinationLng is number) &&
              isValidOptionalList(data, 'packingList', 300) &&
              isValidOptionalList(data, 'todos', 300) &&
              isValidOptionalList(data, 'expenses', 500) &&
@@ -78,7 +82,8 @@ service cloud.firestore {
                'todos', 'expenses', 'bookings', 'customExpenseCategories', 'customCategoryLabels',
                'customExchangeRates', 'emergencyContacts', 'memories', 'deletedItemIds',
                'isSplitEnabled', 'splitMembers', 'initialCashAmount', 'initialCashCurrency',
-               'isSoloTrip', 'googlePhotosAlbumUrl', 'isCollaborative', 'collabId',
+               'isSoloTrip', 'tripMode', 'destinationLat', 'destinationLng',
+               'googlePhotosAlbumUrl', 'driveFolderId', 'isCollaborative', 'collabId',
                'collaborators', 'editorEmails', 'viewerEmails', 'generalAccess', 'lastUpdatedBy',
                'lastSyncedAt', 'createdAt', 'updatedAt'
              ]);
@@ -111,7 +116,8 @@ service cloud.firestore {
                'currency', 'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
                'todos', 'expenses', 'bookings', 'customExpenseCategories', 'customCategoryLabels',
                'customExchangeRates', 'emergencyContacts', 'memories', 'isSplitEnabled',
-               'splitMembers', 'isSoloTrip', 'googlePhotosAlbumUrl', 'publishedAt', 'updatedAt'
+               'splitMembers', 'isSoloTrip', 'tripMode', 'destinationLat', 'destinationLng',
+               'googlePhotosAlbumUrl', 'driveFolderId', 'publishedAt', 'updatedAt'
              ]);
     }
 
@@ -125,7 +131,8 @@ service cloud.firestore {
                'customExpenseCategories', 'customCategoryLabels', 'customExchangeRates',
                'emergencyContacts', 'memories', 'deletedItemIds', 'isSplitEnabled',
                'splitMembers', 'initialCashAmount', 'initialCashCurrency', 'isSoloTrip',
-               'googlePhotosAlbumUrl', 'createdAt', 'updatedAt', 'lastUpdatedBy'
+               'tripMode', 'destinationLat', 'destinationLng',
+               'googlePhotosAlbumUrl', 'driveFolderId', 'createdAt', 'updatedAt', 'lastUpdatedBy'
              ]);
     }
 
@@ -238,7 +245,8 @@ service cloud.firestore {
                              'todos', 'expenses', 'bookings', 'customExpenseCategories', 'customCategoryLabels',
                              'customExchangeRates', 'emergencyContacts', 'memories', 'deletedItemIds',
                              'isSplitEnabled', 'splitMembers', 'initialCashAmount',
-                             'initialCashCurrency', 'isSoloTrip', 'googlePhotosAlbumUrl',
+                             'initialCashCurrency', 'isSoloTrip', 'tripMode', 'destinationLat',
+                             'destinationLng', 'googlePhotosAlbumUrl', 'driveFolderId',
                              'updatedAt', 'lastUpdatedBy'
                            ])
                          )

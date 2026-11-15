@@ -88,6 +88,24 @@
           "type": "array",
           "description": "List of travel memory metadata and media:// references."
         },
+        "tripMode": {
+          "type": "string",
+          "enum": ["planner", "memory"],
+          "description": "Whether the trip is a full itinerary planner or a photo-first memory archive."
+        },
+        "destinationLat": {
+          "type": "number",
+          "description": "Representative latitude for the trip destination on footprint maps."
+        },
+        "destinationLng": {
+          "type": "number",
+          "description": "Representative longitude for the trip destination on footprint maps."
+        },
+        "driveFolderId": {
+          "type": "string",
+          "description": "Google Drive folder ID where uncompressed original trip photos are stored.",
+          "maxLength": 128
+        },
         "deletedItemIds": {
           "type": "object",
           "description": "Map of deleted sub-item IDs to deletion epoch timestamps."

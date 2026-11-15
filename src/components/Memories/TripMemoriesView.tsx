@@ -3,9 +3,26 @@ import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { Trip, TripMemoryItem, ItineraryItem } from '../../types/itinerary';
 import { formatDateSlash, formatMonthDaySlash, getDayOfWeek } from '../../utils/date';
 import { Language } from '../../utils/i18n';
-import { compressImageFile, storeImageAsMediaRef } from '../../utils/image';
+import { processPhotoWithExif } from '../../utils/exif';
+import { searchLocationOSM } from '../../utils/geo';
 import { canUploadImages } from '../../utils/userPermissions';
-import { auth, loginWithGoogle, saveTripToCloud } from '../../utils/firebase';
+import {
+  auth,
+  connectGoogleDrive,
+  getDriveAccessToken,
+  hasDriveAccessToken,
+  loginWithGoogle,
+  saveTripToCloud,
+} from '../../utils/firebase';
+import {
+  deleteDriveFile,
+  downloadDriveOriginalFile,
+  DriveAuthExpiredError,
+  fetchDriveOriginalObjectUrl,
+  formatBytesLabel,
+  getCachedDriveOriginalObjectUrl,
+  uploadOriginalPhotoToDrive,
+} from '../../utils/googleDrive';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { MediaImage } from '../UI/MediaImage';
 import {
@@ -39,6 +56,7 @@ import {
   Compass,
   CheckCircle2,
   Circle,
+  HardDrive,
 } from 'lucide-react';
 
 interface TripMemoriesViewProps {
@@ -66,6 +84,20 @@ const PRESET_MOODS = [
   { icon: '✈️', label: '隨行啟程' },
 ];
 
+export interface PendingMemoryUpload {
+  mediaRef: string;
+  takenDate: string;
+  hasExifDate: boolean;
+  lat?: number;
+  lng?: number;
+  hasGps: boolean;
+  rawFile?: File;
+  originalBytes?: number;
+  originalWidth?: number;
+  originalHeight?: number;
+  originalMimeType?: string;
+}
+
 export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   trip,
   allTrips,
@@ -77,7 +109,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   initialSpotId,
   requireAuth,
 }) => {
-  const [viewMode, setViewMode] = useState<'itinerary' | 'gallery' | 'polaroid'>('itinerary');
+  const [viewMode, setViewMode] = useState<'itinerary' | 'gallery' | 'polaroid'>(() =>
+    trip.tripMode === 'memory' && !initialSpotId ? 'gallery' : 'itinerary'
+  );
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedDayFilter, setSelectedDayFilter] = useState<number | 'all' | 'custom'>('all');
   const [lightboxMemory, setLightboxMemory] = useState<TripMemoryItem | null>(null);
@@ -89,13 +123,38 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const [syncingMemIds, setSyncingMemIds] = useState<Set<string>>(new Set());
   const [confirmDeleteMemId, setConfirmDeleteMemId] = useState<string | null>(null);
   const [confirmDeleteSpotPhoto, setConfirmDeleteSpotPhoto] = useState<{ spotId: string; photoUrl: string } | null>(null);
+  const [isLocatingCity, setIsLocatingCity] = useState(false);
+  const [driveConnected, setDriveConnected] = useState<boolean>(() => hasDriveAccessToken());
+  const [isConnectingDrive, setIsConnectingDrive] = useState(false);
+  const [driveUploadProgress, setDriveUploadProgress] = useState<{ done: number; total: number } | null>(null);
+  const [pendingDriveDeleteMem, setPendingDriveDeleteMem] = useState<TripMemoryItem | null>(null);
+  const [isDeletingDriveFile, setIsDeletingDriveFile] = useState(false);
+  const [driveDeleteError, setDriveDeleteError] = useState<string | null>(null);
 
-  // Monitor Firebase Auth State
+  // Sync default tab when switching between planner trips and memory-only trips
+  useEffect(() => {
+    if (initialSpotId) {
+      setViewMode('itinerary');
+    } else if (trip.tripMode === 'memory') {
+      setViewMode('gallery');
+    } else {
+      setViewMode('itinerary');
+    }
+    setSelectedDayFilter('all');
+  }, [trip.id, trip.tripMode, initialSpotId]);
+
+  // Monitor Firebase Auth State & Drive token changes
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
+      setDriveConnected(hasDriveAccessToken());
     });
-    return () => unsubscribe();
+    const syncDrive = () => setDriveConnected(hasDriveAccessToken());
+    window.addEventListener('hiyori_drive_auth_changed', syncDrive);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('hiyori_drive_auth_changed', syncDrive);
+    };
   }, []);
 
   // Listen to Global Cloud Sync Events
@@ -201,15 +260,18 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     );
   };
 
-  // Lock background scroll when either modal or lightbox is open
-  useBodyScrollLock(showUploadModal || Boolean(lightboxMemory));
+  // Lock background scroll when modal, lightbox, or delete dialog is open
+  useBodyScrollLock(showUploadModal || Boolean(lightboxMemory) || Boolean(pendingDriveDeleteMem));
 
-  // Escape key handler for Lightbox and Upload Modal
+  // Escape key handler for Dialogs, Lightbox, and Upload Modal
   useEffect(() => {
-    if (!showUploadModal && !lightboxMemory) return;
+    if (!showUploadModal && !lightboxMemory && !pendingDriveDeleteMem) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (lightboxMemory) {
+        if (pendingDriveDeleteMem && !isDeletingDriveFile) {
+          setPendingDriveDeleteMem(null);
+          setDriveDeleteError(null);
+        } else if (lightboxMemory) {
           setLightboxMemory(null);
           setConfirmDeleteMemId(null);
         } else if (showUploadModal) {
@@ -220,7 +282,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showUploadModal, lightboxMemory]);
+  }, [showUploadModal, lightboxMemory, pendingDriveDeleteMem, isDeletingDriveFile]);
 
   // Form State for uploading new memory photo
   const [uploadSpotId, setUploadSpotId] = useState<string>(initialSpotId || '');
@@ -231,7 +293,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const [uploadCaption, setUploadCaption] = useState('');
   const [uploadMood, setUploadMood] = useState('✨');
   const [uploadGooglePhotosUrl, setUploadGooglePhotosUrl] = useState('');
-  const [uploadImagePreviews, setUploadImagePreviews] = useState<string[]>([]);
+  const [uploadImagePreviews, setUploadImagePreviews] = useState<PendingMemoryUpload[]>([]);
+  const [uploadBatchProgress, setUploadBatchProgress] = useState<{ done: number; total: number } | null>(null);
   const [uploadLimitWarning, setUploadLimitWarning] = useState<string | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -451,16 +514,69 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     }
   };
 
-  // Lightbox inline edit states & high-res error handling
+  // Lightbox inline edit states & high-res Drive streaming
   const [isEditingLightboxUrl, setIsEditingLightboxUrl] = useState(false);
   const [lightboxEditUrl, setLightboxEditUrl] = useState('');
   const [lightboxHighResFailed, setLightboxHighResFailed] = useState(false);
+  const [driveOriginalUrl, setDriveOriginalUrl] = useState<string | null>(null);
+  const [isLoadingDriveOriginal, setIsLoadingDriveOriginal] = useState(false);
+  const [isDownloadingDriveOriginal, setIsDownloadingDriveOriginal] = useState(false);
+  const [driveOriginalError, setDriveOriginalError] = useState<string | null>(null);
 
   useEffect(() => {
     setIsEditingLightboxUrl(false);
     setLightboxEditUrl(lightboxMemory?.googlePhotosUrl || '');
     setLightboxHighResFailed(false);
-  }, [lightboxMemory?.id]);
+    setDriveOriginalError(null);
+
+    const fileId = lightboxMemory?.driveFileId;
+    if (!fileId) {
+      setDriveOriginalUrl(null);
+      setIsLoadingDriveOriginal(false);
+      return;
+    }
+
+    const cached = getCachedDriveOriginalObjectUrl(fileId);
+    if (cached) {
+      setDriveOriginalUrl(cached);
+      setIsLoadingDriveOriginal(false);
+      return;
+    }
+
+    setDriveOriginalUrl(null);
+    const token = getDriveAccessToken();
+    if (!token) {
+      setIsLoadingDriveOriginal(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingDriveOriginal(true);
+    fetchDriveOriginalObjectUrl(fileId, token)
+      .then((url) => {
+        if (!cancelled) {
+          setDriveOriginalUrl(url);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          if (err instanceof DriveAuthExpiredError) {
+            setDriveConnected(false);
+          } else {
+            setDriveOriginalError(err instanceof Error ? err.message : '原圖載入失敗');
+          }
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingDriveOriginal(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lightboxMemory?.id, lightboxMemory?.driveFileId, driveConnected]);
 
   const handleSaveLightboxGoogleUrl = () => {
     if (!canEdit || !lightboxMemory) return;
@@ -538,7 +654,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     }
   };
 
-  // Handle Photo File selection (multi-file up to 3 per spot)
+  // Handle Photo File selection (up to 3 per itinerary spot, or 24 per custom/memory batch with EXIF extraction)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -546,11 +662,16 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     const matchedSpotObj = !isCustomSpot && uploadSpotId ? allSpots.find((s) => s.spot.id === uploadSpotId) : null;
     const existingCount = matchedSpotObj?.spot.memoryPhotos?.length || 0;
     const currentNewCount = uploadImagePreviews.length;
-    const maxAllowed = isCustomSpot ? 3 : Math.max(0, 3 - existingCount);
+    const batchMax = isCustomSpot ? 24 : 3;
+    const maxAllowed = isCustomSpot ? 24 : Math.max(0, 3 - existingCount);
     const availableSlots = Math.max(0, maxAllowed - currentNewCount);
 
     if (availableSlots <= 0) {
-      setUploadLimitWarning('此景點照片已達上限 3 張！請先移除現有或已選照片後再加入。');
+      setUploadLimitWarning(
+        isCustomSpot
+          ? '單次批次上傳上限為 24 張！請先儲存這批相片後再繼續加入。'
+          : '此景點照片已達上限 3 張！請先移除現有或已選照片後再加入。'
+      );
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
@@ -561,22 +682,49 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     try {
       const filesToProcess = files.slice(0, availableSlots);
       if (files.length > availableSlots) {
-        setUploadLimitWarning(`景點照片上限為 3 張，已為您自動選取前 ${availableSlots} 張。`);
+        setUploadLimitWarning(
+          `${isCustomSpot ? '單次批次上限' : '景點照片上限'}為 ${batchMax} 張，已為您自動選取前 ${availableSlots} 張。`
+        );
       }
 
-      const compressedList: string[] = [];
-      for (const file of filesToProcess) {
-        const compressed = await compressImageFile(file);
-        const ref = await storeImageAsMediaRef(trip.id, compressed);
-        compressedList.push(ref);
+      setUploadBatchProgress({ done: 0, total: filesToProcess.length });
+      const processedList: PendingMemoryUpload[] = [];
+      for (let i = 0; i < filesToProcess.length; i++) {
+        const processed = await processPhotoWithExif(filesToProcess[i], trip.id);
+        processedList.push({
+          mediaRef: processed.mediaRef,
+          takenDate: processed.takenDate,
+          hasExifDate: processed.hasExifDate,
+          lat: processed.lat,
+          lng: processed.lng,
+          hasGps: processed.hasGps,
+          rawFile: processed.rawFile,
+          originalBytes: processed.originalBytes,
+          originalWidth: processed.originalWidth,
+          originalHeight: processed.originalHeight,
+          originalMimeType: processed.originalMimeType,
+        });
+        setUploadBatchProgress({ done: i + 1, total: filesToProcess.length });
       }
 
-      setUploadImagePreviews((prev) => [...prev, ...compressedList].slice(0, maxAllowed));
+      // Auto-fill customDate from earliest EXIF date if empty
+      if (isCustomSpot && !customDate) {
+        const exifDates = processedList
+          .filter((p) => p.hasExifDate && p.takenDate)
+          .map((p) => p.takenDate)
+          .sort();
+        if (exifDates.length > 0) {
+          setCustomDate(exifDates[0]);
+        }
+      }
+
+      setUploadImagePreviews((prev) => [...prev, ...processedList].slice(0, maxAllowed));
     } catch (err) {
-      console.error('Failed to compress photo:', err);
+      console.error('Failed to process photo:', err);
       setUploadLimitWarning(err instanceof Error ? err.message : '照片處理失敗，請確認格式或檔案大小（25MB 以內）後重試');
     } finally {
       setIsProcessingImage(false);
+      setUploadBatchProgress(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -584,6 +732,36 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const handleRemovePreview = (index: number) => {
     setUploadImagePreviews((prev) => prev.filter((_, idx) => idx !== index));
     setUploadLimitWarning(null);
+  };
+
+  // Quick city coordinate lookup for memory-mode trips missing GPS
+  const handleQuickLocateCity = async () => {
+    const query = (trip.destination || trip.title || '').trim();
+    if (!query || !canEdit || isLocatingCity) return;
+    setIsLocatingCity(true);
+    try {
+      const results = await searchLocationOSM(query);
+      if (results.length > 0) {
+        const best = results[0];
+        await onUpdateTrip({
+          ...trip,
+          destinationLat: best.lat,
+          destinationLng: best.lng,
+          updatedAt: Date.now(),
+        });
+        setToastMessage(`📍 已為【${trip.destination || trip.title}】標記城市座標，世界足跡地圖已點亮！`);
+      } else {
+        setToastMessage('⚠️ 找不到對應城市座標，可至「編輯旅程」手動搜尋較完整的城市英文或中文名稱');
+      }
+      setSaveSuccessToast(true);
+      setTimeout(() => setSaveSuccessToast(false), 3500);
+    } catch {
+      setToastMessage('⚠️ 城市座標查詢失敗，請稍後再試');
+      setSaveSuccessToast(true);
+      setTimeout(() => setSaveSuccessToast(false), 3000);
+    } finally {
+      setIsLocatingCity(false);
+    }
   };
 
   // Delete an existing photo from a spot directly (after inline confirm)
@@ -596,6 +774,16 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         lang === 'zh' ? '移除景點照片' : 'Remove spot photo'
       )
     ) {
+      return;
+    }
+
+    const matchingDriveMem = (trip.memories || []).find(
+      (m) => m.imageUrl === photoUrl && Boolean(m.driveFileId)
+    );
+    if (matchingDriveMem) {
+      setConfirmDeleteSpotPhoto(null);
+      setDriveDeleteError(null);
+      setPendingDriveDeleteMem(matchingDriveMem);
       return;
     }
 
@@ -660,22 +848,85 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
     const now = Date.now();
     let updatedMemories = [...(trip.memories || [])];
+    let nextDriveFolderId = trip.driveFolderId;
 
-    if (hasNewPhotos) {
-      const newMemories: TripMemoryItem[] = uploadImagePreviews.map((imgUrl, idx) => ({
-        id: `mem-${now}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
-        imageUrl: imgUrl,
-        caption: uploadCaption.trim() || finalTitle,
-        spotId: !isCustom ? uploadSpotId : undefined,
-        spotTitle: finalTitle,
-        dayNumber: chosenDayNum,
-        date: chosenDate,
-        mood: uploadMood,
-        location: finalLocation,
-        googlePhotosUrl: uploadGooglePhotosUrl.trim() || undefined,
-        createdAt: now + idx * 50,
-      }));
-      updatedMemories = [...newMemories, ...updatedMemories];
+    setIsSavingMemory(true);
+    try {
+      if (hasNewPhotos) {
+        const driveToken = getDriveAccessToken();
+        const driveUploads = new Map<
+          number,
+          { driveFileId: string; driveFolderId: string; originalBytes: number; originalMimeType: string }
+        >();
+
+        const rawIndexes = uploadImagePreviews
+          .map((p, idx) => (p.rawFile ? idx : -1))
+          .filter((idx) => idx >= 0);
+
+        if (driveToken && rawIndexes.length > 0) {
+          setDriveUploadProgress({ done: 0, total: rawIndexes.length });
+          for (let step = 0; step < rawIndexes.length; step++) {
+            const idx = rawIndexes[step];
+            const preview = uploadImagePreviews[idx];
+            if (preview.rawFile) {
+              try {
+                const uploaded = await uploadOriginalPhotoToDrive(preview.rawFile, {
+                  token: driveToken,
+                  tripId: trip.id,
+                  tripTitle: trip.title,
+                  existingFolderId: nextDriveFolderId,
+                  takenDate: isCustom
+                    ? customDate || preview.takenDate || chosenDate
+                    : chosenDate || preview.takenDate,
+                });
+                nextDriveFolderId = uploaded.driveFolderId;
+                driveUploads.set(idx, uploaded);
+              } catch (err) {
+                console.warn('Google Drive original photo upload skipped:', err);
+                if (err instanceof DriveAuthExpiredError) {
+                  setDriveConnected(false);
+                  break;
+                }
+              }
+            }
+            setDriveUploadProgress({ done: step + 1, total: rawIndexes.length });
+          }
+          setDriveUploadProgress(null);
+        }
+
+        const newMemories: TripMemoryItem[] = uploadImagePreviews.map((preview, idx) => {
+          const photoDate = isCustom
+            ? (customDate || preview.takenDate || chosenDate)
+            : chosenDate;
+          const matchedDayByDate =
+            !isCustom
+              ? chosenDayNum
+              : chosenDayNum ?? (photoDate ? trip.days.find((d) => d.date === photoDate)?.dayNumber : undefined);
+          const driveInfo = driveUploads.get(idx);
+
+          return {
+            id: `mem-${now}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+            imageUrl: preview.mediaRef,
+            caption: uploadCaption.trim() || finalTitle,
+            spotId: !isCustom ? uploadSpotId : undefined,
+            spotTitle: finalTitle,
+            dayNumber: matchedDayByDate,
+            date: photoDate,
+            lat: preview.lat,
+            lng: preview.lng,
+            mood: uploadMood,
+            location: finalLocation,
+            googlePhotosUrl: uploadGooglePhotosUrl.trim() || undefined,
+            driveFileId: driveInfo?.driveFileId,
+            driveFolderId: driveInfo?.driveFolderId || nextDriveFolderId,
+            originalBytes: driveInfo?.originalBytes ?? preview.originalBytes,
+            originalWidth: preview.originalWidth,
+            originalHeight: preview.originalHeight,
+            originalMimeType: driveInfo?.originalMimeType ?? preview.originalMimeType,
+            createdAt: now + idx * 50,
+          };
+        });
+        updatedMemories = [...newMemories, ...updatedMemories];
     } else if (hasGoogleUrl) {
       // User only updated/added googlePhotosUrl without uploading files
       if (!isCustom && uploadSpotId) {
@@ -731,8 +982,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         items: d.items.map((item) => {
           if (item.id === uploadSpotId) {
             const existing = item.memoryPhotos || [];
+            const newMediaRefs = uploadImagePreviews.map((p) => p.mediaRef);
             const merged = hasNewPhotos
-              ? [...existing, ...uploadImagePreviews].slice(0, 3)
+              ? [...existing, ...newMediaRefs].slice(0, 3)
               : existing;
             return {
               ...item,
@@ -748,17 +1000,39 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       }));
     }
 
-    setIsSavingMemory(true);
-    try {
+    // Backfill centroid destinationLat / destinationLng if missing and uploaded photos have GPS
+    let nextDestLat = trip.destinationLat;
+    let nextDestLng = trip.destinationLng;
+    if ((typeof nextDestLat !== 'number' || typeof nextDestLng !== 'number') && hasNewPhotos) {
+      const gpsList = uploadImagePreviews.filter(
+        (p) => typeof p.lat === 'number' && typeof p.lng === 'number'
+      );
+      if (gpsList.length > 0) {
+        nextDestLat =
+          Math.round((gpsList.reduce((acc, p) => acc + (p.lat || 0), 0) / gpsList.length) * 1000000) /
+          1000000;
+        nextDestLng =
+          Math.round((gpsList.reduce((acc, p) => acc + (p.lng || 0), 0) / gpsList.length) * 1000000) /
+          1000000;
+      }
+    }
+
       await onUpdateTrip({
         ...trip,
         days: updatedDays,
         memories: updatedMemories,
+        destinationLat: nextDestLat,
+        destinationLng: nextDestLng,
+        driveFolderId: nextDriveFolderId,
         updatedAt: Date.now(),
       });
 
       if (auth.currentUser) {
-        setToastMessage('📸 回憶照片已成功同步至雲端資料庫！');
+        setToastMessage(
+          nextDriveFolderId && uploadImagePreviews.some((p) => p.rawFile) && hasDriveAccessToken()
+            ? '📸 回憶照片與 Google Drive 原圖皆已備份完成！'
+            : '📸 回憶照片已成功同步至雲端資料庫！'
+        );
       } else {
         setToastMessage('💾 照片已儲存至本機！建議登入 Google 帳號以啟用雲端同步');
       }
@@ -771,8 +1045,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       setTimeout(() => setSaveSuccessToast(false), 3500);
     } finally {
       setIsSavingMemory(false);
+      setDriveUploadProgress(null);
       // Reset and close
       setUploadImagePreviews([]);
+      setUploadBatchProgress(null);
       setUploadLimitWarning(null);
       setUploadCaption('');
       setUploadSpotId('');
@@ -783,13 +1059,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     }
   };
 
-  // Delete memory (after inline confirm)
-  const handleDeleteMemory = (memId: string) => {
-    if (!canEdit) return;
-    if (requireAuth && !requireAuth(() => handleDeleteMemory(memId), lang === 'zh' ? '刪除回憶相片' : 'Delete photo')) {
-      return;
-    }
-
+  const performDeleteMemory = (memId: string) => {
     const now = Date.now();
     const targetMem = allMemories.find((m) => m.id === memId);
     const updatedMemories = (trip.memories || []).filter((m) => m.id !== memId);
@@ -827,6 +1097,58 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       deletedItemIds,
       updatedAt: now,
     });
+  };
+
+  // Delete memory (explicit confirmation dialog if backed up to Google Drive)
+  const handleDeleteMemory = (memId: string) => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(() => handleDeleteMemory(memId), lang === 'zh' ? '刪除回憶相片' : 'Delete photo')) {
+      return;
+    }
+
+    const targetMem = allMemories.find((m) => m.id === memId);
+    if (targetMem?.driveFileId) {
+      setConfirmDeleteMemId(null);
+      setDriveDeleteError(null);
+      setPendingDriveDeleteMem(targetMem);
+      return;
+    }
+
+    performDeleteMemory(memId);
+  };
+
+  const handleConfirmDriveDelete = async (alsoDeleteFromDrive: boolean) => {
+    if (!pendingDriveDeleteMem) return;
+    if (alsoDeleteFromDrive && pendingDriveDeleteMem.driveFileId) {
+      setIsDeletingDriveFile(true);
+      setDriveDeleteError(null);
+      try {
+        let token = getDriveAccessToken();
+        if (!token) {
+          token = await connectGoogleDrive();
+          setDriveConnected(hasDriveAccessToken());
+        }
+        if (!token) {
+          setDriveDeleteError('需要 Google Drive 授權才能刪除 Drive 原圖，或選擇「僅從相簿移除」。');
+          setIsDeletingDriveFile(false);
+          return;
+        }
+        await deleteDriveFile(pendingDriveDeleteMem.driveFileId, token);
+      } catch (err) {
+        setDriveDeleteError(
+          err instanceof Error ? err.message : '刪除 Google Drive 原圖失敗，請重試或選擇僅從相簿移除。'
+        );
+        setIsDeletingDriveFile(false);
+        return;
+      } finally {
+        setIsDeletingDriveFile(false);
+      }
+    }
+
+    const memId = pendingDriveDeleteMem.id;
+    setPendingDriveDeleteMem(null);
+    setDriveDeleteError(null);
+    performDeleteMemory(memId);
   };
 
   // Native Print Trigger for Photo Paper
@@ -911,6 +1233,31 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       本機模式
                     </span>
                   )}
+                  <span aria-hidden="true">·</span>
+                  {driveConnected ? (
+                    <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 inline-flex items-center gap-1">
+                      <HardDrive className="w-3 h-3" />
+                      <span>Drive 原圖已連線</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={isConnectingDrive}
+                      onClick={async () => {
+                        setIsConnectingDrive(true);
+                        try {
+                          await connectGoogleDrive();
+                          setDriveConnected(hasDriveAccessToken());
+                        } finally {
+                          setIsConnectingDrive(false);
+                        }
+                      }}
+                      className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 hover:underline inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    >
+                      <HardDrive className="w-3 h-3" />
+                      <span>{isConnectingDrive ? '授權中...' : '連線 Drive 原圖'}</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -968,6 +1315,37 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           </div>
         </div>
 
+        {/* Optional World Footprint Coordinate Hint for Memory Trips missing GPS */}
+        {trip.tripMode === 'memory' &&
+          typeof trip.destinationLat !== 'number' &&
+          !allMemories.some((m) => typeof m.lat === 'number' && typeof m.lng === 'number') && (
+            <div className="px-3.5 py-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
+                <MapPin className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+                <span>
+                  {lang === 'zh'
+                    ? '這趟回憶旅程尚未紀錄 GPS 座標，補上城市位置即可點亮足跡地圖。'
+                    : 'Add city coordinates to light up this trip on the World Footprint Map.'}
+                </span>
+              </div>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={handleQuickLocateCity}
+                  disabled={isLocatingCity}
+                  className="min-h-[34px] px-3 py-1 rounded-xl bg-white dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600 text-teal-700 dark:text-teal-300 font-bold text-[11px] flex items-center gap-1.5 shrink-0 self-start sm:self-auto transition cursor-pointer disabled:opacity-50"
+                >
+                  {isLocatingCity ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <MapPin className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isLocatingCity ? '定位中...' : `一鍵定位「${trip.destination || trip.title}」`}</span>
+                </button>
+              )}
+            </div>
+          )}
+
         {/* Middle Row: View Mode Switcher */}
         <div className="grid grid-cols-3 gap-1 p-1 bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 rounded-2xl text-xs font-semibold">
           <button
@@ -980,7 +1358,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             }`}
           >
             <Route className="w-3.5 h-3.5 shrink-0" />
-            <span className="whitespace-nowrap truncate">{lang === 'zh' ? '景點打卡' : 'Itinerary'}</span>
+            <span className="whitespace-nowrap truncate">
+              {lang === 'zh'
+                ? trip.tripMode === 'memory' && allSpots.length === 0
+                  ? '按日整理'
+                  : '景點打卡'
+                : 'Itinerary'}
+            </span>
           </button>
 
           <button
@@ -1973,13 +2357,43 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   </button>
                 </div>
               ) : (
-                <div className="px-3 py-2 rounded-xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/60 dark:border-teal-800/60 text-[11px] text-teal-800 dark:text-teal-300 font-semibold flex items-center justify-between">
+                <div className="px-3 py-2 rounded-xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/60 dark:border-teal-800/60 text-[11px] text-teal-800 dark:text-teal-300 font-semibold flex items-center justify-between gap-2">
                   <span className="flex items-center gap-1.5 truncate">
                     <Cloud className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
                     <span className="truncate">已連線雲端同步 ({currentUser.email || '已登入'})</span>
                   </span>
                 </div>
               )}
+
+              {/* Google Drive Original Resolution Storage Status */}
+              <div className="flex items-center justify-between gap-2 px-1 text-[11px]">
+                <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 min-w-0">
+                  <HardDrive className={`w-3.5 h-3.5 shrink-0 ${driveConnected ? 'text-teal-700 dark:text-teal-400' : 'text-slate-400'}`} />
+                  <span className="truncate">
+                    {driveConnected
+                      ? 'Drive 原圖已連線 · 上傳將保留未壓縮原始畫質'
+                      : '授權 Google Drive 可免費儲存 400GB 空間原始畫質照片'}
+                  </span>
+                </div>
+                {!driveConnected && (
+                  <button
+                    type="button"
+                    disabled={isConnectingDrive}
+                    onClick={async () => {
+                      setIsConnectingDrive(true);
+                      try {
+                        await connectGoogleDrive();
+                        setDriveConnected(hasDriveAccessToken());
+                      } finally {
+                        setIsConnectingDrive(false);
+                      }
+                    }}
+                    className="text-teal-700 dark:text-teal-400 font-bold hover:underline shrink-0 cursor-pointer disabled:opacity-50"
+                  >
+                    {isConnectingDrive ? '授權中...' : '連線 Drive 原圖'}
+                  </button>
+                )}
+              </div>
 
               {/* Photo Upload Area */}
               <div>
@@ -2067,24 +2481,30 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 {/* Previews Grid or Upload Dropzone */}
                 {uploadImagePreviews.length > 0 ? (
                   <div className="space-y-2">
-                    <div className="grid grid-cols-3 gap-2">
-                      {uploadImagePreviews.map((previewUrl, idx) => (
+                    <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto pr-0.5">
+                      {uploadImagePreviews.map((preview, idx) => (
                         <div key={idx} className="relative aspect-square rounded-2xl overflow-hidden border-2 border-teal-500 shadow-xs group">
                           <MediaImage
                             tripId={trip.id}
                             ownerId={trip.ownerId}
                             collabId={trip.collabId}
-                            src={previewUrl}
+                            src={preview.mediaRef}
                             alt={`預覽 ${idx + 1}`}
                             className="w-full h-full object-cover"
                           />
-                          <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded-md bg-teal-600 text-[9px] text-white font-bold font-mono">
+                          <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded-md bg-teal-700/90 text-[9px] text-white font-bold font-mono tabular-nums">
                             #{idx + 1}
                           </span>
+                          {(preview.hasGps || preview.hasExifDate) && (
+                            <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded-md bg-slate-900/75 text-[9px] text-white font-mono tabular-nums flex items-center gap-1 backdrop-blur-xs">
+                              {preview.hasGps && <MapPin className="w-2.5 h-2.5 text-teal-300 shrink-0" />}
+                              <span>{preview.takenDate.slice(5)}</span>
+                            </span>
+                          )}
                           <button
                             type="button"
                             onClick={() => handleRemovePreview(idx)}
-                            className="absolute top-1 right-1 p-1 rounded-full bg-slate-900/80 text-white hover:bg-rose-600 transition shadow-sm"
+                            className="absolute top-1 right-1 p-1 rounded-full bg-slate-900/80 text-white hover:bg-rose-600 transition shadow-sm cursor-pointer"
                             title="移除此張"
                           >
                             <X className="w-3.5 h-3.5" />
@@ -2092,21 +2512,33 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                         </div>
                       ))}
 
-                      {/* Add more button if not reached 3 */}
+                      {/* Add more button if under limit (24 for custom/memory, 3 for specific spot) */}
                       {(() => {
                         const curSpot = !isCustomSpot && uploadSpotId ? allSpots.find((s) => s.spot.id === uploadSpotId)?.spot : null;
                         const existingCount = curSpot?.memoryPhotos?.length || 0;
-                        const total = existingCount + uploadImagePreviews.length;
-                        if (total < 3) {
+                        const cap = isCustomSpot ? 24 : 3;
+                        const total = (isCustomSpot ? 0 : existingCount) + uploadImagePreviews.length;
+                        if (total < cap) {
                           return (
                             <div
-                              onClick={() => fileInputRef.current?.click()}
+                              onClick={() => !isProcessingImage && fileInputRef.current?.click()}
                               className="aspect-square rounded-2xl border-2 border-dashed border-teal-300 dark:border-teal-700 hover:border-teal-500 bg-teal-50/50 dark:bg-teal-950/30 flex flex-col items-center justify-center p-2 text-center cursor-pointer transition hover:bg-teal-50"
                             >
-                              <Plus className="w-5 h-5 text-teal-600 mb-1" />
-                              <span className="text-[10px] font-bold text-teal-700 dark:text-teal-300">
-                                ＋加照片
-                              </span>
+                              {isProcessingImage && uploadBatchProgress ? (
+                                <>
+                                  <Loader2 className="w-5 h-5 text-teal-600 animate-spin mb-1" />
+                                  <span className="text-[10px] font-bold font-mono tabular-nums text-teal-700 dark:text-teal-300">
+                                    {uploadBatchProgress.done}/{uploadBatchProgress.total}
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <Plus className="w-5 h-5 text-teal-600 mb-1" />
+                                  <span className="text-[10px] font-bold text-teal-700 dark:text-teal-300">
+                                    ＋加照片
+                                  </span>
+                                </>
+                              )}
                             </div>
                           );
                         }
@@ -2119,13 +2551,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
                         disabled={(() => {
+                          if (isProcessingImage) return true;
                           const curSpot = !isCustomSpot && uploadSpotId ? allSpots.find((s) => s.spot.id === uploadSpotId)?.spot : null;
                           const existingCount = curSpot?.memoryPhotos?.length || 0;
-                          return existingCount + uploadImagePreviews.length >= 3;
+                          const cap = isCustomSpot ? 24 : 3;
+                          return (isCustomSpot ? 0 : existingCount) + uploadImagePreviews.length >= cap;
                         })()}
-                        className="text-teal-600 font-bold hover:underline disabled:opacity-40 disabled:hover:no-underline"
+                        className="text-teal-700 dark:text-teal-400 font-bold hover:underline disabled:opacity-40 disabled:hover:no-underline cursor-pointer"
                       >
-                        ＋ 挑選更多照片
+                        {isProcessingImage && uploadBatchProgress
+                          ? `正在讀取拍攝日期與 GPS (${uploadBatchProgress.done}/${uploadBatchProgress.total})...`
+                          : `＋ 挑選更多照片 (${uploadImagePreviews.length}/${isCustomSpot ? 24 : 3})`}
                       </button>
                       <button
                         type="button"
@@ -2133,7 +2569,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                           setUploadImagePreviews([]);
                           setUploadLimitWarning(null);
                         }}
-                        className="text-rose-600 hover:underline"
+                        className="text-rose-600 hover:underline cursor-pointer"
                       >
                         清空已選
                       </button>
@@ -2158,14 +2594,20 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     }
                     return (
                       <div
-                        onClick={() => fileInputRef.current?.click()}
+                        onClick={() => !isProcessingImage && fileInputRef.current?.click()}
                         className="aspect-16/9 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-teal-500 bg-slate-50 dark:bg-slate-800/40 flex flex-col items-center justify-center p-5 text-center cursor-pointer transition hover:bg-teal-50/20"
                       >
                         <div className="w-10 h-10 rounded-2xl bg-teal-100 dark:bg-teal-950 text-teal-600 flex items-center justify-center mb-1.5">
-                          <Camera className="w-5 h-5" />
+                          {isProcessingImage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Camera className="w-5 h-5" />}
                         </div>
                         <p className="font-bold text-slate-800 dark:text-slate-200">
-                          {isProcessingImage ? '照片處理中...' : '點擊選擇相片（支援多選）'}
+                          {isProcessingImage && uploadBatchProgress
+                            ? `正在處理與讀取 EXIF (${uploadBatchProgress.done}/${uploadBatchProgress.total})...`
+                            : isProcessingImage
+                            ? '照片處理中...'
+                            : isCustomSpot
+                            ? '點擊批次選擇相片（一次最多 24 張，自動讀日期與 GPS）'
+                            : '點擊選擇相片（支援多選）'}
                         </p>
                       </div>
                     );
@@ -2360,7 +2802,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   {isSavingMemory ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>儲存中...</span>
+                      <span className="font-mono tabular-nums">
+                        {driveUploadProgress
+                          ? `備份原圖至 Drive (${driveUploadProgress.done}/${driveUploadProgress.total})...`
+                          : '儲存中...'}
+                      </span>
                     </>
                   ) : (
                     <>
@@ -2508,8 +2954,19 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 </button>
               )}
 
-              {/* Display original high-resolution photo from googlePhotosUrl if available and not failed */}
-              {lightboxMemory.googlePhotosUrl && !lightboxHighResFailed ? (
+              {/* Display Drive Original -> Google Photos URL -> 1440px HD Thumbnail */}
+              {driveOriginalUrl ? (
+                <div className="relative flex items-center justify-center max-h-[65vh]">
+                  <MediaImage
+                    tripId={trip.id}
+                    ownerId={trip.ownerId}
+                    collabId={trip.collabId}
+                    src={driveOriginalUrl}
+                    alt={lightboxMemory.caption}
+                    className="max-h-[65vh] w-auto max-w-full object-contain pointer-events-none"
+                  />
+                </div>
+              ) : lightboxMemory.googlePhotosUrl && !lightboxHighResFailed ? (
                 <div className="relative flex items-center justify-center max-h-[65vh]">
                   <MediaImage
                     tripId={trip.id}
@@ -2520,9 +2977,6 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     onError={() => setLightboxHighResFailed(true)}
                     className="max-h-[65vh] w-auto max-w-full object-contain pointer-events-none"
                   />
-                  <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-md text-[11px] font-bold text-teal-300 border border-teal-500/30 shadow-sm">
-                    Google 相簿高畫質原圖
-                  </div>
                 </div>
               ) : (
                 <div className="relative flex items-center justify-center max-h-[65vh]">
@@ -2534,12 +2988,6 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     alt={lightboxMemory.caption}
                     className="max-h-[65vh] w-auto max-w-full object-contain pointer-events-none"
                   />
-                  {lightboxMemory.googlePhotosUrl && (
-                    <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-md text-[11px] font-bold text-slate-200 border border-white/20 flex items-center gap-1.5 shadow-sm">
-                      <ExternalLink className="w-3 h-3 text-teal-400" />
-                      <span>已連結 Google 相簿</span>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -2583,7 +3031,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             )}
 
             {/* Caption & Info Bar */}
-            <div className="p-3.5 sm:p-4 bg-[#111827] text-white flex items-center justify-between gap-3 border-t border-slate-800">
+            <div className="p-3.5 sm:p-4 bg-[#111827] text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-slate-800">
               <div className="space-y-0.5 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-base">{lightboxMemory.mood}</span>
@@ -2604,29 +3052,197 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     「{lightboxMemory.caption}」
                   </p>
                 )}
+                {lightboxMemory.driveFileId && (
+                  <div className="text-[11px] font-mono tabular-nums text-slate-300 flex items-center gap-1.5 flex-wrap pt-0.5">
+                    <HardDrive className="w-3 h-3 text-teal-400 shrink-0" />
+                    {lightboxMemory.originalWidth && lightboxMemory.originalHeight && (
+                      <span>
+                        {lightboxMemory.originalWidth} × {lightboxMemory.originalHeight}
+                      </span>
+                    )}
+                    {lightboxMemory.originalBytes && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>{formatBytesLabel(lightboxMemory.originalBytes)}</span>
+                      </>
+                    )}
+                    <span aria-hidden="true">·</span>
+                    {isLoadingDriveOriginal ? (
+                      <span className="font-sans text-teal-300 inline-flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        <span>載入 Drive 原圖中...</span>
+                      </span>
+                    ) : driveOriginalUrl ? (
+                      <span className="font-sans text-teal-300">Drive 原圖畫質</span>
+                    ) : driveOriginalError ? (
+                      <span className="font-sans text-amber-300">{driveOriginalError}</span>
+                    ) : (
+                      <span className="font-sans text-slate-400">1440px 高清預覽</span>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                {lightboxMemory.driveFileId && !driveOriginalUrl && !isLoadingDriveOriginal && !driveConnected && (
+                  <button
+                    type="button"
+                    disabled={isConnectingDrive}
+                    onClick={async () => {
+                      setIsConnectingDrive(true);
+                      try {
+                        await connectGoogleDrive();
+                        setDriveConnected(hasDriveAccessToken());
+                      } finally {
+                        setIsConnectingDrive(false);
+                      }
+                    }}
+                    className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                  >
+                    <HardDrive className="w-3.5 h-3.5" />
+                    <span>{isConnectingDrive ? '授權中...' : '載入 Drive 原圖'}</span>
+                  </button>
+                )}
+
+                {lightboxMemory.driveFileId && (
+                  <button
+                    type="button"
+                    disabled={isDownloadingDriveOriginal}
+                    onClick={async () => {
+                      let token = getDriveAccessToken();
+                      if (!token) {
+                        token = await connectGoogleDrive();
+                        setDriveConnected(hasDriveAccessToken());
+                      }
+                      if (!token || !lightboxMemory.driveFileId) return;
+                      setIsDownloadingDriveOriginal(true);
+                      try {
+                        const ext =
+                          lightboxMemory.originalMimeType === 'image/png'
+                            ? 'png'
+                            : lightboxMemory.originalMimeType === 'image/webp'
+                            ? 'webp'
+                            : 'jpg';
+                        const safeName = `${lightboxMemory.date || 'hiyori'}_${lightboxMemory.spotTitle || 'photo'}.${ext}`.replace(
+                          /[\\/:*?"<>|]/g,
+                          '_'
+                        );
+                        await downloadDriveOriginalFile(lightboxMemory.driveFileId, safeName, token);
+                      } catch (err) {
+                        setDriveOriginalError(err instanceof Error ? err.message : '下載原圖失敗');
+                      } finally {
+                        setIsDownloadingDriveOriginal(false);
+                      }
+                    }}
+                    className="min-h-[40px] px-3 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold flex items-center gap-1.5 transition active:scale-95 cursor-pointer disabled:opacity-50"
+                    title="下載未壓縮原始畫質照片"
+                  >
+                    {isDownloadingDriveOriginal ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Download className="w-3.5 h-3.5" />
+                    )}
+                    <span>下載原圖</span>
+                  </button>
+                )}
+
                 {(lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl) && (
                   <a
                     href={lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition active:scale-95 shadow-xs"
+                    className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-teal-300 text-xs font-bold flex items-center gap-1.5 transition active:scale-95"
                     title="開啟 Google 相簿檢視原始高畫質相片"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Google 相簿原圖</span>
+                    <span>Google 相簿</span>
                   </a>
                 )}
                 <button
                   type="button"
                   onClick={() => setLightboxMemory(null)}
-                  className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold shrink-0 transition"
+                  className="min-h-[40px] px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold shrink-0 transition cursor-pointer"
                 >
                   關閉
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= 5. EXPLICIT GOOGLE DRIVE DELETE CONFIRMATION ================= */}
+      {pendingDriveDeleteMem && (
+        <div
+          className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150"
+          onClick={() => {
+            if (!isDeletingDriveFile) {
+              setPendingDriveDeleteMem(null);
+              setDriveDeleteError(null);
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-5 sm:p-6 shadow-2xl space-y-4 text-slate-800 dark:text-slate-100"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="space-y-1">
+                <h4 className="font-bold text-base text-slate-900 dark:text-white">
+                  刪除此回憶照片
+                </h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  這張照片在您的 Google Drive 同時存有未壓縮原圖。請確認是否一併刪除雲端原圖檔案：
+                </p>
+              </div>
+            </div>
+
+            {driveDeleteError && (
+              <p className="text-xs text-rose-600 dark:text-rose-400 font-medium bg-rose-50 dark:bg-rose-950/40 px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-900">
+                {driveDeleteError}
+              </p>
+            )}
+
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                disabled={isDeletingDriveFile}
+                onClick={() => handleConfirmDriveDelete(true)}
+                className="w-full min-h-[44px] px-4 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer"
+              >
+                {isDeletingDriveFile ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>正在刪除相簿與 Drive 原圖...</span>
+                  </>
+                ) : (
+                  <span>刪除相簿照片，並永久移除 Google Drive 原圖</span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                disabled={isDeletingDriveFile}
+                onClick={() => handleConfirmDriveDelete(false)}
+                className="w-full min-h-[44px] px-4 py-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs font-semibold transition cursor-pointer disabled:opacity-50"
+              >
+                僅從日和相簿移除（保留 Google Drive 原圖）
+              </button>
+
+              <button
+                type="button"
+                disabled={isDeletingDriveFile}
+                onClick={() => {
+                  setPendingDriveDeleteMem(null);
+                  setDriveDeleteError(null);
+                }}
+                className="w-full min-h-[40px] px-4 py-2 rounded-2xl text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold transition cursor-pointer"
+              >
+                取消
+              </button>
             </div>
           </div>
         </div>

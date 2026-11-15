@@ -242,7 +242,11 @@ export function hasTripContentDifference(a: Trip, b: Trip): boolean {
     a.endDate !== b.endDate ||
     (a.notes || '') !== (b.notes || '') ||
     a.googlePhotosAlbumUrl !== b.googlePhotosAlbumUrl ||
+    a.driveFolderId !== b.driveFolderId ||
     a.isSoloTrip !== b.isSoloTrip ||
+    a.tripMode !== b.tripMode ||
+    a.destinationLat !== b.destinationLat ||
+    a.destinationLng !== b.destinationLng ||
     a.isSplitEnabled !== b.isSplitEnabled ||
     a.coverGradient !== b.coverGradient ||
     a.generalAccess !== b.generalAccess ||
@@ -264,9 +268,13 @@ export function hasTripContentDifference(a: Trip, b: Trip): boolean {
       ma.id !== mb.id ||
       ma.imageUrl !== mb.imageUrl ||
       ma.googlePhotosUrl !== mb.googlePhotosUrl ||
+      ma.driveFileId !== mb.driveFileId ||
       ma.caption !== mb.caption ||
       ma.spotId !== mb.spotId ||
-      ma.mood !== mb.mood
+      ma.mood !== mb.mood ||
+      ma.date !== mb.date ||
+      ma.lat !== mb.lat ||
+      ma.lng !== mb.lng
     ) {
       return true;
     }

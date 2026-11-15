@@ -70,8 +70,8 @@ export function validateImageFile(file: File): string | null {
 
 export const compressImageFile = async (
   file: File,
-  maxWidth = 960,
-  quality = 0.72
+  maxWidth = 1440,
+  quality = 0.82
 ): Promise<string> => {
   const validationError = validateImageFile(file);
   if (validationError) {
@@ -110,10 +110,10 @@ export const compressImageFile = async (
 
     let dataUrl = canvas.toDataURL('image/jpeg', q);
 
-    // Keep individual media doc compact (~<= 150KB Base64) for fast sync & subcollection efficiency
-    if (dataUrl.length > 180000) {
-      const secondWidth = Math.max(1, Math.round(canvas.width * 0.78));
-      const secondHeight = Math.max(1, Math.round(canvas.height * 0.78));
+    // Keep individual media doc compact (~<= 340KB Base64, well below Firestore 900KB doc limit) while crisp at Retina 1440px
+    if (dataUrl.length > 360000) {
+      const secondWidth = Math.max(1, Math.round(canvas.width * 0.82));
+      const secondHeight = Math.max(1, Math.round(canvas.height * 0.82));
       canvas.width = secondWidth;
       canvas.height = secondHeight;
       const ctx2 = canvas.getContext('2d');
@@ -121,7 +121,7 @@ export const compressImageFile = async (
         ctx2.imageSmoothingEnabled = true;
         ctx2.imageSmoothingQuality = 'high';
         ctx2.drawImage(source, 0, 0, secondWidth, secondHeight);
-        dataUrl = canvas.toDataURL('image/jpeg', Math.max(0.55, q - 0.12));
+        dataUrl = canvas.toDataURL('image/jpeg', Math.max(0.68, q - 0.1));
       }
     }
 
@@ -164,6 +164,38 @@ export const compressImageFile = async (
     img.src = objectUrl;
   });
 };
+
+export async function getImageDimensions(
+  file: File
+): Promise<{ width: number; height: number } | null> {
+  if (!file) return null;
+  if (typeof window !== 'undefined' && 'createImageBitmap' in window) {
+    try {
+      const bitmap = await createImageBitmap(file);
+      const dims = { width: bitmap.width, height: bitmap.height };
+      bitmap.close();
+      if (dims.width > 0 && dims.height > 0) return dims;
+    } catch {
+      // Fallback to Image
+    }
+  }
+  return new Promise((resolve) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const dims =
+        img.width > 0 && img.height > 0 ? { width: img.width, height: img.height } : null;
+      URL.revokeObjectURL(objectUrl);
+      img.src = '';
+      resolve(dims);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(null);
+    };
+    img.src = objectUrl;
+  });
+}
 
 /**
  * Store a compressed dataUrl into IndexedDB + RAM cache and return a lightweight media:// reference

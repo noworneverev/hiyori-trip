@@ -703,6 +703,91 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     setSelectedDayNumber(newDayNum);
   };
 
+  const isPureMemoryArchive =
+    trip.tripMode === 'memory' &&
+    (trip.days || []).every((d) => (d.items || []).length === 0);
+
+  if (isPureMemoryArchive) {
+    const memoriesCount = (trip.memories || []).length;
+    const gpsPinCount = (trip.memories || []).filter(
+      (m) => typeof m.lat === 'number' && typeof m.lng === 'number'
+    ).length;
+    const hasCityCoord =
+      typeof trip.destinationLat === 'number' && typeof trip.destinationLng === 'number';
+
+    return (
+      <div className="py-6 sm:py-10 px-2">
+        <div className="max-w-lg mx-auto rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-6 sm:p-8 shadow-2xs space-y-6">
+          <div className="flex items-start gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center shrink-0">
+              <Camera className="w-6 h-6" />
+            </div>
+            <div className="min-w-0 space-y-1">
+              <h3 className="font-bold text-slate-900 dark:text-white text-base sm:text-lg">
+                {lang === 'zh' ? '回憶相簿模式' : 'Photo Memory Archive'}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                {lang === 'zh'
+                  ? '這趟過往旅程以保存相片與足跡為主，已為您省略繁瑣的逐日空白行程表。'
+                  : 'This past trip focuses on photos and map footprints without an empty day-by-day schedule.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-2.5 p-3.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC]/80 dark:border-slate-800 text-center">
+            <div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">收錄相片</div>
+              <div className="text-base font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5">
+                {memoriesCount}
+              </div>
+            </div>
+            <div className="border-x border-[#E5E2DC] dark:border-slate-800 px-1">
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">地圖座標</div>
+              <div className="text-base font-bold font-mono tabular-nums text-teal-700 dark:text-teal-400 mt-0.5">
+                {gpsPinCount > 0 ? `${gpsPinCount} 點` : hasCityCoord ? '已定位' : '未設定'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">回憶年份</div>
+              <div className="text-base font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5">
+                {trip.startDate ? trip.startDate.slice(0, 4) : '—'}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+            {onOpenMemories && (
+              <button
+                type="button"
+                onClick={() => onOpenMemories()}
+                className="flex-1 min-h-[44px] px-5 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs shadow-xs flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer"
+              >
+                <Camera className="w-4 h-4" />
+                <span>{lang === 'zh' ? '開啟回憶相簿' : 'Open Photo Gallery'}</span>
+              </button>
+            )}
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => {
+                  onUpdateTrip({
+                    ...trip,
+                    tripMode: 'planner',
+                    updatedAt: Date.now(),
+                  });
+                }}
+                className="min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-teal-600 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
+                <Calendar className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                <span>{lang === 'zh' ? '切換為完整行程規劃' : 'Switch to Full Planner'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3.5">
       {/* 水平捲動日期/天數篩選列 (Horizontal Day & Date Filter Bar with Scroll Detection & Compact Mode) */}

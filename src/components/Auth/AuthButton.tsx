@@ -1,9 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
-import { auth, loginWithGoogle, logoutFirebase, saveTripToCloud } from '../../utils/firebase';
+import {
+  auth,
+  connectGoogleDrive,
+  hasDriveAccessToken,
+  loginWithGoogle,
+  logoutFirebase,
+  saveTripToCloud,
+} from '../../utils/firebase';
 import { Trip } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
-import { CloudCheck, LogOut, UploadCloud, User as UserIcon, Check } from 'lucide-react';
+import { CloudCheck, HardDrive, LogOut, UploadCloud, User as UserIcon, Check } from 'lucide-react';
 
 interface AuthButtonProps {
   lang: Language;
@@ -16,7 +23,15 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
   const [showDropdown, setShowDropdown] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncDone, setSyncDone] = useState(false);
+  const [driveConnected, setDriveConnected] = useState<boolean>(() => hasDriveAccessToken());
+  const [isConnectingDrive, setIsConnectingDrive] = useState(false);
   const authDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const syncDriveState = () => setDriveConnected(hasDriveAccessToken());
+    window.addEventListener('hiyori_drive_auth_changed', syncDriveState);
+    return () => window.removeEventListener('hiyori_drive_auth_changed', syncDriveState);
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -157,6 +172,41 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
             ) : isSyncing ? (
               <span className="text-[11px] text-teal-700 dark:text-teal-400 font-mono">...</span>
             ) : null}
+          </button>
+
+          <button
+            type="button"
+            onClick={async () => {
+              if (driveConnected || isConnectingDrive) return;
+              setIsConnectingDrive(true);
+              try {
+                await connectGoogleDrive();
+                setDriveConnected(hasDriveAccessToken());
+              } finally {
+                setIsConnectingDrive(false);
+              }
+            }}
+            className="w-full min-h-[44px] text-left px-2.5 py-1.5 rounded-xl hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-between gap-2 transition cursor-pointer"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <HardDrive className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+              <span className="truncate">
+                {driveConnected
+                  ? lang === 'zh'
+                    ? 'Drive 原圖備份已連線'
+                    : 'Drive Originals Connected'
+                  : lang === 'zh'
+                  ? '連線 Google Drive 原圖空間'
+                  : 'Connect Google Drive Originals'}
+              </span>
+            </div>
+            {driveConnected ? (
+              <Check className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+            ) : (
+              <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400 shrink-0">
+                {isConnectingDrive ? '...' : '授權'}
+              </span>
+            )}
           </button>
 
           <div className="pt-1 border-t border-[#E5E2DC] dark:border-slate-800">

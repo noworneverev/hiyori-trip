@@ -2,6 +2,8 @@ import { initializeApp } from 'firebase/app';
 import {
   getAuth,
   GoogleAuthProvider,
+  onAuthStateChanged,
+  reauthenticateWithPopup,
   signInWithPopup,
   signOut,
   User,
@@ -43,26 +45,72 @@ export function sanitizeForFirestore<T>(data: T): T {
 // 1. Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// CRITICAL: Use multi-tab IndexedDB persistent cache + explicit custom databaseId
+const firestoreDatabaseId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+
+// CRITICAL: Use multi-tab IndexedDB persistent cache + configured databaseId
 function createFirestoreInstance(): Firestore {
   try {
-    return initializeFirestore(
-      app,
-      {
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager(),
-        }),
-      },
-      firebaseConfig.firestoreDatabaseId
-    );
+    return firestoreDatabaseId
+      ? initializeFirestore(
+          app,
+          {
+            localCache: persistentLocalCache({
+              tabManager: persistentMultipleTabManager(),
+            }),
+          },
+          firestoreDatabaseId
+        )
+      : initializeFirestore(app, {
+          localCache: persistentLocalCache({
+            tabManager: persistentMultipleTabManager(),
+          }),
+        });
   } catch {
-    return getFirestore(app, firebaseConfig.firestoreDatabaseId);
+    return firestoreDatabaseId ? getFirestore(app, firestoreDatabaseId) : getFirestore(app);
   }
 }
 
 export const db: Firestore = createFirestoreInstance();
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.addScope('https://www.googleapis.com/auth/drive.file');
+googleProvider.setCustomParameters({
+  include_granted_scopes: 'true',
+});
+
+// Strict in-memory-only Google Drive OAuth access token (never persisted to localStorage/sessionStorage)
+let cachedDriveAccessToken: string | null = null;
+
+function notifyDriveAuthChanged(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('hiyori_drive_auth_changed', {
+        detail: { connected: Boolean(cachedDriveAccessToken) },
+      })
+    );
+  }
+}
+
+export function getDriveAccessToken(): string | null {
+  return cachedDriveAccessToken;
+}
+
+export function hasDriveAccessToken(): boolean {
+  return Boolean(cachedDriveAccessToken);
+}
+
+export function clearDriveAccessToken(): void {
+  if (cachedDriveAccessToken !== null) {
+    cachedDriveAccessToken = null;
+    notifyDriveAuthChanged();
+  }
+}
+
+onAuthStateChanged(auth, (user) => {
+  if (!user) {
+    clearDriveAccessToken();
+  }
+});
 
 // 2. Validate Connection to Firestore (Skill Mandatory Requirement)
 async function testConnection() {
@@ -133,6 +181,11 @@ export function handleFirestoreError(
 export async function loginWithGoogle(): Promise<User | null> {
   try {
     const result = await signInWithPopup(auth, googleProvider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (credential?.accessToken) {
+      cachedDriveAccessToken = credential.accessToken;
+      notifyDriveAuthChanged();
+    }
     return result.user;
   } catch (error) {
     console.error('Google Sign-in Error:', error);
@@ -140,8 +193,36 @@ export async function loginWithGoogle(): Promise<User | null> {
   }
 }
 
+export async function connectGoogleDrive(): Promise<string | null> {
+  try {
+    const driveProvider = new GoogleAuthProvider();
+    driveProvider.addScope('https://www.googleapis.com/auth/drive.file');
+    driveProvider.setCustomParameters({
+      include_granted_scopes: 'true',
+    });
+
+    const result = auth.currentUser
+      ? await reauthenticateWithPopup(auth.currentUser, driveProvider).catch(async () => {
+          return await signInWithPopup(auth, driveProvider);
+        })
+      : await signInWithPopup(auth, driveProvider);
+
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    if (credential?.accessToken) {
+      cachedDriveAccessToken = credential.accessToken;
+      notifyDriveAuthChanged();
+      return cachedDriveAccessToken;
+    }
+    return null;
+  } catch (error) {
+    console.error('Google Drive Connect Error:', error);
+    return null;
+  }
+}
+
 export async function logoutFirebase(): Promise<void> {
   try {
+    clearDriveAccessToken();
     await signOut(auth);
   } catch (error) {
     console.error('Firebase Sign-out Error:', error);
@@ -329,7 +410,11 @@ function normalizeTripData(id: string, data: Record<string, any>, fallbackOwnerI
     initialCashAmount: data.initialCashAmount,
     initialCashCurrency: data.initialCashCurrency,
     isSoloTrip: data.isSoloTrip ?? false,
+    tripMode: data.tripMode || 'planner',
+    destinationLat: typeof data.destinationLat === 'number' ? data.destinationLat : undefined,
+    destinationLng: typeof data.destinationLng === 'number' ? data.destinationLng : undefined,
     googlePhotosAlbumUrl: data.googlePhotosAlbumUrl || undefined,
+    driveFolderId: data.driveFolderId || undefined,
     isCollaborative: data.isCollaborative ?? false,
     collabId: data.collabId || undefined,
     collaborators: data.collaborators || undefined,
@@ -469,7 +554,11 @@ export async function saveTripToCloud(userId: string, trip: Trip): Promise<Trip>
       initialCashAmount: lightweightTrip.initialCashAmount ?? null,
       initialCashCurrency: lightweightTrip.initialCashCurrency || null,
       isSoloTrip: lightweightTrip.isSoloTrip ?? false,
+      tripMode: lightweightTrip.tripMode || 'planner',
+      destinationLat: typeof lightweightTrip.destinationLat === 'number' ? lightweightTrip.destinationLat : null,
+      destinationLng: typeof lightweightTrip.destinationLng === 'number' ? lightweightTrip.destinationLng : null,
       googlePhotosAlbumUrl: lightweightTrip.googlePhotosAlbumUrl || null,
+      driveFolderId: lightweightTrip.driveFolderId || null,
       isCollaborative: lightweightTrip.isCollaborative ?? false,
       collabId: lightweightTrip.collabId || null,
       collaborators: lightweightTrip.collaborators || [],
@@ -605,7 +694,11 @@ export async function publishSharedTrip(trip: Trip, ownerUid?: string): Promise<
         isSplitEnabled: lightweightTrip.isSplitEnabled ?? false,
         splitMembers: lightweightTrip.splitMembers || [],
         isSoloTrip: lightweightTrip.isSoloTrip ?? false,
+        tripMode: lightweightTrip.tripMode || 'planner',
+        destinationLat: typeof lightweightTrip.destinationLat === 'number' ? lightweightTrip.destinationLat : null,
+        destinationLng: typeof lightweightTrip.destinationLng === 'number' ? lightweightTrip.destinationLng : null,
         googlePhotosAlbumUrl: lightweightTrip.googlePhotosAlbumUrl || null,
+        driveFolderId: lightweightTrip.driveFolderId || null,
         publishedAt: Date.now(),
         updatedAt: Date.now(),
       })
@@ -781,7 +874,11 @@ export async function enableTripCollaboration(trip: Trip, currentUser?: User | n
         initialCashAmount: lightweightTrip.initialCashAmount ?? null,
         initialCashCurrency: lightweightTrip.initialCashCurrency || null,
         isSoloTrip: lightweightTrip.isSoloTrip ?? false,
+        tripMode: lightweightTrip.tripMode || 'planner',
+        destinationLat: typeof lightweightTrip.destinationLat === 'number' ? lightweightTrip.destinationLat : null,
+        destinationLng: typeof lightweightTrip.destinationLng === 'number' ? lightweightTrip.destinationLng : null,
         googlePhotosAlbumUrl: lightweightTrip.googlePhotosAlbumUrl || null,
+        driveFolderId: lightweightTrip.driveFolderId || null,
         createdAt: lightweightTrip.createdAt || Date.now(),
         updatedAt: Date.now(),
         lastUpdatedBy: ownerName,
@@ -1051,7 +1148,11 @@ export async function syncCollaborativeTrip(
       initialCashAmount: tripToSave.initialCashAmount ?? null,
       initialCashCurrency: tripToSave.initialCashCurrency || null,
       isSoloTrip: tripToSave.isSoloTrip ?? false,
+      tripMode: tripToSave.tripMode || 'planner',
+      destinationLat: typeof tripToSave.destinationLat === 'number' ? tripToSave.destinationLat : null,
+      destinationLng: typeof tripToSave.destinationLng === 'number' ? tripToSave.destinationLng : null,
       googlePhotosAlbumUrl: tripToSave.googlePhotosAlbumUrl || null,
+      driveFolderId: tripToSave.driveFolderId || null,
       updatedAt: Date.now(),
       lastUpdatedBy: editorName || auth.currentUser?.displayName || '同行旅伴',
     };

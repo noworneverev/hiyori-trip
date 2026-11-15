@@ -59,6 +59,11 @@ export interface GalleryPhotoItem {
   mood?: string;
   caption?: string;
   googlePhotosUrl?: string;
+  driveFileId?: string;
+  originalBytes?: number;
+  originalWidth?: number;
+  originalHeight?: number;
+  originalMimeType?: string;
   isFeaturedSpot: boolean;
 }
 

@@ -74,7 +74,15 @@ export interface TripMemoryItem {
   date?: string;
   mood?: string;
   location?: string;
+  lat?: number;
+  lng?: number;
   googlePhotosUrl?: string;
+  driveFileId?: string;
+  driveFolderId?: string;
+  originalBytes?: number;
+  originalWidth?: number;
+  originalHeight?: number;
+  originalMimeType?: string;
   createdAt: number;
 }
 
@@ -166,8 +174,12 @@ export interface Trip {
   splitMembers?: string[];
   initialCashAmount?: number;
   initialCashCurrency?: string;
+  tripMode?: 'planner' | 'memory';
+  destinationLat?: number;
+  destinationLng?: number;
   memories?: TripMemoryItem[];
   googlePhotosAlbumUrl?: string;
+  driveFolderId?: string;
   createdAt: number;
   updatedAt: number;
 }
