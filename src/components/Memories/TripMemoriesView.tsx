@@ -2375,11 +2375,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       {/* ================= 3. UPLOAD MEMORY PHOTO MODAL ================= */}
       {showUploadModal && canShowUploadAction && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center px-3 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] bg-black/75 backdrop-blur-xs animate-in fade-in duration-150"
           onClick={() => closeUploadModalAndCleanup()}
         >
           <div
-            className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-150"
+            className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-full sm:max-h-[92dvh] animate-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
@@ -2904,13 +2904,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       {/* ================= 4. FULLSCREEN LIGHTBOX PREVIEW ================= */}
       {lightboxMemory && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-black/95 backdrop-blur-md animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center px-2 sm:p-6 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] bg-black/95 backdrop-blur-md animate-in fade-in duration-150"
           onClick={() => setLightboxMemory(null)}
           onTouchStart={(e) => e.stopPropagation()}
           onTouchEnd={(e) => e.stopPropagation()}
         >
           <div
-            className="max-w-4xl w-full bg-[#111827] rounded-3xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-[95vh] relative"
+            className="max-w-4xl w-full bg-[#111827] rounded-3xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-full sm:max-h-[95dvh] relative"
             onClick={(e) => e.stopPropagation()}
             onTouchStart={handleLightboxTouchStart}
             onTouchEnd={handleLightboxTouchEnd}
@@ -3260,7 +3260,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       {/* ================= 5. EXPLICIT GOOGLE DRIVE DELETE CONFIRMATION ================= */}
       {pendingDriveDeleteMem && (
         <div
-          className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150"
+          className="fixed inset-0 z-60 flex items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] bg-black/75 backdrop-blur-xs animate-in fade-in duration-150"
           onClick={() => {
             if (!isDeletingDriveFile) {
               setPendingDriveDeleteMem(null);
@@ -3269,7 +3269,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           }}
         >
           <div
-            className="w-full max-w-md rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-5 sm:p-6 shadow-2xl space-y-4 text-slate-800 dark:text-slate-100"
+            className="w-full max-w-md max-h-full overflow-y-auto rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-5 sm:p-6 shadow-2xl space-y-4 text-slate-800 dark:text-slate-100"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start gap-3">

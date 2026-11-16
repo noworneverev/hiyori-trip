@@ -1038,11 +1038,11 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
       {/* Fullscreen Counter Display Modal (Airport / Hotel Check-in Card) */}
       {counterCard && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))]"
           onClick={() => setCounterCard(null)}
         >
           <div
-            className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 p-6 sm:p-8 shadow-2xl space-y-5 animate-in zoom-in-95 duration-150"
+            className="w-full max-w-lg max-h-full overflow-y-auto rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 p-6 sm:p-8 shadow-2xl space-y-5 animate-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">

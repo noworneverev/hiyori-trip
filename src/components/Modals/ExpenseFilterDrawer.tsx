@@ -55,13 +55,13 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-60 bg-black/55 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 transition-opacity animate-in fade-in duration-200"
+      className="fixed inset-0 z-60 bg-black/55 backdrop-blur-xs flex items-end sm:items-center justify-center pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-4 transition-opacity animate-in fade-in duration-200"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
     >
       <div
-        className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-t-[2rem] sm:rounded-3xl shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-[88vh] sm:max-h-[82vh] animate-in slide-in-from-bottom duration-300 ease-out"
+        className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-t-[2rem] sm:rounded-3xl shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-full sm:max-h-[82dvh] pb-[env(safe-area-inset-bottom,0px)] sm:pb-0 animate-in slide-in-from-bottom duration-300 ease-out"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Mobile Pull Handle Bar */}

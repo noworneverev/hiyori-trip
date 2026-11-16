@@ -650,11 +650,11 @@ export const TripOverviewMap: React.FC<TripOverviewMapProps> = ({
       {/* 4. ATTRACTION DETAIL MODAL / DRAWER (景點詳情彈窗) */}
       {selectedSpot && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-150"
           onClick={() => setSelectedSpot(null)}
         >
           <div
-            className="bg-white dark:bg-[#111827] rounded-3xl max-w-lg w-full max-h-[90vh] overflow-y-auto border border-[#E5E2DC] dark:border-slate-800 shadow-2xl p-5 sm:p-6 space-y-4 animate-in zoom-in-95 duration-150 relative text-left"
+            className="bg-white dark:bg-[#111827] rounded-3xl max-w-lg w-full max-h-full sm:max-h-[90dvh] overflow-y-auto border border-[#E5E2DC] dark:border-slate-800 shadow-2xl p-5 sm:p-6 space-y-4 animate-in zoom-in-95 duration-150 relative text-left"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Top Bar with Metadata & Close Button */}

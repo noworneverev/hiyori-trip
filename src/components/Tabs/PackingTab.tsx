@@ -684,11 +684,11 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
       {/* On-Demand Luggage Packing Modal (Retained cleanly per user choice) */}
       {isPackingModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs px-3 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150"
           onClick={() => setIsPackingModalOpen(false)}
         >
           <div
-            className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-3xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200"
+            className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-3xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-full sm:max-h-[85dvh] animate-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
@@ -721,7 +721,8 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                 <button
                   type="button"
                   onClick={() => setIsPackingModalOpen(false)}
-                  className="w-10 h-10 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  aria-label="關閉"
                 >
                   <X className="w-5 h-5" />
                 </button>

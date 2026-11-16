@@ -1180,11 +1180,11 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
       {/* 4. Full Emergency Guide Modal */}
       {showEmergencyGuide && (
         <div
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center px-4 sm:p-6 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] overflow-hidden animate-in fade-in duration-150"
           onClick={() => setShowEmergencyGuide(false)}
         >
           <div
-            className="max-w-xl w-full bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-150 overflow-hidden"
+            className="max-w-xl w-full bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 flex flex-col max-h-full sm:max-h-[90dvh] animate-in zoom-in-95 duration-150 overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header with Enlarged Touch Hitbox Close Button (>=44px) */}

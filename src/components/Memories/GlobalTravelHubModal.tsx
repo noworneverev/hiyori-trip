@@ -920,7 +920,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="w-full max-w-7xl h-full sm:h-[92vh] sm:max-h-[900px] sm:rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border-0 sm:border border-slate-200/90 dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200"
+        className="w-full max-w-7xl h-dvh sm:h-[92dvh] sm:max-h-[900px] sm:rounded-3xl bg-white dark:bg-slate-900 shadow-2xl border-0 sm:border border-slate-200/90 dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Editorial Masthead */}
@@ -1549,11 +1549,11 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       {/* Mobile Slide-Up Bottom Filter Sheet */}
       {showMobileFilters && (
         <div
-          className="lg:hidden fixed inset-0 z-60 flex items-end justify-center bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-150"
+          className="lg:hidden fixed inset-0 z-60 flex items-end justify-center pt-[max(0.75rem,env(safe-area-inset-top,0px))] bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-150"
           onClick={() => setShowMobileFilters(false)}
         >
           <div
-            className="w-full max-h-[82vh] rounded-t-3xl bg-white dark:bg-[#111827] border-t border-[#E5E2DC] dark:border-slate-800 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
+            className="w-full max-h-full rounded-t-3xl bg-white dark:bg-[#111827] border-t border-[#E5E2DC] dark:border-slate-800 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="pt-3 pb-1 flex flex-col items-center shrink-0">

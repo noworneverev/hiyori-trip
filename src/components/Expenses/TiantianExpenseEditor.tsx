@@ -46,9 +46,35 @@ export interface TiantianExpenseDraft {
   isPersonal: boolean;
   tags: string[];
   receiptImages: string[];
-  title: string;
-  notes: string;
+  description: string;
 }
+
+export const formatExpenseDescriptionDraft = (title?: string, notes?: string): string => {
+  const cleanTitle = (title || '').trim();
+  const cleanNotes = (notes || '').trim();
+  if (cleanTitle && cleanNotes && cleanTitle !== cleanNotes) {
+    return `${cleanTitle}\n${cleanNotes}`;
+  }
+  return cleanTitle || cleanNotes;
+};
+
+export const parseExpenseDescription = (
+  description: string,
+  fallbackCategoryLabel: string
+): { title: string; notes?: string } => {
+  const normalized = (description || '').replace(/\r\n/g, '\n').trim();
+  if (!normalized) {
+    return { title: fallbackCategoryLabel || '旅途支出', notes: undefined };
+  }
+  const lines = normalized.split('\n');
+  const firstNonEmptyIdx = lines.findIndex((line) => line.trim().length > 0);
+  const title = firstNonEmptyIdx >= 0 ? lines[firstNonEmptyIdx].trim() : fallbackCategoryLabel;
+  const remaining = firstNonEmptyIdx >= 0 ? lines.slice(firstNonEmptyIdx + 1).join('\n').trim() : '';
+  return {
+    title: title || fallbackCategoryLabel || '旅途支出',
+    notes: remaining || undefined,
+  };
+};
 
 interface TiantianExpenseEditorProps {
   trip: Trip;
@@ -69,7 +95,6 @@ interface TiantianExpenseEditorProps {
   isCompressingReceipts?: boolean;
   receiptError?: string | null;
   onOpenManageCategoriesModal?: () => void;
-  showQuickIncrements?: boolean;
   saveStatusToast?: string | null;
   focusTrigger?: number;
 }
@@ -95,7 +120,6 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
   isCompressingReceipts = false,
   receiptError = null,
   onOpenManageCategoriesModal,
-  showQuickIncrements = false,
   saveStatusToast = null,
   focusTrigger = 0,
 }) => {
@@ -145,12 +169,6 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
   const accountMeta = EXPENSE_ACCOUNT_MAP[draft.paymentMethod] || EXPENSE_ACCOUNT_MAP.cash;
   const isSplitMode = !trip.isSoloTrip && Boolean(trip.isSplitEnabled);
 
-  const quickIncrements = useMemo(() => {
-    if (['JPY', 'KRW', 'VND', 'IDR'].includes(draft.currency)) return [500, 1000, 5000, 10000];
-    if (['TWD', 'THB', 'PHP', 'INR'].includes(draft.currency)) return [50, 100, 500, 1000];
-    return [5, 10, 20, 50];
-  }, [draft.currency]);
-
   const handleAmountChange = (rawVal: string) => {
     let cleaned = rawVal.replace(/,/g, '.').replace(/[^0-9.]/g, '');
     const parts = cleaned.split('.');
@@ -159,11 +177,6 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
       cleaned = cleaned.split('.')[0];
     }
     onChangeDraft((prev) => ({ ...prev, amount: cleaned }));
-  };
-
-  const handleIncrementAmount = (delta: number) => {
-    const next = Math.round(((parseFloat(draft.amount) || 0) + delta) * 100) / 100;
-    onChangeDraft((prev) => ({ ...prev, amount: String(next) }));
   };
 
   const handleAddCustomCategory = () => {
@@ -392,7 +405,7 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
                 </div>
               </div>
             </div>
-            <div className="p-3.5 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60">
+            <div className="p-3.5 pb-[calc(0.875rem+env(safe-area-inset-bottom,0px))] sm:pb-3.5 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 shrink-0">
               <button
                 type="button"
                 onClick={() => setActivePicker('none')}
@@ -803,7 +816,7 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
                 </>
               )}
             </div>
-            <div className="p-3.5 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60">
+            <div className="p-3.5 pb-[calc(0.875rem+env(safe-area-inset-bottom,0px))] sm:pb-3.5 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 shrink-0">
               <button
                 type="button"
                 onClick={() => setActivePicker('none')}
@@ -887,7 +900,7 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
                 </div>
               </div>
             </div>
-            <div className="p-3.5 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60">
+            <div className="p-3.5 pb-[calc(0.875rem+env(safe-area-inset-bottom,0px))] sm:pb-3.5 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 shrink-0">
               <button
                 type="button"
                 onClick={() => setActivePicker('none')}
@@ -989,29 +1002,13 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-2 pl-20">
-            {showQuickIncrements ? (
-              <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
-                {quickIncrements.map((delta) => (
-                  <button
-                    key={delta}
-                    type="button"
-                    onClick={() => handleIncrementAmount(delta)}
-                    className="px-2 py-0.5 rounded-lg bg-white dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600 text-[11px] font-mono tabular-nums font-semibold text-slate-600 dark:text-slate-300 cursor-pointer shrink-0"
-                  >
-                    +{delta >= 1000 ? `${delta / 1000}k` : delta}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <span />
-            )}
-            {parsedAmount > 0 && draft.currency !== baseCurrency && (
-              <span className="text-[11px] font-mono tabular-nums font-semibold text-teal-700 dark:text-teal-300 shrink-0 ml-auto">
+          {parsedAmount > 0 && draft.currency !== baseCurrency && (
+            <div className="flex justify-end">
+              <span className="text-[11px] font-mono tabular-nums font-semibold text-teal-700 dark:text-teal-300">
                 ≈ {formatCurrencyAmount(convertedPreview, baseCurrency)}
               </span>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* 3. 類別（點一下進入挑選，不全部展開） */}
@@ -1167,35 +1164,21 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
           </div>
         )}
 
-        {/* 8. 編輯 DESCRIPTION 區 */}
-        <div className="px-4 sm:px-5 py-3.5 space-y-2">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              編輯 DESCRIPTION 區
-            </label>
-            <span className="text-[11px] text-slate-400 dark:text-slate-500">
-              空白將自動帶入類別名稱
-            </span>
-          </div>
-          <input
-            type="text"
-            value={draft.title}
-            onChange={(e) => onChangeDraft((prev) => ({ ...prev, title: e.target.value }))}
-            placeholder={`品項摘要（預設：${catMeta.label}）`}
-            className="w-full min-h-[42px] px-3.5 py-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-xs sm:text-sm font-medium text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden focus:ring-2 focus:ring-teal-600"
-          />
+        {/* 8. 單一描述與備註文字輸入框 */}
+        <div className="px-4 sm:px-5 py-3.5">
           <textarea
-            rows={2}
-            value={draft.notes}
-            onChange={(e) => onChangeDraft((prev) => ({ ...prev, notes: e.target.value }))}
-            placeholder="備註細節（店家、付款明細或補充說明）..."
-            className="w-full px-3.5 py-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden focus:ring-2 focus:ring-teal-600 resize-none"
+            rows={3}
+            value={draft.description}
+            onChange={(e) => onChangeDraft((prev) => ({ ...prev, description: e.target.value }))}
+            placeholder={`輸入消費品項或備註（選填，預設：${catMeta.label}）`}
+            aria-label="消費品項或備註"
+            className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden focus:ring-2 focus:ring-teal-600 resize-none"
           />
         </div>
       </div>
 
       {/* 9. 底部固定操作區：儲存 / 再記一筆 */}
-      <div className="px-4 sm:px-5 py-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/90 flex items-center justify-between gap-2.5 shrink-0 pb-safe">
+      <div className="px-4 sm:px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] sm:pb-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/90 flex items-center justify-between gap-2.5 shrink-0">
         {isEditing ? (
           <>
             <div>

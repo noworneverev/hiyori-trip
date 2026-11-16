@@ -53,7 +53,12 @@ import { calculateTripSplits, formatSplitsForSharing } from '../../utils/billSpl
 import { CategoryManageModal } from '../Modals/CategoryManageModal';
 import { ExpenseFilterDrawer } from '../Modals/ExpenseFilterDrawer';
 import { ExpenseCalendarBar } from '../Expenses/ExpenseCalendarBar';
-import { TiantianExpenseEditor, TiantianExpenseDraft } from '../Expenses/TiantianExpenseEditor';
+import {
+  TiantianExpenseEditor,
+  TiantianExpenseDraft,
+  formatExpenseDescriptionDraft,
+  parseExpenseDescription,
+} from '../Expenses/TiantianExpenseEditor';
 import {
   DEFAULT_EXPENSE_CATEGORIES,
   EXPENSE_ACCOUNT_MAP,
@@ -117,8 +122,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     isPersonal: false,
     tags: [],
     receiptImages: [],
-    title: '',
-    notes: '',
+    description: '',
   }));
   const [isCompressingReceipts, setIsCompressingReceipts] = useState(false);
   const [receiptError, setReceiptError] = useState<string | null>(null);
@@ -692,8 +696,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       isPersonal: false,
       tags: [],
       receiptImages: [],
-      title: '',
-      notes: '',
+      description: '',
     });
     setEditorFocusTrigger((c) => c + 1);
     setShowAddModal(true);
@@ -726,8 +729,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       isPersonal: !!item.isPersonal,
       tags: item.tags ? [...item.tags] : [],
       receiptImages: imgs,
-      title: item.title || '',
-      notes: item.notes || '',
+      description: formatExpenseDescriptionDraft(item.title, item.notes),
     });
     setEditorFocusTrigger((c) => c + 1);
     setShowAddModal(true);
@@ -743,7 +745,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     if (isNaN(parsedAmount) || parsedAmount <= 0) return;
 
     const resolvedCatMeta = getCategoryMeta(expenseDraft.category);
-    const finalTitle = expenseDraft.title.trim() || resolvedCatMeta.label;
+    const { title: finalTitle, notes: finalNotes } = parseExpenseDescription(
+      expenseDraft.description,
+      resolvedCatMeta.label
+    );
     const matchedDay = trip.days.find((d) => d.date === expenseDraft.date);
     const isSplitMode = !trip.isSoloTrip && Boolean(trip.isSplitEnabled);
     const finalTags = expenseDraft.tags.length > 0 ? expenseDraft.tags : undefined;
@@ -760,7 +765,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             paymentMethod: expenseDraft.paymentMethod,
             date: expenseDraft.date,
             dayNumber: matchedDay ? matchedDay.dayNumber : undefined,
-            notes: expenseDraft.notes.trim() || undefined,
+            notes: finalNotes,
             tags: finalTags,
             receiptImages: expenseDraft.receiptImages.length > 0 ? expenseDraft.receiptImages : undefined,
             receiptImage: expenseDraft.receiptImages[0] || undefined,
@@ -794,7 +799,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         paymentMethod: expenseDraft.paymentMethod,
         date: expenseDraft.date,
         dayNumber: matchedDay ? matchedDay.dayNumber : undefined,
-        notes: expenseDraft.notes.trim() || undefined,
+        notes: finalNotes,
         tags: finalTags,
         receiptImages: expenseDraft.receiptImages.length > 0 ? expenseDraft.receiptImages : undefined,
         receiptImage: expenseDraft.receiptImages[0] || undefined,
@@ -824,8 +829,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       setExpenseDraft((prev) => ({
         ...prev,
         amount: '',
-        title: '',
-        notes: '',
+        description: '',
         tags: [],
         receiptImages: [],
       }));
@@ -2970,11 +2974,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           onClick={closeAddExpenseModal}
         >
           <div
-            className="w-full h-full sm:h-[680px] sm:max-h-[92vh] sm:max-w-lg bg-white dark:bg-[#111827] sm:rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            className="w-full h-dvh sm:h-[680px] sm:max-h-[92dvh] sm:max-w-lg bg-white dark:bg-[#111827] sm:rounded-3xl shadow-2xl border-0 sm:border border-[#E5E2DC] dark:border-slate-800 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="px-5 py-3.5 border-b border-[#E5E2DC]/80 dark:border-slate-800 flex items-center justify-between shrink-0 bg-[#FAF9F6] dark:bg-slate-900/60">
+            <div className="px-5 py-3.5 pt-[calc(0.875rem+env(safe-area-inset-top,0px))] sm:pt-3.5 border-b border-[#E5E2DC]/80 dark:border-slate-800 flex items-center justify-between shrink-0 bg-[#FAF9F6] dark:bg-slate-900/60">
               <div className="flex items-center gap-2.5">
                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
                   editingExpenseId
@@ -3019,7 +3023,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 setViewingReceiptGallery({
                   images: expenseDraft.receiptImages,
                   currentIndex: index,
-                  title: expenseDraft.title.trim() || getCategoryMeta(expenseDraft.category).label,
+                  title: parseExpenseDescription(
+                    expenseDraft.description,
+                    getCategoryMeta(expenseDraft.category).label
+                  ).title,
                   amount: parseFloat(expenseDraft.amount) || 0,
                   currency: expenseDraft.currency,
                 });
@@ -3027,7 +3034,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               isCompressingReceipts={isCompressingReceipts}
               receiptError={receiptError}
               onOpenManageCategoriesModal={() => setShowCategoryManageModal(true)}
-              showQuickIncrements={true}
               saveStatusToast={saveToast}
               focusTrigger={editorFocusTrigger}
             />
@@ -3038,11 +3044,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       {/* 5. Custom Exchange Rate Configuration Modal */}
       {showRateModal && (
         <div
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))]"
           onClick={() => setShowRateModal(false)}
         >
           <div
-            className="w-full max-w-sm bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-5 space-y-4 animate-in fade-in zoom-in-95 duration-100 text-xs"
+            className="w-full max-w-sm max-h-full overflow-y-auto bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-5 space-y-4 animate-in fade-in zoom-in-95 duration-100 text-xs"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
@@ -3135,11 +3141,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       {/* 5.5 Cash on Hand Configuration Modal (手頭初始現金設定) */}
       {showCashModal && (
         <div
-          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-100"
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-100"
           onClick={() => setShowCashModal(false)}
         >
           <div
-            className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 space-y-4 animate-in zoom-in-95 duration-100 text-xs"
+            className="w-full max-w-md max-h-full overflow-y-auto bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 space-y-4 animate-in zoom-in-95 duration-100 text-xs"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
@@ -3282,11 +3288,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       {/* 6. Multi-Receipt Fullscreen Lightbox / Gallery */}
       {viewingReceiptGallery && (
         <div
-          className="fixed inset-0 z-60 bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-60 bg-black/85 backdrop-blur-sm flex items-center justify-center px-2 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150"
           onClick={() => setViewingReceiptGallery(null)}
         >
           <div
-            className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-[92vh]"
+            className="bg-white dark:bg-slate-900 rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 flex flex-col max-h-full sm:max-h-[92dvh]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -3444,11 +3450,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       {/* Safe Delete Confirmation Modal */}
       {pendingDeleteExpense && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150"
           onClick={() => setPendingDeleteExpense(null)}
         >
           <div
-            className="w-full max-w-sm rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-6 text-center space-y-4 my-auto"
+            className="w-full max-w-sm max-h-full overflow-y-auto rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-6 text-center space-y-4 my-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="w-12 h-12 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto">

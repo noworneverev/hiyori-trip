@@ -11,6 +11,7 @@ import { convertAmount, detectTripCurrency } from '../../utils/currency';
 import {
   TiantianExpenseEditor,
   TiantianExpenseDraft,
+  parseExpenseDescription,
 } from '../Expenses/TiantianExpenseEditor';
 import { resolveExpenseCategoryMeta } from '../Expenses/expenseMeta';
 import {
@@ -68,8 +69,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     isPersonal: false,
     tags: [],
     receiptImages: [],
-    title: '',
-    notes: '',
+    description: '',
   }));
 
   const [isCompressingReceipts, setIsCompressingReceipts] = useState(false);
@@ -161,6 +161,10 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) return;
 
     const catMeta = resolveExpenseCategoryMeta(draft.category, trip);
+    const { title: finalTitle, notes: finalNotes } = parseExpenseDescription(
+      draft.description,
+      catMeta.label || '旅途支出'
+    );
     const isSplitMode = !trip.isSoloTrip && Boolean(trip.isSplitEnabled);
     const matchedDay = (trip.days || []).find((d) => d.date === draft.date);
 
@@ -168,7 +172,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
 
     const newExpense: ExpenseItem = {
       id: `exp-${Date.now()}`,
-      title: draft.title.trim() || catMeta.label || '旅途支出',
+      title: finalTitle,
       amount: parsedAmount,
       currency: draft.currency,
       category: draft.category,
@@ -176,7 +180,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       date: draft.date,
       dayNumber: matchedDay ? matchedDay.dayNumber : undefined,
       convertedAmount: convertAmount(parsedAmount, draft.currency, trip.currency || 'TWD', trip.customExchangeRates),
-      notes: draft.notes.trim() || undefined,
+      notes: finalNotes,
       tags: draft.tags.length > 0 ? draft.tags : undefined,
       receiptImages: draft.receiptImages.length > 0 ? draft.receiptImages : undefined,
       receiptImage: draft.receiptImages.length > 0 ? draft.receiptImages[0] : undefined,
@@ -202,8 +206,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       setDraft((prev) => ({
         ...prev,
         amount: '',
-        title: '',
-        notes: '',
+        description: '',
         receiptImages: [],
         tags: [],
       }));
@@ -417,11 +420,11 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150 overflow-hidden"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150 overflow-hidden"
       onClick={handleClose}
     >
       <div
-        className="relative w-full max-w-full sm:max-w-lg bg-white dark:bg-[#111827] rounded-t-[28px] sm:rounded-3xl shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-[92dvh] sm:max-h-[88vh] overscroll-contain touch-pan-y animate-in slide-in-from-bottom duration-200"
+        className="relative w-full max-w-full sm:max-w-lg bg-white dark:bg-[#111827] rounded-t-[28px] sm:rounded-3xl shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-full sm:max-h-[88dvh] overscroll-contain touch-pan-y animate-in slide-in-from-bottom duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Mobile Drag Indicator Handle */}
@@ -491,7 +494,6 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
             onPreviewReceipt={(src) => setPreviewImage(src)}
             isCompressingReceipts={isCompressingReceipts}
             receiptError={receiptError}
-            showQuickIncrements={true}
             saveStatusToast={saveStatusToast}
             focusTrigger={focusTrigger}
           />
@@ -740,10 +742,10 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       {/* Fullscreen Receipt Image Lightbox */}
       {previewImage && (
         <div
-          className="fixed inset-0 z-60 bg-black/90 backdrop-blur-xs flex flex-col items-center justify-center p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-60 bg-black/90 backdrop-blur-xs flex flex-col items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150"
           onClick={() => setPreviewImage(null)}
         >
-          <div className="relative max-w-2xl max-h-[85vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+          <div className="relative max-w-2xl max-h-full flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
             <MediaImage
               src={previewImage}
               tripId={trip.id}

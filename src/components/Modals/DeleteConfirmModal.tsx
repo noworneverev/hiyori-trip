@@ -26,11 +26,11 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-6 text-center space-y-4 my-auto"
+        className="w-full max-w-sm max-h-full overflow-y-auto rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-6 text-center space-y-4 my-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto ${

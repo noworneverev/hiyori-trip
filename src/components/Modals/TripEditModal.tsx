@@ -589,7 +589,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto overscroll-contain touch-manipulation"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm px-3 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] overflow-hidden overscroll-contain touch-manipulation"
       onClick={handleCloseAndCleanup}
       onTouchMove={(e) => {
         if (e.target === e.currentTarget) {
@@ -598,7 +598,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
       }}
     >
       <div
-        className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-150 overflow-hidden flex flex-col max-h-[92vh] overscroll-contain"
+        className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-150 overflow-hidden flex flex-col max-h-full sm:max-h-[92dvh] overscroll-contain"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

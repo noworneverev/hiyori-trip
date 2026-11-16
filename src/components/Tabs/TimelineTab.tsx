@@ -1963,11 +1963,11 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   {/* High-Resolution Photo Overlay for Timeline */}
   {overlaySpotPhoto && (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 bg-black/95 backdrop-blur-md animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 flex items-center justify-center px-2 sm:p-6 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] bg-black/95 backdrop-blur-md animate-in fade-in duration-150"
       onClick={() => setOverlaySpotPhoto(null)}
     >
       <div
-        className="max-w-4xl w-full bg-[#111827] rounded-3xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-[95vh] relative"
+        className="max-w-4xl w-full bg-[#111827] rounded-3xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-full sm:max-h-[95dvh] relative"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Close Button & Action Bar */}

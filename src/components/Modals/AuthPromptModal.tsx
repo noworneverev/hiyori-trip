@@ -74,7 +74,7 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-slate-950/60 backdrop-blur-md animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-4 bg-slate-950/60 backdrop-blur-md animate-in fade-in duration-200"
       onClick={(e) => {
         if (e.target === e.currentTarget && !isLoggingIn) onClose();
       }}
@@ -82,7 +82,7 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
       aria-modal="true"
       aria-labelledby="auth-modal-title"
     >
-      <div className="relative w-full max-w-sm bg-white dark:bg-[#111827] rounded-t-3xl sm:rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] sm:pb-6 overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200 text-slate-900 dark:text-slate-100">
+      <div className="relative w-full max-w-sm max-h-full overflow-y-auto bg-white dark:bg-[#111827] rounded-t-3xl sm:rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] sm:pb-6 animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200 text-slate-900 dark:text-slate-100">
         {/* Close Button */}
         <button
           onClick={onClose}

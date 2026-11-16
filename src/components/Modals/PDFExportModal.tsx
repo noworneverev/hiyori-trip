@@ -129,7 +129,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/75 backdrop-blur-xs p-2 sm:p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/75 backdrop-blur-xs px-2 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]"
       onClick={onClose}
     >
       {/* Print-specific style for native browser printing */}
@@ -170,7 +170,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
       `}</style>
 
       <div
-        className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col h-[92vh] max-h-[92vh] min-h-0 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        className="w-full max-w-4xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col h-full sm:h-[92dvh] max-h-full min-h-0 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Sticky Control Header */}

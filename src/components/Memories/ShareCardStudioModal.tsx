@@ -262,11 +262,11 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-70 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-3 sm:p-5 overflow-y-auto"
+      className="fixed inset-0 z-70 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm px-3 sm:p-5 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] overflow-hidden"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-4xl bg-white dark:bg-[#111827] rounded-3xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl overflow-hidden my-auto text-slate-900 dark:text-slate-100"
+        className="w-full max-w-4xl max-h-full overflow-y-auto bg-white dark:bg-[#111827] rounded-3xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl my-auto text-slate-900 dark:text-slate-100"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between">

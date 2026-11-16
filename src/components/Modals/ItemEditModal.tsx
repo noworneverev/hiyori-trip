@@ -328,11 +328,11 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs p-0 sm:p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-4 overflow-hidden"
       onClick={handleClose}
     >
       <div
-        className="w-full max-w-xl rounded-t-[28px] sm:rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col max-h-[92vh] sm:max-h-[88vh] overflow-hidden animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-200"
+        className="w-full max-w-xl rounded-t-[28px] sm:rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col max-h-full sm:max-h-[88dvh] pb-[env(safe-area-inset-bottom,0px)] sm:pb-0 overflow-hidden animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* iOS Drag Handle on Mobile */}
