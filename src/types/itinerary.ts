@@ -62,6 +62,7 @@ export interface ExpenseItem {
   paidBy?: string; // name of who paid (e.g. '我', '小明')
   splitWith?: string[]; // names of who splits this expense (e.g. ['我', '小明'])
   isPersonal?: boolean; // if true, treated as private/personal (not split)
+  tags?: string[]; // optional user-selected tags for categorizing expenses
 }
 
 export interface TripMemoryItem {
@@ -167,6 +168,7 @@ export interface Trip {
   stickyNotes?: StickyNoteItem[];
   customExpenseCategories?: string[];
   customCategoryLabels?: Record<string, string>;
+  customExpenseTags?: string[];
   customExchangeRates?: Record<string, number>;
   emergencyContacts: EmergencyContact[];
   collabId?: string;

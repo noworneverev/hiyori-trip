@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { Trip, PackingItem, PackingCategory, TodoItem, TodoCategory } from '../../types/itinerary';
+import { Trip, PackingItem, PackingCategory, TodoItem } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import {
   Plus,
@@ -89,7 +89,18 @@ const DEFAULT_TODOS: TodoItem[] = [
 export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = true, onUpdateTrip, requireAuth }) => {
   const [showCompleted, setShowCompleted] = useState(false);
 
-  // Luggage Packing Modal State (Quiet on-demand tool, separate from main to-dos)
+  // Inline Quick Add input
+  const [inlineTitle, setInlineTitle] = useState('');
+  const [inlineDueDate, setInlineDueDate] = useState('');
+  const [showInlineDateInput, setShowInlineDateInput] = useState(false);
+
+  // Direct Inline Edit States (NO modal for todo editing!)
+  const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
+  const [editTodoTitle, setEditTodoTitle] = useState('');
+  const [editTodoDueDate, setEditTodoDueDate] = useState('');
+  const [openTodoSwipeId, setOpenTodoSwipeId] = useState<string | null>(null);
+
+  // Luggage Packing Modal State (Quiet on-demand tool retained from Phase 1 clarification)
   const [isPackingModalOpen, setIsPackingModalOpen] = useState(false);
   useBodyScrollLock(isPackingModalOpen);
   const [packingCategoryFilter, setPackingCategoryFilter] = useState<PackingCategory | 'all'>('all');
@@ -98,33 +109,17 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
   const [editPackingName, setEditPackingName] = useState('');
   const [editPackingCategory, setEditPackingCategory] = useState<PackingCategory>('other');
 
-  // Quick Addition / Edit Sheet State for detailed Todo
-  const [isAddSheetOpen, setIsAddSheetOpen] = useState(false);
-  useBodyScrollLock(isAddSheetOpen);
-  const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
-  const [openTodoSwipeId, setOpenTodoSwipeId] = useState<string | null>(null);
-  const [inputTitle, setInputTitle] = useState('');
-  const [inputDueDate, setInputDueDate] = useState('');
-
   useEffect(() => {
-    if (!isPackingModalOpen && !isAddSheetOpen) return;
+    if (!isPackingModalOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isAddSheetOpen) {
-          setIsAddSheetOpen(false);
-          setEditingTodoId(null);
-        } else if (isPackingModalOpen) {
-          setIsPackingModalOpen(false);
-          setEditingPackingId(null);
-        }
+        setIsPackingModalOpen(false);
+        setEditingPackingId(null);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isPackingModalOpen, isAddSheetOpen]);
-
-  // Inline Quick Add input
-  const [inlineTitle, setInlineTitle] = useState('');
+  }, [isPackingModalOpen]);
 
   const todos = trip.todos || [];
   const packingList = trip.packingList || [];
@@ -139,10 +134,6 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
     ? Math.round((completedTodos.length / todos.length) * 100)
     : 0;
 
-  // Display all pending todos cleanly without category clutter
-  const displayedTodos = pendingTodos;
-
-  // Filtered Packing items for modal
   const displayedPacking = useMemo(() => {
     let list = pendingPacking;
     if (packingCategoryFilter !== 'all') {
@@ -151,7 +142,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
     return list;
   }, [pendingPacking, packingCategoryFilter]);
 
-  // Handlers for Todos
+  // Todo Handlers
   const handleToggleTodo = (id: string) => {
     if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleToggleTodo(id), lang === 'zh' ? '勾選待辦事項' : 'Toggle todo')) {
@@ -159,6 +150,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
     }
     const updated = todos.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t));
     onUpdateTrip({ ...trip, todos: updated, updatedAt: Date.now() });
+    if (editingTodoId === id) setEditingTodoId(null);
   };
 
   const handleDeleteTodo = (id: string) => {
@@ -173,6 +165,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
       deletedItemIds: { ...(trip.deletedItemIds || {}), [id]: Date.now() },
       updatedAt: Date.now(),
     });
+    if (editingTodoId === id) setEditingTodoId(null);
   };
 
   const performInlineAdd = () => {
@@ -188,9 +181,12 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
       title: text,
       category: 'other',
       completed: false,
+      dueDate: inlineDueDate || undefined,
     };
     onUpdateTrip({ ...trip, todos: [newTodo, ...todos], updatedAt: Date.now() });
     setInlineTitle('');
+    setInlineDueDate('');
+    setShowInlineDateInput(false);
   };
 
   const handleInlineAdd = (e: React.FormEvent) => {
@@ -198,78 +194,31 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
     performInlineAdd();
   };
 
-  const openAddTodoSheet = () => {
+  const startInlineEditTodo = (todo: TodoItem) => {
     if (!canEdit) return;
-    if (requireAuth && !requireAuth(openAddTodoSheet, lang === 'zh' ? '新增待辦事項' : 'Add todo')) {
+    if (requireAuth && !requireAuth(() => startInlineEditTodo(todo), lang === 'zh' ? '編輯待辦事項' : 'Edit todo')) {
       return;
     }
-    setEditingTodoId(null);
-    setInputTitle('');
-    setInputDueDate('');
-    setIsAddSheetOpen(true);
-  };
-
-  const openEditTodoSheet = (todo: TodoItem) => {
-    if (!canEdit) return;
-    if (requireAuth && !requireAuth(() => openEditTodoSheet(todo), lang === 'zh' ? '編輯待辦事項' : 'Edit todo')) {
-      return;
-    }
+    setOpenTodoSwipeId(null);
     setEditingTodoId(todo.id);
-    setInputTitle(todo.title);
-    setInputDueDate(todo.dueDate || '');
-    setIsAddSheetOpen(true);
+    setEditTodoTitle(todo.title);
+    setEditTodoDueDate(todo.dueDate || '');
   };
 
-  const performSaveTodoSheet = () => {
-    if (!canEdit) return;
-    const text = inputTitle.trim();
-    if (!text) return;
-    if (
-      requireAuth &&
-      !requireAuth(
-        performSaveTodoSheet,
-        editingTodoId
-          ? lang === 'zh'
-            ? '編輯待辦事項'
-            : 'Edit todo'
-          : lang === 'zh'
-          ? '新增待辦事項'
-          : 'Add todo'
-      )
-    ) {
+  const saveInlineEditTodo = () => {
+    if (!canEdit || !editingTodoId) return;
+    const trimmed = editTodoTitle.trim();
+    if (!trimmed) return;
+    if (requireAuth && !requireAuth(saveInlineEditTodo, lang === 'zh' ? '儲存待辦事項' : 'Save todo')) {
       return;
     }
-
-    if (editingTodoId) {
-      const updated = todos.map((t) =>
-        t.id === editingTodoId
-          ? {
-              ...t,
-              title: text,
-              dueDate: inputDueDate || undefined,
-            }
-          : t
-      );
-      onUpdateTrip({ ...trip, todos: updated, updatedAt: Date.now() });
-    } else {
-      const newTodo: TodoItem = {
-        id: `todo-${Date.now()}`,
-        title: text,
-        category: 'other',
-        completed: false,
-        dueDate: inputDueDate || undefined,
-      };
-      onUpdateTrip({ ...trip, todos: [newTodo, ...todos], updatedAt: Date.now() });
-    }
+    const updated = todos.map((t) =>
+      t.id === editingTodoId
+        ? { ...t, title: trimmed, dueDate: editTodoDueDate || undefined }
+        : t
+    );
+    onUpdateTrip({ ...trip, todos: updated, updatedAt: Date.now() });
     setEditingTodoId(null);
-    setInputTitle('');
-    setInputDueDate('');
-    setIsAddSheetOpen(false);
-  };
-
-  const handleDetailedAdd = (e: React.FormEvent) => {
-    e.preventDefault();
-    performSaveTodoSheet();
   };
 
   const handleLoadRecommendedTodos = () => {
@@ -286,7 +235,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
     onUpdateTrip({ ...trip, todos: [...todos, ...additions], updatedAt: Date.now() });
   };
 
-  // Handlers for Packing Items (Inside Modal)
+  // Packing Modal Handlers
   const handleTogglePacking = (id: string) => {
     if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleTogglePacking(id), lang === 'zh' ? '勾選行李清單' : 'Toggle packing')) {
@@ -376,122 +325,219 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
     onUpdateTrip({ ...trip, packingList: [...packingList, ...additions], updatedAt: Date.now() });
   };
 
+  const renderInlineEditRow = (todo: TodoItem) => (
+    <div
+      key={todo.id}
+      className="p-3.5 sm:p-4 bg-teal-50/45 dark:bg-teal-950/20 space-y-2.5 animate-in fade-in duration-100"
+    >
+      <input
+        type="text"
+        value={editTodoTitle}
+        onChange={(e) => setEditTodoTitle(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            saveInlineEditTodo();
+          } else if (e.key === 'Escape') {
+            setEditingTodoId(null);
+          }
+        }}
+        autoFocus
+        placeholder="輸入待辦事項..."
+        className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-white dark:bg-[#111827] border border-teal-600/70 dark:border-teal-500/70 text-sm text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-teal-600"
+      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <input
+            type="date"
+            value={editTodoDueDate}
+            onChange={(e) => setEditTodoDueDate(e.target.value)}
+            className="min-h-[44px] sm:min-h-[36px] px-2.5 py-1 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-xs font-mono tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-teal-600"
+          />
+          {editTodoDueDate && (
+            <button
+              type="button"
+              onClick={() => setEditTodoDueDate('')}
+              className="min-h-[36px] px-2 text-xs text-slate-400 hover:text-rose-500 cursor-pointer"
+              title="清除日期"
+            >
+              清除日期
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 ml-auto">
+          <button
+            type="button"
+            onClick={() => handleDeleteTodo(todo.id)}
+            className="min-h-[44px] sm:min-h-[36px] px-2.5 py-1 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-semibold cursor-pointer flex items-center gap-1"
+            title="刪除待辦"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>刪除</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditingTodoId(null)}
+            className="min-h-[44px] sm:min-h-[36px] px-3 py-1 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={saveInlineEditTodo}
+            disabled={!editTodoTitle.trim()}
+            className="min-h-[44px] sm:min-h-[36px] px-3.5 py-1 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-xs font-bold disabled:opacity-50 cursor-pointer flex items-center gap-1"
+          >
+            <Check className="w-3.5 h-3.5" />
+            <span>儲存</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="relative pb-24 grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-      {/* Left Rail (Desktop Workbench Summary, Progress & Quick Actions) */}
-      <div className="lg:col-span-4 lg:sticky lg:top-24 bg-white dark:bg-[#111827] rounded-3xl p-4 sm:p-5 border border-[#E5E2DC] dark:border-slate-800 shadow-2xs space-y-4">
-        <div>
-          <div className="flex items-center gap-2">
+    <div className="relative pb-24 max-w-3xl mx-auto">
+      {/* Clean Single Checklist Card */}
+      <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs overflow-hidden">
+        {/* Minimal Header Bar: Progress + Quiet Luggage Packing Button */}
+        <div className="px-4 sm:px-5 py-3.5 border-b border-[#E5E2DC] dark:border-slate-800 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center shrink-0">
               <CheckSquare className="w-4 h-4" />
             </div>
-            <h3 className="font-bold text-slate-900 dark:text-white text-base sm:text-lg">
-              {lang === 'zh' ? '待辦清單' : 'To-Do Checklist'}
-            </h3>
+            <div className="min-w-0">
+              <h3 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base leading-tight">
+                {lang === 'zh' ? '待辦清單' : 'To-Do Checklist'}
+              </h3>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums mt-0.5">
+                {completedTodos.length} / {todos.length} {lang === 'zh' ? '已完成' : 'Done'} · {progressPercent}%
+              </p>
+            </div>
           </div>
-          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-2 font-mono tabular-nums">
-            <span>
-              {completedTodos.length} / {todos.length} {lang === 'zh' ? '已完成' : 'Completed'} ({progressPercent}%)
-            </span>
+
+          <div className="flex items-center gap-2">
+            {canEdit && todos.length === 0 && (
+              <button
+                type="button"
+                onClick={handleLoadRecommendedTodos}
+                className="min-h-[40px] px-3 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                <span>載入常用範本</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsPackingModalOpen(true)}
+              className="min-h-[40px] px-3.5 py-1.5 rounded-xl border border-teal-200 dark:border-teal-800/80 bg-teal-50/70 dark:bg-teal-950/50 hover:bg-teal-100/70 dark:hover:bg-teal-900/40 text-teal-800 dark:text-teal-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+              title="開啟出發前行李打包清單"
+            >
+              <Luggage className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+              <span>行李打包</span>
+              <span className="font-mono tabular-nums text-[11px] opacity-85">
+                ({pendingPacking.length})
+              </span>
+            </button>
           </div>
         </div>
 
-        {/* Progress Bar */}
+        {/* Hairline Progress Bar */}
         {todos.length > 0 && (
-          <div className="w-full bg-[#FAF9F6] dark:bg-slate-800 h-1.5 rounded-full overflow-hidden border border-[#E5E2DC]/60 dark:border-slate-700/50">
+          <div className="w-full bg-[#FAF9F6] dark:bg-slate-900 h-1 overflow-hidden">
             <div
-              className="bg-teal-700 dark:bg-teal-500 h-full rounded-full transition-all duration-300"
+              className="bg-teal-700 dark:bg-teal-500 h-full transition-all duration-300"
               style={{ width: `${progressPercent}%` }}
             />
           </div>
         )}
 
-        {/* Quick Actions (Quiet Luggage Button & Recommended Templates) */}
-        <div className="flex flex-wrap lg:flex-col items-stretch gap-2 pt-1">
-          <button
-            type="button"
-            onClick={() => setIsPackingModalOpen(true)}
-            className="min-h-[44px] px-3.5 py-2 rounded-xl border border-teal-200 dark:border-teal-800/80 bg-teal-50/70 dark:bg-teal-950/50 hover:bg-teal-100/60 dark:hover:bg-teal-900/40 text-teal-800 dark:text-teal-300 text-xs font-semibold flex items-center justify-between gap-2 transition cursor-pointer shadow-2xs active:scale-98"
-            title="開啟出發前行李打包清單"
-          >
-            <span className="flex items-center gap-2">
-              <Luggage className="w-4 h-4 text-teal-700 dark:text-teal-400" />
-              <span>行李裝備打包</span>
-            </span>
-            <span className="text-[11px] font-mono tabular-nums text-teal-700 dark:text-teal-300">
-              {pendingPacking.length} 待打包
-            </span>
-          </button>
-
-          {canEdit && (
-            <button
-              type="button"
-              onClick={handleLoadRecommendedTodos}
-              className="min-h-[44px] px-3.5 py-2 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-900/70 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-2 transition cursor-pointer shadow-2xs active:scale-98"
-              title="載入常用行前待辦範本"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-              <span>載入推薦待辦範本</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Right Main Checklist Card Container */}
-      <div className="lg:col-span-8 rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs overflow-hidden">
-        {/* Inline Quick Add Input */}
+        {/* Inline Quick Add Bar */}
         {canEdit && (
           <form
             onSubmit={handleInlineAdd}
-            className="p-3 sm:p-4 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/50 flex items-center gap-2.5 transition"
+            className="p-3 sm:p-4 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/40 space-y-2"
           >
-            <div className="w-5 h-5 rounded-full border border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center shrink-0">
-              <Plus className="w-3 h-3 text-slate-400 dark:text-slate-500" />
-            </div>
-            <input
-              type="text"
-              value={inlineTitle}
-              onChange={(e) => setInlineTitle(e.target.value)}
-              placeholder="新增待辦事項..."
-              className="flex-1 min-h-[36px] bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden"
-            />
-            <div className="flex items-center gap-1.5 shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="w-5 h-5 rounded-full border border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center shrink-0">
+                <Plus className="w-3 h-3 text-slate-400 dark:text-slate-500" />
+              </div>
+              <input
+                type="text"
+                value={inlineTitle}
+                onChange={(e) => setInlineTitle(e.target.value)}
+                placeholder="新增待辦事項，或點擊下方項目直接編輯..."
+                className="flex-1 min-h-[38px] bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden"
+              />
               <button
                 type="button"
-                onClick={openAddTodoSheet}
-                className="min-h-[44px] sm:min-h-[36px] px-2.5 py-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer text-xs font-medium"
-                title="設定日期與詳細項目"
+                onClick={() => setShowInlineDateInput((v) => !v)}
+                className={`min-w-[38px] min-h-[38px] rounded-xl flex items-center justify-center transition cursor-pointer ${
+                  showInlineDateInput || inlineDueDate
+                    ? 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-300 dark:border-teal-800'
+                    : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800'
+                }`}
+                title="附加上預計日期（選填）"
               >
-                詳細
+                <Calendar className="w-4 h-4" />
               </button>
               {inlineTitle.trim() && (
                 <button
                   type="submit"
-                  className="min-h-[36px] px-3.5 py-1 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-xs font-semibold cursor-pointer transition shadow-2xs"
+                  className="min-h-[38px] px-3.5 py-1 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-xs font-bold cursor-pointer transition shadow-2xs shrink-0"
                 >
                   新增
                 </button>
               )}
             </div>
+
+            {showInlineDateInput && (
+              <div className="flex items-center gap-2 pl-7 animate-in fade-in duration-100">
+                <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  預計日期：
+                </span>
+                <input
+                  type="date"
+                  value={inlineDueDate}
+                  onChange={(e) => setInlineDueDate(e.target.value)}
+                  className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-xs font-mono tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:ring-1 focus:ring-teal-600"
+                />
+                {inlineDueDate && (
+                  <button
+                    type="button"
+                    onClick={() => setInlineDueDate('')}
+                    className="text-[11px] text-slate-400 hover:text-rose-500 cursor-pointer"
+                  >
+                    清除
+                  </button>
+                )}
+              </div>
+            )}
           </form>
         )}
 
-        {/* Active Todos List */}
-        {displayedTodos.length === 0 ? (
-          <div className="py-16 text-center px-4">
-            <div className="w-12 h-12 rounded-2xl bg-teal-50 dark:bg-slate-800 text-teal-700 dark:text-teal-400 flex items-center justify-center mx-auto mb-3">
-              <Check className="w-6 h-6 stroke-[2.5]" />
+        {/* Pending Todos List (Click any row to edit directly inline) */}
+        {pendingTodos.length === 0 ? (
+          <div className="py-14 text-center px-4">
+            <div className="w-11 h-11 rounded-2xl bg-teal-50 dark:bg-slate-800 text-teal-700 dark:text-teal-400 flex items-center justify-center mx-auto mb-3">
+              <Check className="w-5 h-5 stroke-[2.5]" />
             </div>
             <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-              尚無待辦事項
+              {todos.length === 0 ? '尚無待辦事項' : '待辦事項已全數完成'}
             </p>
             <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-              可從上方新增，或載入推薦待辦範本
+              從上方輸入新增，點擊任何列即可直接行內修改
             </p>
           </div>
         ) : (
           <div className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800/80">
-            {displayedTodos.map((todo) => {
+            {pendingTodos.map((todo) => {
+              if (editingTodoId === todo.id) {
+                return renderInlineEditRow(todo);
+              }
+
               return (
                 <SwipeableActionRow
                   key={todo.id}
@@ -499,15 +545,14 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                   isOpen={openTodoSwipeId === todo.id}
                   canEdit={canEdit}
                   onOpenChange={setOpenTodoSwipeId}
-                  onRowClick={canEdit ? () => openEditTodoSheet(todo) : undefined}
-                  onEdit={() => openEditTodoSheet(todo)}
+                  onRowClick={canEdit ? () => startInlineEditTodo(todo) : undefined}
+                  onEdit={() => startInlineEditTodo(todo)}
                   onDelete={() => handleDeleteTodo(todo.id)}
                   className={`flex items-center justify-between p-3.5 sm:p-4 md:hover:bg-[#FAF9F6] md:dark:hover:bg-slate-900/50 transition group ${
                     canEdit ? 'cursor-pointer' : ''
                   }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    {/* Touch Checkbox with >=44px mobile hitbox */}
                     <button
                       type="button"
                       onClick={(e) => {
@@ -543,7 +588,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                     >
                       <button
                         type="button"
-                        onClick={() => openEditTodoSheet(todo)}
+                        onClick={() => startInlineEditTodo(todo)}
                         className="w-9 h-9 flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-700 dark:text-slate-500 dark:hover:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer opacity-70 group-hover:opacity-100"
                         title="編輯待辦"
                         aria-label="編輯待辦"
@@ -584,45 +629,59 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
 
             {showCompleted && (
               <div className="divide-y divide-[#E5E2DC]/60 dark:divide-slate-800/60 px-2 pb-2">
-                {completedTodos.map((todo) => (
-                  <div
-                    key={todo.id}
-                    className="flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100/60 dark:hover:bg-slate-800/40 transition group opacity-75"
-                  >
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleTodo(todo.id)}
-                        className="w-11 h-11 sm:w-8 sm:h-8 -ml-2 flex items-center justify-center rounded-xl shrink-0 cursor-pointer"
-                        title="恢復待辦"
-                      >
-                        <span className="w-5 h-5 rounded-full bg-teal-700 dark:bg-teal-500 text-white flex items-center justify-center shadow-2xs">
-                          <Check className="w-3 h-3 stroke-[2.5]" />
+                {completedTodos.map((todo) => {
+                  if (editingTodoId === todo.id) {
+                    return renderInlineEditRow(todo);
+                  }
+                  return (
+                    <div
+                      key={todo.id}
+                      onClick={() => canEdit && startInlineEditTodo(todo)}
+                      className={`flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100/60 dark:hover:bg-slate-800/40 transition group opacity-75 ${
+                        canEdit ? 'cursor-pointer' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleTodo(todo.id);
+                          }}
+                          className="w-11 h-11 sm:w-8 sm:h-8 -ml-2 flex items-center justify-center rounded-xl shrink-0 cursor-pointer"
+                          title="恢復待辦"
+                        >
+                          <span className="w-5 h-5 rounded-full bg-teal-700 dark:bg-teal-500 text-white flex items-center justify-center shadow-2xs">
+                            <Check className="w-3 h-3 stroke-[2.5]" />
+                          </span>
+                        </button>
+                        <span className="text-sm line-through text-slate-400 dark:text-slate-500 truncate flex-1">
+                          {todo.title}
                         </span>
-                      </button>
-                      <span className="text-sm line-through text-slate-400 dark:text-slate-500 truncate flex-1">
-                        {todo.title}
-                      </span>
+                      </div>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteTodo(todo.id);
+                          }}
+                          className="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
+                          title="刪除"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
-                    {canEdit && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteTodo(todo.id)}
-                        className="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
-                        title="刪除"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
         )}
       </div>
 
-      {/* On-Demand Luggage Packing Modal */}
+      {/* On-Demand Luggage Packing Modal (Retained cleanly per user choice) */}
       {isPackingModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150"
@@ -906,85 +965,6 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                 </div>
               )}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Detailed Todo Modal (Add / Edit Sheet) */}
-      {isAddSheetOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-150"
-          onClick={() => {
-            setIsAddSheetOpen(false);
-            setEditingTodoId(null);
-          }}
-        >
-          <div
-            className="w-full sm:max-w-md bg-white dark:bg-[#111827] rounded-t-3xl sm:rounded-3xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl overflow-hidden p-5 animate-in slide-in-from-bottom duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-[#E5E2DC] dark:border-slate-800">
-              <h4 className="font-bold text-base text-slate-900 dark:text-white">
-                {editingTodoId ? '編輯待辦事項' : '新增待辦事項'}
-              </h4>
-              <button
-                type="button"
-                onClick={() => {
-                  setIsAddSheetOpen(false);
-                  setEditingTodoId(null);
-                }}
-                className="w-11 h-11 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleDetailedAdd} className="mt-4 space-y-4">
-              <div>
-                <input
-                  type="text"
-                  required
-                  placeholder="輸入待辦名稱..."
-                  value={inputTitle}
-                  onChange={(e) => setInputTitle(e.target.value)}
-                  className="w-full px-3.5 py-3 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white text-sm focus:outline-hidden focus:ring-2 focus:ring-teal-600 placeholder:text-slate-400 dark:placeholder:text-slate-500"
-                />
-              </div>
-
-              {/* Due Date */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
-                  預計完成日期 (選填)
-                </label>
-                <input
-                  type="date"
-                  value={inputDueDate}
-                  onChange={(e) => setInputDueDate(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white text-xs font-mono tabular-nums focus:outline-hidden focus:ring-2 focus:ring-teal-600"
-                />
-              </div>
-
-              {/* Action Buttons */}
-              <div className="pt-2 flex items-center justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsAddSheetOpen(false);
-                    setEditingTodoId(null);
-                  }}
-                  className="min-h-[44px] px-4 py-2.5 rounded-2xl border border-[#E5E2DC] dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={!inputTitle.trim()}
-                  className="min-h-[44px] px-5 py-2.5 rounded-2xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-xs font-bold transition disabled:opacity-50 cursor-pointer shadow-2xs"
-                >
-                  {editingTodoId ? '儲存變更' : '確認新增'}
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

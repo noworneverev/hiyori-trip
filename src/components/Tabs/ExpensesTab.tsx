@@ -27,24 +27,17 @@ import {
   BarChart3,
   Receipt,
   X,
-  Eye,
-  Camera,
-  Check,
   Calendar,
   Download,
   Filter,
   ChevronLeft,
   ChevronRight,
-  ChevronDown,
   ArrowRightLeft,
   Tag,
-  ImageIcon,
   RefreshCw,
   User,
   Users,
   Copy,
-  CheckCheck,
-  Share2,
   UserPlus,
   Sparkles,
   Pencil,
@@ -52,20 +45,20 @@ import {
   Coins,
   TableProperties,
   Search,
-  Utensils,
-  Train,
-  Ticket,
   ShoppingBag,
-  Gift,
-  Hotel,
-  Bookmark,
   CreditCard,
-  Smartphone,
+  Check,
 } from 'lucide-react';
-import { canUploadImages } from '../../utils/userPermissions';
 import { calculateTripSplits, formatSplitsForSharing } from '../../utils/billSplitter';
 import { CategoryManageModal } from '../Modals/CategoryManageModal';
 import { ExpenseFilterDrawer } from '../Modals/ExpenseFilterDrawer';
+import { ExpenseCalendarBar } from '../Expenses/ExpenseCalendarBar';
+import { TiantianExpenseEditor, TiantianExpenseDraft } from '../Expenses/TiantianExpenseEditor';
+import {
+  DEFAULT_EXPENSE_CATEGORIES,
+  EXPENSE_ACCOUNT_MAP,
+  resolveExpenseCategoryMeta,
+} from '../Expenses/expenseMeta';
 import {
   ResponsiveContainer,
   PieChart,
@@ -87,69 +80,62 @@ interface ExpensesTabProps {
   requireAuth?: (action: () => void, reason?: string) => boolean;
 }
 
-// Built-in categories
-const DEFAULT_CATEGORIES: Record<string, { label: string; Icon: React.ComponentType<{ className?: string }>; color: string; bg: string }> = {
-  food: { label: '美食餐飲', Icon: Utensils, color: '#F59E0B', bg: 'bg-amber-500/10 text-amber-700 dark:text-amber-300' },
-  transport: { label: '交通車資', Icon: Train, color: '#3B82F6', bg: 'bg-blue-500/10 text-blue-700 dark:text-blue-300' },
-  tickets: { label: '門票票券', Icon: Ticket, color: '#10B981', bg: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' },
-  shopping: { label: '購物商場', Icon: ShoppingBag, color: '#EC4899', bg: 'bg-pink-500/10 text-pink-700 dark:text-pink-300' },
-  souvenir: { label: '紀念品伴手禮', Icon: Gift, color: '#8B5CF6', bg: 'bg-purple-500/10 text-purple-700 dark:text-purple-300' },
-  stay: { label: '住宿飯店', Icon: Hotel, color: '#6366F1', bg: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300' },
-  other: { label: '其他雜支', Icon: Bookmark, color: '#64748B', bg: 'bg-slate-500/10 text-slate-700 dark:text-slate-300' },
-};
-
-const PAYMENT_LABELS: Record<PaymentMethod, Record<Language, string> & { Icon: React.ComponentType<{ className?: string }> }> = {
-  cash: { zh: '現金', en: 'Cash', ja: '現金', ko: '현금', 'zh-CN': '现金', Icon: Coins },
-  card: { zh: '信用卡', en: 'Credit Card', ja: 'クレジットカード', ko: '신용카드', 'zh-CN': '信用卡', Icon: CreditCard },
-  ic_card: { zh: '交通卡/IC卡', en: 'Transit Card', ja: '交通系ICカード', ko: '교통카드', 'zh-CN': '交通卡', Icon: Tag },
-  mobile: { zh: '行動支付', en: 'Mobile Pay', ja: 'スマホ決済', ko: '간편결제', 'zh-CN': '移动支付', Icon: Smartphone },
-};
+const DEFAULT_CATEGORIES = DEFAULT_EXPENSE_CATEGORIES;
+const PAYMENT_LABELS = EXPENSE_ACCOUNT_MAP;
 
 export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = true, onUpdateTrip, requireAuth }) => {
   const t = TRANSLATIONS[lang];
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Base display currency (auto-detected from trip destination or trip.currency)
   const defaultDetectedCurrency = detectTripCurrency(trip);
   const [baseCurrency, setBaseCurrency] = useState<string>(trip.currency || defaultDetectedCurrency);
   const initialEditReceiptsRef = useRef<string[]>([]);
 
-  // Form states
+  const getInitialExpenseDate = () => {
+    const today = getTodayLocal();
+    if (trip.startDate && trip.endDate && today >= trip.startDate && today <= trip.endDate) return today;
+    return trip.startDate || today;
+  };
+
+  // Split members list
+  const splitMembersList = useMemo(() => {
+    return trip.splitMembers && trip.splitMembers.length > 0 ? trip.splitMembers : ['我', '同行夥伴'];
+  }, [trip.splitMembers]);
+
+  // Form states (Tiantian Bookkeeping Draft)
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
-  const [confirmingDeleteExpense, setConfirmingDeleteExpense] = useState(false);
   const [splitNotice, setSplitNotice] = useState<string | null>(null);
-  const [title, setTitle] = useState('');
-  const [amount, setAmount] = useState('');
-  const [itemCurrency, setItemCurrency] = useState<string>(trip.currency || defaultDetectedCurrency);
-  const [category, setCategory] = useState<string>('food');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
-  const [date, setDate] = useState<string>(() => {
-    const today = getTodayLocal();
-    if (today >= trip.startDate && today <= trip.endDate) return today;
-    return trip.startDate || today;
-  });
-  const [notes, setNotes] = useState('');
-  const [receiptImages, setReceiptImages] = useState<string[]>([]);
+  const [expenseDraft, setExpenseDraft] = useState<TiantianExpenseDraft>(() => ({
+    date: getInitialExpenseDate(),
+    amount: '',
+    currency: trip.currency || defaultDetectedCurrency,
+    category: 'food',
+    paymentMethod: 'cash',
+    paidBy: '我',
+    splitWith: trip.splitMembers && trip.splitMembers.length > 0 ? trip.splitMembers : ['我', '同行夥伴'],
+    isPersonal: false,
+    tags: [],
+    receiptImages: [],
+    title: '',
+    notes: '',
+  }));
   const [isCompressingReceipts, setIsCompressingReceipts] = useState(false);
   const [receiptError, setReceiptError] = useState<string | null>(null);
+  const [saveToast, setSaveToast] = useState<string | null>(null);
+  const [editorFocusTrigger, setEditorFocusTrigger] = useState(0);
 
   useEffect(() => {
     const nextCur = trip.currency || detectTripCurrency(trip);
     setBaseCurrency(nextCur);
-    setItemCurrency(nextCur);
+    setExpenseDraft((prev) => ({ ...prev, currency: nextCur }));
   }, [trip.id, trip.currency]);
 
   // Filter Drawer Bottom Sheet state
   const [showFilterDrawer, setShowFilterDrawer] = useState(false);
 
-  // Custom Category Add & Dedicated Modal Manage states
+  // Custom Category Dedicated Modal state
   const [showCategoryManageModal, setShowCategoryManageModal] = useState(false);
-  const [showNewCatInput, setShowNewCatInput] = useState(false);
-  const [newCatName, setNewCatName] = useState('');
-  const [isManagingCategories, setIsManagingCategories] = useState(false);
-  const [editingCategoryKey, setEditingCategoryKey] = useState<string | null>(null);
-  const [editingCategoryName, setEditingCategoryName] = useState('');
 
   // Exchange rate config modal & Live Market Rates
   const [showRateModal, setShowRateModal] = useState(false);
@@ -189,16 +175,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   const [showAddCompanionInput, setShowAddCompanionInput] = useState(false);
   const [copiedSplitToast, setCopiedSplitToast] = useState(false);
   const [expenseSearchQuery, setExpenseSearchQuery] = useState('');
-
-  // Split members list
-  const splitMembersList = useMemo(() => {
-    return trip.splitMembers && trip.splitMembers.length > 0 ? trip.splitMembers : ['我', '同行夥伴'];
-  }, [trip.splitMembers]);
-
-  // Form split fields
-  const [itemPaidBy, setItemPaidBy] = useState<string>('我');
-  const [itemSplitWith, setItemSplitWith] = useState<string[]>(['我', '同行夥伴']);
-  const [itemIsPersonal, setItemIsPersonal] = useState<boolean>(false);
 
   // Calculated splits
   const splitsResult = useMemo(() => {
@@ -245,7 +221,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   useBodyScrollLock(Boolean(showAddModal || showRateModal || showCashModal || showCategoryManageModal || viewingReceiptGallery || pendingDeleteExpense));
 
   const closeAddExpenseModal = () => {
-    const stagedAdded = receiptImages.filter(
+    const stagedAdded = expenseDraft.receiptImages.filter(
       (ref) => isMediaRef(ref) && !initialEditReceiptsRef.current.includes(ref)
     );
     if (stagedAdded.length > 0) {
@@ -257,8 +233,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     initialEditReceiptsRef.current = [];
     setShowAddModal(false);
     setEditingExpenseId(null);
-    setConfirmingDeleteExpense(false);
-    setReceiptImages([]);
+    setSaveToast(null);
+    setExpenseDraft((prev) => ({ ...prev, receiptImages: [] }));
     setReceiptError(null);
   };
 
@@ -278,27 +254,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showAddModal, showRateModal, showCashModal, viewingReceiptGallery, pendingDeleteExpense, receiptImages]);
+  }, [showAddModal, showRateModal, showCashModal, viewingReceiptGallery, pendingDeleteExpense, expenseDraft.receiptImages]);
 
   // Custom categories list from trip
   const customCategories = trip.customExpenseCategories || [];
 
   // Helper: get display info for a category
-  const getCategoryMeta = (catKey: string) => {
-    const customLabel = trip.customCategoryLabels?.[catKey];
-    if (DEFAULT_CATEGORIES[catKey]) {
-      return {
-        ...DEFAULT_CATEGORIES[catKey],
-        label: customLabel || DEFAULT_CATEGORIES[catKey].label,
-      };
-    }
-    return {
-      label: customLabel || catKey,
-      Icon: Tag,
-      color: '#0d9488',
-      bg: 'bg-teal-500/10 text-teal-700 dark:text-teal-300',
-    };
-  };
+  const getCategoryMeta = (catKey: string) => resolveExpenseCategoryMeta(catKey, trip);
 
   // Convert an expense to the selected baseCurrency
   const getItemConvertedAmount = (item: ExpenseItem): number => {
@@ -553,15 +515,13 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   }, [trip.expenses, trip.days, trip.startDate, baseCurrency, trip.customExchangeRates, todayStr]);
 
   // Multi-file receipt upload handler (max 5 receipts per expense)
-  const handleReceiptFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  const handleUploadReceiptsForDraft = async (files: FileList) => {
     if (!files || files.length === 0) return;
 
     setReceiptError(null);
-    const remainingSlots = Math.max(0, 5 - receiptImages.length);
+    const remainingSlots = Math.max(0, 5 - expenseDraft.receiptImages.length);
     if (remainingSlots <= 0) {
       setReceiptError(lang === 'zh' ? '每筆支出最多附加 5 張發票收據' : 'Maximum 5 receipts per expense');
-      e.target.value = '';
       return;
     }
 
@@ -582,23 +542,28 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         const ref = await storeImageAsMediaRef(trip.id, compressed);
         compressedList.push(ref);
       }
-      setReceiptImages((prev) => [...prev, ...compressedList].slice(0, 5));
+      setExpenseDraft((prev) => ({
+        ...prev,
+        receiptImages: [...prev.receiptImages, ...compressedList].slice(0, 5),
+      }));
     } catch (err) {
       console.error('Failed to compress receipt images:', err);
       setReceiptError(err instanceof Error ? err.message : '發票處理失敗，請確認檔案格式與大小（25MB 以內）');
     } finally {
       setIsCompressingReceipts(false);
-      e.target.value = '';
     }
   };
 
-  const handleRemoveReceiptImage = (indexToRemove: number) => {
-    const removed = receiptImages[indexToRemove];
+  const handleRemoveReceiptForDraft = (indexToRemove: number) => {
+    const removed = expenseDraft.receiptImages[indexToRemove];
     if (removed && isMediaRef(removed) && !initialEditReceiptsRef.current.includes(removed)) {
       const mid = extractMediaId(removed);
       if (mid) idbDeleteMedia(mid).catch(() => {});
     }
-    setReceiptImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+    setExpenseDraft((prev) => ({
+      ...prev,
+      receiptImages: prev.receiptImages.filter((_, idx) => idx !== indexToRemove),
+    }));
     setReceiptError(null);
   };
 
@@ -620,18 +585,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     document.body.removeChild(a);
   };
 
-  // Add custom category
-  const handleAddCustomCategory = () => {
+  // Add custom category (supports CategoryManageModal callback)
+  const handleAddCustomCategory = (categoryNameInput: string) => {
     if (!canEdit) return;
-    if (requireAuth && !requireAuth(handleAddCustomCategory, lang === 'zh' ? '新增自訂類別' : 'Add category')) {
+    if (requireAuth && !requireAuth(() => handleAddCustomCategory(categoryNameInput), lang === 'zh' ? '新增自訂類別' : 'Add category')) {
       return;
     }
-    const trimmed = newCatName.trim();
+    const trimmed = (categoryNameInput || '').trim();
     if (!trimmed) return;
     if (DEFAULT_CATEGORIES[trimmed] || customCategories.includes(trimmed)) {
-      setCategory(trimmed);
-      setNewCatName('');
-      setShowNewCatInput(false);
+      setExpenseDraft((prev) => ({ ...prev, category: trimmed }));
       return;
     }
 
@@ -642,9 +605,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       updatedAt: Date.now(),
     });
 
-    setCategory(trimmed);
-    setNewCatName('');
-    setShowNewCatInput(false);
+    setExpenseDraft((prev) => ({ ...prev, category: trimmed }));
   };
 
   // Rename custom category or customize default category display name
@@ -655,7 +616,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     }
     const trimmed = newName.trim();
     if (!trimmed || trimmed === oldKey) {
-      setEditingCategoryKey(null);
       return;
     }
 
@@ -669,7 +629,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         customCategoryLabels: updatedLabels,
         updatedAt: Date.now(),
       });
-      setEditingCategoryKey(null);
       return;
     }
 
@@ -685,10 +644,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       updatedAt: Date.now(),
     });
 
-    if (category === oldKey) {
-      setCategory(trimmed);
+    if (expenseDraft.category === oldKey) {
+      setExpenseDraft((prev) => ({ ...prev, category: trimmed }));
     }
-    setEditingCategoryKey(null);
   };
 
   // Delete custom category (confirmation already handled inline inside CategoryManageModal)
@@ -704,35 +662,40 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       updatedAt: Date.now(),
     });
 
-    if (category === catKey) {
-      setCategory('food');
+    if (expenseDraft.category === catKey) {
+      setExpenseDraft((prev) => ({ ...prev, category: 'food' }));
     }
   };
 
   // Open Modal to Add New Expense
-  const handleOpenAddExpense = () => {
+  const handleOpenAddExpense = (overrideDate?: string) => {
     if (!canEdit) return;
-    if (requireAuth && !requireAuth(handleOpenAddExpense, lang === 'zh' ? '新增支出記帳' : 'Add expense')) {
+    if (requireAuth && !requireAuth(() => handleOpenAddExpense(overrideDate), lang === 'zh' ? '新增支出記帳' : 'Add expense')) {
       return;
     }
+    const defaultDate =
+      overrideDate ||
+      (todayStr >= trip.startDate && todayStr <= trip.endDate ? todayStr : trip.startDate || todayStr);
+
     setEditingExpenseId(null);
-    setConfirmingDeleteExpense(false);
     setReceiptError(null);
-    setTitle('');
-    setAmount('');
-    setItemCurrency(baseCurrency);
-    setCategory('food');
-    setPaymentMethod('cash');
-    const defaultDate = todayStr >= trip.startDate && todayStr <= trip.endDate
-      ? todayStr
-      : (trip.startDate || todayStr);
-    setDate(defaultDate);
-    setNotes('');
+    setSaveToast(null);
     initialEditReceiptsRef.current = [];
-    setReceiptImages([]);
-    setItemPaidBy('我');
-    setItemSplitWith(splitMembersList);
-    setItemIsPersonal(false);
+    setExpenseDraft({
+      date: defaultDate,
+      amount: '',
+      currency: baseCurrency,
+      category: 'food',
+      paymentMethod: 'cash',
+      paidBy: '我',
+      splitWith: splitMembersList,
+      isPersonal: false,
+      tags: [],
+      receiptImages: [],
+      title: '',
+      notes: '',
+    });
+    setEditorFocusTrigger((c) => c + 1);
     setShowAddModal(true);
   };
 
@@ -742,63 +705,71 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     if (requireAuth && !requireAuth(() => handleOpenEditExpense(item), lang === 'zh' ? '編輯支出紀錄' : 'Edit expense')) {
       return;
     }
-    setEditingExpenseId(item.id);
-    setConfirmingDeleteExpense(false);
-    setReceiptError(null);
-    setTitle(item.title);
-    setAmount(item.amount.toString());
-    setItemCurrency(item.currency || baseCurrency);
-    setCategory(item.category || 'food');
-    setPaymentMethod(item.paymentMethod || 'cash');
-    setDate(item.date || todayStr);
-    setNotes(item.notes || '');
-
     const imgs = item.receiptImages && item.receiptImages.length > 0
       ? [...item.receiptImages]
       : item.receiptImage
       ? [item.receiptImage]
       : [];
     initialEditReceiptsRef.current = imgs;
-    setReceiptImages(imgs);
 
-    setItemPaidBy(item.paidBy || '我');
-    setItemSplitWith(item.splitWith && item.splitWith.length > 0 ? item.splitWith : splitMembersList);
-    setItemIsPersonal(!!item.isPersonal);
+    setEditingExpenseId(item.id);
+    setReceiptError(null);
+    setSaveToast(null);
+    setExpenseDraft({
+      date: item.date || todayStr,
+      amount: item.amount.toString(),
+      currency: item.currency || baseCurrency,
+      category: item.category || 'food',
+      paymentMethod: item.paymentMethod || 'cash',
+      paidBy: item.paidBy || '我',
+      splitWith: item.splitWith && item.splitWith.length > 0 ? [...item.splitWith] : [...splitMembersList],
+      isPersonal: !!item.isPersonal,
+      tags: item.tags ? [...item.tags] : [],
+      receiptImages: imgs,
+      title: item.title || '',
+      notes: item.notes || '',
+    });
+    setEditorFocusTrigger((c) => c + 1);
     setShowAddModal(true);
   };
 
-  // Save Expense Item (New or Edit)
-  const handleSaveExpense = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Save Expense Item (New or Edit; supports continueAdding = "再記一筆")
+  const handleSaveExpense = (continueAdding: boolean) => {
     if (!canEdit) return;
-    const parsedAmount = parseFloat(amount);
-    if (!title.trim() || isNaN(parsedAmount) || parsedAmount <= 0) return;
+    if (requireAuth && !requireAuth(() => handleSaveExpense(continueAdding), editingExpenseId ? '編輯支出紀錄' : '新增支出記帳')) {
+      return;
+    }
+    const parsedAmount = parseFloat(expenseDraft.amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) return;
 
-    // calculate dayNumber if date matches a trip day
-    const matchedDay = trip.days.find((d) => d.date === date);
-
+    const resolvedCatMeta = getCategoryMeta(expenseDraft.category);
+    const finalTitle = expenseDraft.title.trim() || resolvedCatMeta.label;
+    const matchedDay = trip.days.find((d) => d.date === expenseDraft.date);
     const isSplitMode = !trip.isSoloTrip && Boolean(trip.isSplitEnabled);
+    const finalTags = expenseDraft.tags.length > 0 ? expenseDraft.tags : undefined;
 
     if (editingExpenseId) {
-      // Edit existing expense
       const updatedExpenses = trip.expenses.map((exp) => {
         if (exp.id === editingExpenseId) {
           return {
             ...exp,
-            title: title.trim(),
+            title: finalTitle,
             amount: parsedAmount,
-            currency: itemCurrency,
-            category,
-            paymentMethod,
-            date,
+            currency: expenseDraft.currency,
+            category: expenseDraft.category,
+            paymentMethod: expenseDraft.paymentMethod,
+            date: expenseDraft.date,
             dayNumber: matchedDay ? matchedDay.dayNumber : undefined,
-            notes: notes.trim() || undefined,
-            receiptImages: receiptImages.length > 0 ? receiptImages : undefined,
-            receiptImage: receiptImages[0] || undefined,
-            convertedAmount: convertAmount(parsedAmount, itemCurrency, baseCurrency, trip.customExchangeRates),
-            paidBy: isSplitMode ? (itemPaidBy || '我') : undefined,
-            splitWith: isSplitMode && !itemIsPersonal ? (itemSplitWith.length > 0 ? itemSplitWith : splitMembersList) : undefined,
-            isPersonal: !isSplitMode ? true : itemIsPersonal,
+            notes: expenseDraft.notes.trim() || undefined,
+            tags: finalTags,
+            receiptImages: expenseDraft.receiptImages.length > 0 ? expenseDraft.receiptImages : undefined,
+            receiptImage: expenseDraft.receiptImages[0] || undefined,
+            convertedAmount: convertAmount(parsedAmount, expenseDraft.currency, baseCurrency, trip.customExchangeRates),
+            paidBy: isSplitMode ? (expenseDraft.paidBy || '我') : undefined,
+            splitWith: isSplitMode && !expenseDraft.isPersonal
+              ? (expenseDraft.splitWith.length > 0 ? expenseDraft.splitWith : splitMembersList)
+              : undefined,
+            isPersonal: !isSplitMode ? true : expenseDraft.isPersonal,
           };
         }
         return exp;
@@ -814,23 +785,25 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         getStoredTrips().map((t) => (t.id === updatedTrip.id ? updatedTrip : t))
       ).catch(() => {});
     } else {
-      // Create new expense
       const newExpense: ExpenseItem = {
         id: `exp-${Date.now()}`,
-        title: title.trim(),
+        title: finalTitle,
         amount: parsedAmount,
-        currency: itemCurrency,
-        category,
-        paymentMethod,
-        date,
+        currency: expenseDraft.currency,
+        category: expenseDraft.category,
+        paymentMethod: expenseDraft.paymentMethod,
+        date: expenseDraft.date,
         dayNumber: matchedDay ? matchedDay.dayNumber : undefined,
-        notes: notes.trim() || undefined,
-        receiptImages: receiptImages.length > 0 ? receiptImages : undefined,
-        receiptImage: receiptImages[0] || undefined,
-        convertedAmount: convertAmount(parsedAmount, itemCurrency, baseCurrency, trip.customExchangeRates),
-        paidBy: isSplitMode ? (itemPaidBy || '我') : undefined,
-        splitWith: isSplitMode && !itemIsPersonal ? (itemSplitWith.length > 0 ? itemSplitWith : splitMembersList) : undefined,
-        isPersonal: !isSplitMode ? true : itemIsPersonal,
+        notes: expenseDraft.notes.trim() || undefined,
+        tags: finalTags,
+        receiptImages: expenseDraft.receiptImages.length > 0 ? expenseDraft.receiptImages : undefined,
+        receiptImage: expenseDraft.receiptImages[0] || undefined,
+        convertedAmount: convertAmount(parsedAmount, expenseDraft.currency, baseCurrency, trip.customExchangeRates),
+        paidBy: isSplitMode ? (expenseDraft.paidBy || '我') : undefined,
+        splitWith: isSplitMode && !expenseDraft.isPersonal
+          ? (expenseDraft.splitWith.length > 0 ? expenseDraft.splitWith : splitMembersList)
+          : undefined,
+        isPersonal: !isSplitMode ? true : expenseDraft.isPersonal,
       };
 
       const updatedTrip: Trip = {
@@ -844,16 +817,29 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       ).catch(() => {});
     }
 
-    // Reset Form
+    if (continueAdding && !editingExpenseId) {
+      // Receipts just saved are now committed to trip — keep them untouched in IndexedDB
+      initialEditReceiptsRef.current = [];
+      setSaveToast(`已儲存「${finalTitle}」(${formatCurrencyAmount(parsedAmount, expenseDraft.currency)})`);
+      setExpenseDraft((prev) => ({
+        ...prev,
+        amount: '',
+        title: '',
+        notes: '',
+        tags: [],
+        receiptImages: [],
+      }));
+      setReceiptError(null);
+      setEditorFocusTrigger((c) => c + 1);
+      setTimeout(() => setSaveToast(null), 2600);
+      return;
+    }
+
+    // Close modal cleanly
     initialEditReceiptsRef.current = [];
     setEditingExpenseId(null);
-    setTitle('');
-    setAmount('');
-    setNotes('');
-    setReceiptImages([]);
-    setItemPaidBy('我');
-    setItemSplitWith(splitMembersList);
-    setItemIsPersonal(false);
+    setSaveToast(null);
+    setExpenseDraft((prev) => ({ ...prev, receiptImages: [] }));
     setShowAddModal(false);
   };
 
@@ -883,7 +869,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   const handleConfirmDeleteCurrentlyEditing = () => {
     if (!editingExpenseId) return;
     handleDeleteExpense(editingExpenseId);
-    setConfirmingDeleteExpense(false);
+    initialEditReceiptsRef.current = [];
     setShowAddModal(false);
     setEditingExpenseId(null);
   };
@@ -984,14 +970,15 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         const titleMatch = (item.title || '').toLowerCase().includes(q);
         const notesMatch = (item.notes || '').toLowerCase().includes(q);
         const catMatch = (item.category || '').toLowerCase().includes(q);
-        const catMeta = DEFAULT_CATEGORIES[item.category];
+        const catMeta = resolveExpenseCategoryMeta(item.category, trip);
         const catLabelMatch = (catMeta?.label || '').toLowerCase().includes(q);
         const payMethodMatch = (item.paymentMethod || '').toLowerCase().includes(q);
         const payInfo = PAYMENT_LABELS[item.paymentMethod];
         const payLabelMatch = (payInfo?.zh || '').toLowerCase().includes(q);
         const paidByMatch = (item.paidBy || '').toLowerCase().includes(q);
+        const tagsMatch = (item.tags || []).some((tg) => tg.toLowerCase().includes(q));
         const amountMatch = String(item.amount).includes(q) || String(item.convertedAmount || '').includes(q);
-        if (!titleMatch && !notesMatch && !catMatch && !catLabelMatch && !payMethodMatch && !payLabelMatch && !paidByMatch && !amountMatch) {
+        if (!titleMatch && !notesMatch && !catMatch && !catLabelMatch && !payMethodMatch && !payLabelMatch && !paidByMatch && !tagsMatch && !amountMatch) {
           return false;
         }
       }
@@ -1222,7 +1209,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             {/* Add Expense Button */}
             {canEdit && (
               <button
-                onClick={handleOpenAddExpense}
+                onClick={() => handleOpenAddExpense()}
                 className="min-h-[38px] px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
@@ -2070,8 +2057,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   {canEdit && (
                     <button
                       type="button"
-                      onClick={handleOpenAddExpense}
-                      className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition"
+                      onClick={() => handleOpenAddExpense()}
+                      className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>{lang === 'zh' ? '記一筆' : 'Add Expense'}</span>
@@ -2229,11 +2216,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                                         {canEdit && (
                                           <button
                                             type="button"
-                                            onClick={() => {
-                                              setDate(row.date);
-                                              handleOpenAddExpense();
-                                            }}
-                                            className="px-2.5 py-1 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-bold flex items-center gap-1 shadow-2xs"
+                                            onClick={() => handleOpenAddExpense(row.date)}
+                                            className="px-2.5 py-1 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-bold flex items-center gap-1 shadow-2xs cursor-pointer"
                                           >
                                             <Plus className="w-3 h-3" />
                                             <span>為這天記一筆</span>
@@ -2295,6 +2279,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                                                     <span className="text-[10px] text-slate-400">
                                                       {catMeta.label}
                                                     </span>
+                                                    {item.tags && item.tags.length > 0 && (
+                                                      <span className="text-[10px] text-teal-700 dark:text-teal-300 font-medium">
+                                                        {item.tags.map((tg) => `#${tg}`).join(' ')}
+                                                      </span>
+                                                    )}
                                                   </div>
 
                                                   {item.notes && (
@@ -2580,14 +2569,25 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           {canEdit && (
             <button
               type="button"
-              onClick={handleOpenAddExpense}
-              className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition self-start sm:self-auto"
+              onClick={() => handleOpenAddExpense()}
+              className="px-3 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition self-start sm:self-auto cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>{lang === 'zh' ? '記一筆' : 'Add Expense'}</span>
             </button>
           )}
         </div>
+
+        {/* Collapsible Month Calendar Date Switcher */}
+        <ExpenseCalendarBar
+          trip={trip}
+          baseCurrency={baseCurrency}
+          selectedDateFilter={selectedDateFilter}
+          onSelectDateFilter={setSelectedDateFilter}
+          todayStr={todayStr}
+          lang={lang}
+          hasPreTripExpenses={trip.expenses.some((e) => trip.startDate && e.date < trip.startDate)}
+        />
 
         {/* Compact Search & Filter Action Bar */}
         <div className="flex items-center gap-2">
@@ -2599,7 +2599,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 type="text"
                 value={expenseSearchQuery}
                 onChange={(e) => setExpenseSearchQuery(e.target.value)}
-                placeholder={lang === 'zh' ? '搜尋品名、店家、付款方式、備註或金額...' : 'Search expenses...'}
+                placeholder={lang === 'zh' ? '搜尋品名、標籤、付款方式、備註或金額...' : 'Search expenses...'}
                 className="w-full bg-transparent text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden"
               />
               {expenseSearchQuery && (
@@ -2759,12 +2759,18 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 <button
                   type="button"
                   onClick={() => {
-                    if (selectedDateFilter !== 'all' && selectedDateFilter !== 'pre' && selectedDateFilter !== 'today' && selectedDateFilter !== 'cash_only') {
-                      setDate(selectedDateFilter);
-                    }
-                    handleOpenAddExpense();
+                    const targetDate =
+                      selectedDateFilter !== 'all' &&
+                      selectedDateFilter !== 'pre' &&
+                      selectedDateFilter !== 'today' &&
+                      selectedDateFilter !== 'cash_only'
+                        ? selectedDateFilter
+                        : selectedDateFilter === 'today'
+                        ? todayStr
+                        : undefined;
+                    handleOpenAddExpense(targetDate);
                   }}
-                  className="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition shadow-xs flex items-center gap-1 active:scale-95"
+                  className="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition shadow-xs flex items-center gap-1 active:scale-95 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>{selectedDateFilter !== 'all' && selectedDateFilter !== 'today' ? '為這天記一筆' : '立即記一筆'}</span>
@@ -2884,6 +2890,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                                   </span>
                                 </>
                               )}
+                              {item.tags && item.tags.length > 0 && (
+                                <>
+                                  <span>·</span>
+                                  <span className="text-teal-700 dark:text-teal-300 font-medium">
+                                    {item.tags.map((tg) => `#${tg}`).join(' ')}
+                                  </span>
+                                </>
+                              )}
                               {item.notes && (
                                 <>
                                   <span>·</span>
@@ -2949,18 +2963,18 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         </>
       )}
 
-      {/* 4. Fullscreen Mobile / Centered Desktop Modal for Add / Edit Expense */}
+      {/* 4. Fullscreen Mobile / Centered Desktop Modal for Add / Edit Expense (天天記帳排版) */}
       {showAddModal && (
         <div
           className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-0 sm:p-4"
           onClick={closeAddExpenseModal}
         >
           <div
-            className="w-full h-full sm:h-auto sm:max-h-[92vh] sm:max-w-lg bg-white dark:bg-[#111827] sm:rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            className="w-full h-full sm:h-[680px] sm:max-h-[92vh] sm:max-w-lg bg-white dark:bg-[#111827] sm:rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="px-5 py-4 border-b border-[#E5E2DC]/60 dark:border-slate-800 flex items-center justify-between shrink-0 bg-[#FAF9F6] dark:bg-slate-800/40">
+            <div className="px-5 py-3.5 border-b border-[#E5E2DC]/80 dark:border-slate-800 flex items-center justify-between shrink-0 bg-[#FAF9F6] dark:bg-slate-900/60">
               <div className="flex items-center gap-2.5">
                 <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
                   editingExpenseId
@@ -2969,13 +2983,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 }`}>
                   {editingExpenseId ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                 </div>
-                <div>
-                  <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
-                    {editingExpenseId
-                      ? (lang === 'zh' ? '編輯支出' : 'Edit Expense')
-                      : (lang === 'zh' ? '新增支出' : 'Add Expense')}
-                  </h3>
-                </div>
+                <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
+                  {editingExpenseId
+                    ? (lang === 'zh' ? '編輯支出' : 'Edit Expense')
+                    : (lang === 'zh' ? '新增支出' : 'Add Expense')}
+                </h3>
               </div>
 
               <button
@@ -2988,442 +3000,37 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               </button>
             </div>
 
-            {/* Scrollable Form Body */}
-            <form onSubmit={handleSaveExpense} id="expense-modal-form" className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
-              {/* 1. 金額 (Currency & Amount) */}
-              <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-100 dark:border-teal-900/60 space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                    {lang === 'zh' ? '消費幣別' : 'Currency'}
-                  </label>
-                  <span className="text-[10px] text-teal-700 dark:text-teal-400 font-mono">
-                    {itemCurrency !== baseCurrency && (
-                      <>匯率自動換算至 {baseCurrency}</>
-                    )}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                  {SUPPORTED_CURRENCIES.map((cur) => (
-                    <button
-                      key={cur.code}
-                      type="button"
-                      onClick={() => setItemCurrency(cur.code)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 ${
-                        itemCurrency === cur.code
-                          ? 'bg-teal-600 text-white shadow-xs'
-                          : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-teal-500'
-                      }`}
-                    >
-                      {cur.flag} {cur.code} ({cur.symbol})
-                    </button>
-                  ))}
-                </div>
-
-                {/* Big Numeric Amount Input */}
-                <div>
-                  <div className="flex items-center rounded-xl bg-white dark:bg-slate-800 border-2 border-teal-200 dark:border-teal-700/80 focus-within:border-teal-600 dark:focus-within:border-teal-400 focus-within:ring-2 focus-within:ring-teal-500/20 transition overflow-hidden">
-                    <div className="px-3.5 py-3 bg-teal-50/70 dark:bg-teal-950/40 border-r border-teal-200 dark:border-teal-800/80 text-teal-800 dark:text-teal-200 font-mono font-bold text-base sm:text-lg shrink-0 select-none flex items-center gap-1">
-                      <span>{CURRENCY_MAP[itemCurrency]?.symbol || itemCurrency}</span>
-                      <span className="text-[10px] text-teal-600 dark:text-teal-400 font-normal">({itemCurrency})</span>
-                    </div>
-                    <input
-                      type="number"
-                      step="any"
-                      inputMode="decimal"
-                      required
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      placeholder="0"
-                      className="flex-1 min-w-0 px-4 py-3 bg-transparent text-xl sm:text-2xl font-mono font-black text-slate-900 dark:text-white outline-none placeholder:text-slate-300 dark:placeholder:text-slate-600"
-                    />
-                  </div>
-
-                  {/* Converted Preview */}
-                  {amount && !isNaN(parseFloat(amount)) && itemCurrency !== baseCurrency && (
-                    <div className="mt-1.5 text-right font-mono text-xs text-teal-700 dark:text-teal-300 font-bold">
-                      ≈ {formatCurrencyAmount(convertAmount(parseFloat(amount), itemCurrency, baseCurrency, trip.customExchangeRates), baseCurrency)}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* 2. 方式 (Payment Method) */}
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  {lang === 'zh' ? '支付方式' : 'Payment Method'}
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {(Object.keys(PAYMENT_LABELS) as PaymentMethod[]).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setPaymentMethod(m)}
-                      className={`py-2 px-2.5 rounded-xl border text-center transition flex items-center justify-center gap-1.5 text-xs ${
-                        paymentMethod === m
-                          ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 font-bold text-teal-900 dark:text-teal-200'
-                          : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      {PAYMENT_LABELS[m]?.Icon ? (
-                        React.createElement(PAYMENT_LABELS[m].Icon, { className: 'w-3.5 h-3.5 shrink-0' })
-                      ) : (
-                        <Coins className="w-3.5 h-3.5 shrink-0" />
-                      )}
-                      <span>{PAYMENT_LABELS[m][lang]}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 3. 種類 (Category) */}
-              {/* 3. 支出類別 (Category) */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                    {lang === 'zh' ? '支出類別' : 'Category'}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setShowCategoryManageModal(true)}
-                    className="text-xs text-teal-600 dark:text-teal-400 font-bold hover:underline flex items-center gap-1 transition"
-                  >
-                    <Pencil className="w-3 h-3" />
-                    <span>{lang === 'zh' ? '管理自訂類別' : 'Manage Categories'}</span>
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 max-h-52 overflow-y-auto p-0.5 scrollbar-thin">
-                  {Object.entries(DEFAULT_CATEGORIES).map(([catKey]) => {
-                    const meta = getCategoryMeta(catKey);
-                    const isSelected = category === catKey;
-                    return (
-                      <button
-                        key={catKey}
-                        type="button"
-                        onClick={() => setCategory(catKey)}
-                        className={`p-2 rounded-xl text-left border transition flex items-center gap-1.5 active:scale-95 ${
-                          isSelected
-                            ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 font-bold text-teal-900 dark:text-teal-200 shadow-2xs ring-1 ring-teal-500/20'
-                            : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
-                        }`}
-                      >
-                        <meta.Icon className="w-3.5 h-3.5 shrink-0 text-slate-600 dark:text-slate-400" />
-                        <span className="truncate text-[11px]">{meta.label}</span>
-                      </button>
-                    );
-                  })}
-
-                  {customCategories.map((catKey) => {
-                    const isSelected = category === catKey;
-                    const displayName = trip.customCategoryLabels?.[catKey] || catKey;
-
-                    return (
-                      <button
-                        key={catKey}
-                        type="button"
-                        onClick={() => setCategory(catKey)}
-                        className={`p-2 rounded-xl text-left border transition flex items-center gap-1.5 active:scale-95 ${
-                          isSelected
-                            ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 font-bold text-teal-900 dark:text-teal-200 shadow-2xs ring-1 ring-teal-500/20'
-                            : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
-                        }`}
-                      >
-                        <Tag className="w-3.5 h-3.5 shrink-0 text-teal-600 dark:text-teal-400" />
-                        <span className="truncate text-[11px]">{displayName}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 4. 品項描述 (Description) */}
-              <div>
-                <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  {lang === 'zh' ? '品項描述 / 支出名稱' : 'Title / Description'} *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder={lang === 'zh' ? '如：一蘭拉麵、晴空塔門票、超商飲料、伴手禮盒' : 'e.g. Dinner, Ticket, Flight'}
-                  className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500"
-                />
-              </div>
-
-              {/* 5. 日期 (Date) */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-teal-600" />
-                    <span>{lang === 'zh' ? '消費日期' : 'Date'} *</span>
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={date}
-                    onChange={(e) => setDate(e.target.value)}
-                    className="px-2.5 py-1 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-mono outline-none"
-                  />
-                </div>
-
-                {/* Quick Date Chips */}
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const preDate = trip.startDate || todayStr;
-                      setDate(preDate);
-                    }}
-                    className={`px-2 py-1 rounded-lg text-[10px] font-bold shrink-0 transition ${
-                      date < trip.startDate
-                        ? 'bg-teal-600 text-white'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                    }`}
-                  >
-                    行前準備
-                  </button>
-                  {trip.days.map((d) => (
-                    <button
-                      key={d.id}
-                      type="button"
-                      onClick={() => setDate(d.date)}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold shrink-0 transition ${
-                        date === d.date
-                          ? 'bg-teal-600 text-white shadow-2xs'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
-                      }`}
-                    >
-                      D{d.dayNumber} ({d.date.slice(5).replace('-', '/')})
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 6. 朋友分帳設定 */}
-              {!trip.isSoloTrip && trip.isSplitEnabled && (
-                <div className="p-3.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <label className="text-[11px] font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                      <Users className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                      <span>{lang === 'zh' ? '朋友分帳設定' : 'Split Details'}</span>
-                    </label>
-                    <label className="flex items-center gap-1.5 cursor-pointer text-[11px] font-bold text-slate-600 dark:text-slate-400 select-none hover:text-teal-700 dark:hover:text-teal-400">
-                      <input
-                        type="checkbox"
-                        checked={itemIsPersonal}
-                        onChange={(e) => setItemIsPersonal(e.target.checked)}
-                        className="w-4 h-4 rounded accent-teal-700 cursor-pointer"
-                      />
-                      <span>{lang === 'zh' ? '此筆為個人私用 (不列入公費分帳)' : 'Personal (No Split)'}</span>
-                    </label>
-                  </div>
-
-                  {!itemIsPersonal && (
-                    <>
-                      {/* Payer Selection */}
-                      <div className="space-y-1">
-                        <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block">
-                          {lang === 'zh' ? '誰先代墊 / 買單？' : 'Who Paid?'}
-                        </span>
-                        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
-                          {splitMembersList.map((m) => (
-                            <button
-                              key={m}
-                              type="button"
-                              onClick={() => setItemPaidBy(m)}
-                              className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1 cursor-pointer ${
-                                itemPaidBy === m
-                                  ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
-                                  : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700'
-                              }`}
-                            >
-                              <User className="w-3 h-3" />
-                              <span>{m === '我' ? '我' : m}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Participants Selection */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
-                            {lang === 'zh' ? '誰參與分攤？' : 'Split Between'}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (itemSplitWith.length === splitMembersList.length) {
-                                setItemSplitWith(['我']);
-                              } else {
-                                setItemSplitWith(splitMembersList);
-                              }
-                            }}
-                            className="text-[11px] font-bold text-teal-700 dark:text-teal-400 hover:underline cursor-pointer"
-                          >
-                            {itemSplitWith.length === splitMembersList.length ? '全選中' : '全選'}
-                          </button>
-                        </div>
-                        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
-                          {splitMembersList.map((m) => {
-                            const isIncluded = itemSplitWith.includes(m);
-                            return (
-                              <button
-                                key={m}
-                                type="button"
-                                onClick={() => {
-                                  if (isIncluded) {
-                                    if (itemSplitWith.length > 1) {
-                                      setItemSplitWith(itemSplitWith.filter((x) => x !== m));
-                                    }
-                                  } else {
-                                    setItemSplitWith([...itemSplitWith, m]);
-                                  }
-                                }}
-                                className={`min-h-[36px] px-2.5 py-1 rounded-xl text-xs font-bold transition flex items-center gap-1 shrink-0 cursor-pointer ${
-                                  isIncluded
-                                    ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
-                                    : 'bg-white dark:bg-slate-800 text-slate-500 border border-[#E5E2DC] dark:border-slate-700'
-                                }`}
-                              >
-                                {isIncluded && <Check className="w-3 h-3" />}
-                                <span>{m}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {amount && !isNaN(parseFloat(amount)) && itemSplitWith.length > 0 && (
-                          <p className="text-[11px] text-teal-700 dark:text-teal-400 font-mono tabular-nums pt-0.5">
-                            每人應攤約 {formatCurrencyAmount(convertAmount(parseFloat(amount), itemCurrency, baseCurrency, trip.customExchangeRates) / itemSplitWith.length, baseCurrency)} ({itemSplitWith.length} 人均分)
-                          </p>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* 7. 發票憑證上傳 */}
-              {canUploadImages({ canEdit }) && (
-                <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                      <Receipt className="w-3.5 h-3.5 text-teal-600" />
-                      <span>{lang === 'zh' ? '發票與收據' : 'Receipt Photos'}</span>
-                    </label>
-                    <span className="text-[10px] text-teal-600 dark:text-teal-400 font-medium">
-                      已選 {receiptImages.length} / 5 張
-                    </span>
-                  </div>
-
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={handleReceiptFiles}
-                  />
-
-                  {/* Upload Button */}
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isCompressingReceipts || receiptImages.length >= 5}
-                    className="w-full py-3 px-4 border-2 border-dashed border-teal-300 dark:border-teal-800 hover:border-teal-500 bg-teal-50/30 dark:bg-slate-800/50 rounded-2xl flex items-center justify-center gap-2 text-teal-700 dark:text-teal-300 transition active:scale-98 disabled:opacity-50"
-                  >
-                    <Camera className="w-4 h-4 text-teal-600" />
-                    <span className="font-semibold text-xs">
-                      {isCompressingReceipts ? '處理相片中...' : receiptImages.length >= 5 ? '已達 5 張發票上限' : '拍照或選取收據'}
-                    </span>
-                  </button>
-
-                  {receiptError && (
-                    <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
-                      {receiptError}
-                    </p>
-                  )}
-
-                  {/* Thumbnail Previews with Remove Button */}
-                  {receiptImages.length > 0 && (
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 pt-1">
-                      {receiptImages.map((img, idx) => (
-                        <div key={idx} className="relative group rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 aspect-square">
-                          <MediaImage tripId={trip.id} ownerId={trip.ownerId} collabId={trip.collabId} src={img} alt={`Receipt ${idx}`} className="w-full h-full object-cover" />
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveReceiptImage(idx)}
-                            className="absolute top-1 right-1 w-7 h-7 flex items-center justify-center bg-black/70 hover:bg-rose-600 text-white rounded-full transition"
-                            title="移除此張"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </form>
-
-            {/* Sticky Modal Bottom Actions */}
-            <div className="px-5 py-3.5 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/80 flex items-center justify-between gap-2.5 shrink-0">
-              <div>
-                {editingExpenseId && (
-                  confirmingDeleteExpense ? (
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={handleConfirmDeleteCurrentlyEditing}
-                        className="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl transition font-bold text-xs cursor-pointer"
-                      >
-                        {lang === 'zh' ? '確認刪除' : 'Confirm'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmingDeleteExpense(false)}
-                        className="px-2.5 py-2 text-slate-500 hover:bg-slate-200/70 dark:hover:bg-slate-700 rounded-xl transition font-medium text-xs cursor-pointer"
-                      >
-                        {lang === 'zh' ? '取消' : 'Cancel'}
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmingDeleteExpense(true)}
-                      className="px-3 py-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>{lang === 'zh' ? '刪除' : 'Delete'}</span>
-                    </button>
-                  )
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={closeAddExpenseModal}
-                  className="min-h-[44px] sm:min-h-[38px] px-4 py-2 border border-slate-300 dark:border-slate-700 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 transition font-semibold text-xs text-slate-700 dark:text-slate-300 cursor-pointer"
-                >
-                  {lang === 'zh' ? '取消' : 'Cancel'}
-                </button>
-                <button
-                  type="submit"
-                  form="expense-modal-form"
-                  className="min-h-[44px] sm:min-h-[38px] px-6 py-2 bg-teal-700 hover:bg-teal-800 text-white font-bold rounded-xl shadow-xs transition active:scale-95 flex items-center gap-1.5 text-xs cursor-pointer"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>
-                    {editingExpenseId
-                      ? (lang === 'zh' ? '儲存修改' : 'Save')
-                      : (lang === 'zh' ? '儲存' : 'Save')}
-                  </span>
-                </button>
-              </div>
-            </div>
+            <TiantianExpenseEditor
+              trip={trip}
+              lang={lang}
+              canEdit={canEdit}
+              baseCurrency={baseCurrency}
+              isEditing={Boolean(editingExpenseId)}
+              draft={expenseDraft}
+              onChangeDraft={setExpenseDraft}
+              onUpdateTrip={onUpdateTrip}
+              requireAuth={requireAuth}
+              onSave={handleSaveExpense}
+              onCancel={closeAddExpenseModal}
+              onDelete={editingExpenseId ? handleConfirmDeleteCurrentlyEditing : undefined}
+              onUploadReceipts={handleUploadReceiptsForDraft}
+              onRemoveReceipt={handleRemoveReceiptForDraft}
+              onPreviewReceipt={(_src, index) => {
+                setViewingReceiptGallery({
+                  images: expenseDraft.receiptImages,
+                  currentIndex: index,
+                  title: expenseDraft.title.trim() || getCategoryMeta(expenseDraft.category).label,
+                  amount: parseFloat(expenseDraft.amount) || 0,
+                  currency: expenseDraft.currency,
+                });
+              }}
+              isCompressingReceipts={isCompressingReceipts}
+              receiptError={receiptError}
+              onOpenManageCategoriesModal={() => setShowCategoryManageModal(true)}
+              showQuickIncrements={true}
+              saveStatusToast={saveToast}
+              focusTrigger={editorFocusTrigger}
+            />
           </div>
         </div>
       )}
@@ -3675,7 +3282,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       {/* 6. Multi-Receipt Fullscreen Lightbox / Gallery */}
       {viewingReceiptGallery && (
         <div
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150"
+          className="fixed inset-0 z-60 bg-black/85 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150"
           onClick={() => setViewingReceiptGallery(null)}
         >
           <div

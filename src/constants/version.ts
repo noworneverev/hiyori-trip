@@ -2,14 +2,14 @@
  * Application Version and Release Metadata
  * Displayed across the App Menu, Settings, and Update Engine
  */
-export const APP_VERSION = 'v1.8.1';
+export const APP_VERSION = 'v1.9.0';
 export const BUILD_DATE = '2026.11.16';
-export const BUILD_ID = `build-${BUILD_DATE.replace(/\./g, '')}-v181`;
+export const BUILD_ID = `build-${BUILD_DATE.replace(/\./g, '')}-v190`;
 
 export const RELEASE_HIGHLIGHTS = [
-  '全站編輯全面檢修與手機體驗升級：修復記帳與隨行等編輯權限檢查問題，隨行支援直接編輯/新增景點與當日備忘，待辦與行李清單支援左滑及行內編輯',
+  '待辦清單極簡化與行內直接編輯：移除多餘分頁與編輯彈窗，點擊任一待辦項目即可行內快速修改內容與日期，保留行李打包清單視窗，右下角快速待辦同步升級',
+  '記帳可收合月曆切換日期：支出明細頂部新增 7 欄月曆檢視每日花費與行程日標記，支援前後日切換與一鍵檢視全部明細',
+  '天天記帳式直覺記帳排版：主記帳與右下角快記全面統一為「日期 / 金額 / 類別 / 帳戶 / 成員 / 標籤 / 收據照片 / DESCRIPTION 區」點擊挑選排版，並支援「再記一筆」連續記帳與自訂標籤',
   '手機端與 PWA 長效登入強化：顯式鎖定本機持久層、彈窗優先搭配跳轉自動接回，並拆開 Google 登入與 Drive 增量授權',
-  '記帳明細手機左滑操作：左滑支出列展開編輯與刪除按鈕，搭配安全確認視窗與防誤觸手勢保護',
-  'Google Drive 原圖備份與 EXIF 批次上傳：相簿縮圖極速載入、燈箱切換檢視 400GB 原始高畫質照片',
-  '雲端同步與離線衝突防護：冷快取防覆寫、媒體垃圾回收（GC）、外部連結與記帳多幣別精準度全面加固',
+  '記帳明細與隨行編輯體驗升級：手機左滑與桌面點擊直覺展開編輯與刪除，安全確認防誤觸',
 ];

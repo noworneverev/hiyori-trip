@@ -637,6 +637,7 @@ function normalizeTripData(id: string, data: Record<string, any>, fallbackOwnerI
     bookings: data.bookings || [],
     customExpenseCategories: data.customExpenseCategories || [],
     customCategoryLabels: data.customCategoryLabels || {},
+    customExpenseTags: data.customExpenseTags || [],
     customExchangeRates: data.customExchangeRates || {},
     emergencyContacts: data.emergencyContacts || [],
     memories: data.memories || [],
@@ -782,6 +783,7 @@ export async function saveTripToCloud(userId: string, trip: Trip): Promise<Trip>
       bookings: lightweightTrip.bookings || [],
       customExpenseCategories: lightweightTrip.customExpenseCategories || [],
       customCategoryLabels: lightweightTrip.customCategoryLabels || {},
+      customExpenseTags: lightweightTrip.customExpenseTags || [],
       customExchangeRates: lightweightTrip.customExchangeRates || {},
       emergencyContacts: lightweightTrip.emergencyContacts || [],
       memories: lightweightTrip.memories || [],
@@ -926,6 +928,7 @@ export async function publishSharedTrip(trip: Trip, ownerUid?: string): Promise<
         bookings: lightweightTrip.bookings || [],
         customExpenseCategories: lightweightTrip.customExpenseCategories || [],
         customCategoryLabels: lightweightTrip.customCategoryLabels || {},
+        customExpenseTags: lightweightTrip.customExpenseTags || [],
         customExchangeRates: lightweightTrip.customExchangeRates || {},
         emergencyContacts: lightweightTrip.emergencyContacts || [],
         memories: lightweightTrip.memories || [],
@@ -1104,6 +1107,7 @@ export async function enableTripCollaboration(trip: Trip, currentUser?: User | n
         bookings: lightweightTrip.bookings || [],
         customExpenseCategories: lightweightTrip.customExpenseCategories || [],
         customCategoryLabels: lightweightTrip.customCategoryLabels || {},
+        customExpenseTags: lightweightTrip.customExpenseTags || [],
         customExchangeRates: lightweightTrip.customExchangeRates || {},
         emergencyContacts: lightweightTrip.emergencyContacts || [],
         memories: lightweightTrip.memories || [],
@@ -1311,6 +1315,10 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
     mergedStickyNotes = Array.from(stickyMap.values());
   }
 
+  const mergedCustomTags = Array.from(
+    new Set([...(older.customExpenseTags || []), ...(newer.customExpenseTags || [])])
+  );
+
   return {
     ...older,
     ...newer,
@@ -1321,6 +1329,7 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
     bookings: mergedBookings,
     emergencyContacts: mergedContacts,
     splitMembers: mergedSplitMembers,
+    customExpenseTags: mergedCustomTags,
     memories: mergedMemories,
     ...(mergedStickyNotes !== undefined ? { stickyNotes: mergedStickyNotes } : {}),
     deletedItemIds: Object.keys(deletedMap).length > 0 ? deletedMap : undefined,
@@ -1394,6 +1403,7 @@ export async function syncCollaborativeTrip(
       bookings: tripToSave.bookings || [],
       customExpenseCategories: tripToSave.customExpenseCategories || [],
       customCategoryLabels: tripToSave.customCategoryLabels || {},
+      customExpenseTags: tripToSave.customExpenseTags || [],
       customExchangeRates: tripToSave.customExchangeRates || {},
       emergencyContacts: tripToSave.emergencyContacts || [],
       memories: tripToSave.memories || [],
