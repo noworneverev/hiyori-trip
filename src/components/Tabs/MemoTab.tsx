@@ -105,6 +105,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
   const [tripNotes, setTripNotes] = useState(trip.notes || '');
   const [isSavedNotes, setIsSavedNotes] = useState(false);
   const [isAutoSaving, setIsAutoSaving] = useState(false);
+  const memoTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   useBodyScrollLock(showEmergencyGuide);
 
@@ -234,10 +235,9 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
     } catch {}
   }, [stickyNotes, STORAGE_KEY_NOTES]);
 
-  const handleAddSticky = (e: React.FormEvent) => {
-    e.preventDefault();
+  const performAddSticky = () => {
     if (!canEdit || !newStickyContent.trim()) return;
-    if (requireAuth && !requireAuth(() => handleAddSticky(e), lang === 'zh' ? '新增速記便籤' : 'Add sticky note')) {
+    if (requireAuth && !requireAuth(performAddSticky, lang === 'zh' ? '新增速記便籤' : 'Add sticky note')) {
       return;
     }
     const cat = STICKY_CATS.find((c) => c.key === newStickyCat) || STICKY_CATS[0];
@@ -252,6 +252,11 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
     setNewStickyLabel('');
     setNewStickyContent('');
     setShowAddSticky(false);
+  };
+
+  const handleAddSticky = (e: React.FormEvent) => {
+    e.preventDefault();
+    performAddSticky();
   };
 
   const handleStartEditSticky = (note: StickyNoteItem) => {
@@ -270,9 +275,11 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
     setEditStickyCat(safeCat);
   };
 
-  const handleSaveEditSticky = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const performSaveEditSticky = () => {
     if (!canEdit || !editingStickyId || !editStickyContent.trim()) return;
+    if (requireAuth && !requireAuth(performSaveEditSticky, lang === 'zh' ? '儲存速記便籤' : 'Save sticky note')) {
+      return;
+    }
     const nextNotes = stickyNotes.map((n) =>
       n.id === editingStickyId
         ? {
@@ -285,6 +292,11 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
     );
     commitStickyNotes(nextNotes);
     setEditingStickyId(null);
+  };
+
+  const handleSaveEditSticky = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    performSaveEditSticky();
   };
 
   const handleDeleteSticky = (id: string) => {
@@ -302,7 +314,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
   const handleToggleStickyComplete = (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (!canEdit) return;
-    if (requireAuth && !requireAuth(() => handleToggleStickyComplete(id, e), lang === 'zh' ? '切換便籤完成狀態' : 'Toggle sticky note')) {
+    if (requireAuth && !requireAuth(() => handleToggleStickyComplete(id), lang === 'zh' ? '切換便籤完成狀態' : 'Toggle sticky note')) {
       return;
     }
     const nextNotes = stickyNotes.map((n) => (n.id === id ? { ...n, completed: !n.completed } : n));
@@ -310,6 +322,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
   };
 
   const [showAddContact, setShowAddContact] = useState(false);
+  const [editingContactId, setEditingContactId] = useState<string | null>(null);
   const [contactName, setContactName] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [contactAddress, setContactAddress] = useState('');
@@ -355,33 +368,86 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
     setTimeout(() => setIsSavedNotes(false), 2000);
   };
 
-  const handleAddContact = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!canEdit || !contactName.trim() || !contactPhone.trim()) return;
-    if (requireAuth && !requireAuth(() => handleAddContact(e), lang === 'zh' ? '新增緊急聯絡人' : 'Add emergency contact')) {
-      return;
-    }
-
-    const newContact: EmergencyContact = {
-      id: `em-${Date.now()}`,
-      name: contactName.trim(),
-      phone: contactPhone.trim(),
-      address: contactAddress.trim() || undefined,
-      note: contactNote.trim() || undefined,
-      type: 'custom',
-    };
-
-    onUpdateTrip({
-      ...trip,
-      emergencyContacts: [...trip.emergencyContacts, newContact],
-      updatedAt: Date.now(),
-    });
-
+  const resetContactForm = () => {
+    setEditingContactId(null);
     setContactName('');
     setContactPhone('');
     setContactAddress('');
     setContactNote('');
+  };
+
+  const handleStartEditContact = (contact: EmergencyContact) => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(() => handleStartEditContact(contact), lang === 'zh' ? '編輯緊急聯絡人' : 'Edit emergency contact')) {
+      return;
+    }
+    setEditingContactId(contact.id);
+    setContactName(contact.name);
+    setContactPhone(contact.phone);
+    setContactAddress(contact.address || '');
+    setContactNote(contact.note || '');
+    setShowAddContact(true);
+  };
+
+  const performSaveContact = () => {
+    if (!canEdit || !contactName.trim() || !contactPhone.trim()) return;
+    if (
+      requireAuth &&
+      !requireAuth(
+        performSaveContact,
+        editingContactId
+          ? lang === 'zh'
+            ? '編輯緊急聯絡人'
+            : 'Edit emergency contact'
+          : lang === 'zh'
+          ? '新增緊急聯絡人'
+          : 'Add emergency contact'
+      )
+    ) {
+      return;
+    }
+
+    if (editingContactId) {
+      const updated = trip.emergencyContacts.map((c) =>
+        c.id === editingContactId
+          ? {
+              ...c,
+              name: contactName.trim(),
+              phone: contactPhone.trim(),
+              address: contactAddress.trim() || undefined,
+              note: contactNote.trim() || undefined,
+            }
+          : c
+      );
+      onUpdateTrip({
+        ...trip,
+        emergencyContacts: updated,
+        updatedAt: Date.now(),
+      });
+    } else {
+      const newContact: EmergencyContact = {
+        id: `em-${Date.now()}`,
+        name: contactName.trim(),
+        phone: contactPhone.trim(),
+        address: contactAddress.trim() || undefined,
+        note: contactNote.trim() || undefined,
+        type: 'custom',
+      };
+
+      onUpdateTrip({
+        ...trip,
+        emergencyContacts: [...trip.emergencyContacts, newContact],
+        updatedAt: Date.now(),
+      });
+    }
+
+    resetContactForm();
     setShowAddContact(false);
+  };
+
+  const handleAddContact = (e: React.FormEvent) => {
+    e.preventDefault();
+    performSaveContact();
   };
 
   const handleDeleteContact = (id: string) => {
@@ -398,6 +464,10 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
       },
       updatedAt: Date.now(),
     });
+    if (editingContactId === id) {
+      resetContactForm();
+      setShowAddContact(false);
+    }
   };
 
   return (
@@ -417,12 +487,16 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
             <button
               type="button"
               onClick={() => {
-                if (!showAddSticky && requireAuth && !requireAuth(() => setShowAddSticky(true), lang === 'zh' ? '新增速記便籤' : 'Add sticky note')) {
-                  return;
+                if (!showAddSticky) {
+                  if (requireAuth && !requireAuth(() => setShowAddSticky(true), lang === 'zh' ? '新增速記便籤' : 'Add sticky note')) {
+                    return;
+                  }
+                  setShowAddSticky(true);
+                } else {
+                  setShowAddSticky(false);
                 }
-                setShowAddSticky(!showAddSticky);
               }}
-              className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1.5 transition active:scale-95 shadow-2xs self-start sm:self-auto cursor-pointer"
+              className="min-h-[44px] sm:min-h-[40px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1.5 transition active:scale-95 shadow-2xs self-start sm:self-auto cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>新增便籤</span>
@@ -599,18 +673,23 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                         : 'bg-[#FAF9F6] dark:bg-slate-900/60 border-[#E5E2DC] dark:border-slate-800 hover:border-teal-600/50 dark:hover:border-teal-500/50'
                     }`}
                   >
-                    {/* Checkbox button */}
+                    {/* Checkbox button (>=44px mobile touch hitbox) */}
                     <button
                       type="button"
                       onClick={(e) => handleToggleStickyComplete(note.id, e)}
-                      className={`mt-0.5 shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition active:scale-90 cursor-pointer ${
-                        isDone
-                          ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
-                          : 'border-2 border-slate-300 dark:border-slate-600 hover:border-teal-600 bg-white dark:bg-[#111827] text-transparent hover:text-slate-300'
-                      }`}
+                      className="w-11 h-11 sm:w-8 sm:h-8 -ml-2 -mt-2 shrink-0 flex items-center justify-center rounded-xl transition cursor-pointer"
                       title={isDone ? '點擊取消打勾 (標記為未完成)' : '點擊打勾 (標記為已完成)'}
+                      aria-label={isDone ? '標記為未完成' : '標記為已完成'}
                     >
-                      <Check className={`w-3.5 h-3.5 ${isDone ? 'stroke-[3]' : 'opacity-0 hover:opacity-40'}`} />
+                      <span
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center transition ${
+                          isDone
+                            ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                            : 'border-2 border-slate-300 dark:border-slate-600 hover:border-teal-600 bg-white dark:bg-[#111827] text-transparent hover:text-slate-300'
+                        }`}
+                      >
+                        <Check className={`w-3.5 h-3.5 ${isDone ? 'stroke-[3]' : 'opacity-0 hover:opacity-40'}`} />
+                      </span>
                     </button>
 
                     <div className="min-w-0 flex-1 space-y-1.5">
@@ -652,7 +731,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                       <button
                         type="button"
                         onClick={() => handleCopyText(note.content, note.id)}
-                        className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition cursor-pointer"
+                        className="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition cursor-pointer"
                         title="複製內容"
                       >
                         {copiedId === note.id ? (
@@ -666,7 +745,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                           <button
                             type="button"
                             onClick={() => handleStartEditSticky(note)}
-                            className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg border border-[#E5E2DC] dark:border-slate-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-slate-500 hover:text-teal-700 dark:hover:text-teal-400 transition cursor-pointer"
+                            className="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg border border-[#E5E2DC] dark:border-slate-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-slate-500 hover:text-teal-700 dark:hover:text-teal-400 transition cursor-pointer"
                             title="編輯此便籤"
                           >
                             <Edit2 className="w-3.5 h-3.5" />
@@ -674,7 +753,7 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                           <button
                             type="button"
                             onClick={() => handleDeleteSticky(note.id)}
-                            className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 transition cursor-pointer"
+                            className="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-400 hover:text-rose-600 transition cursor-pointer"
                             title="刪除"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -779,12 +858,13 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
           )}
 
           <textarea
+            ref={memoTextareaRef}
             rows={10}
             readOnly={!canEdit}
             value={tripNotes}
             onFocus={(e) => {
               if (!canEdit) return;
-              if (requireAuth && !requireAuth(() => e.target.focus(), lang === 'zh' ? '編輯旅遊備忘錄' : 'Edit travel memo')) {
+              if (requireAuth && !requireAuth(() => memoTextareaRef.current?.focus(), lang === 'zh' ? '編輯旅遊備忘錄' : 'Edit travel memo')) {
                 e.target.blur();
               }
             }}
@@ -839,10 +919,19 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
               <button
                 type="button"
                 onClick={() => {
-                  if (!showAddContact && requireAuth && !requireAuth(() => setShowAddContact(true), lang === 'zh' ? '新增緊急聯絡人' : 'Add emergency contact')) {
-                    return;
+                  if (!showAddContact) {
+                    const openNew = () => {
+                      resetContactForm();
+                      setShowAddContact(true);
+                    };
+                    if (requireAuth && !requireAuth(openNew, lang === 'zh' ? '新增緊急聯絡人' : 'Add emergency contact')) {
+                      return;
+                    }
+                    openNew();
+                  } else {
+                    resetContactForm();
+                    setShowAddContact(false);
                   }
-                  setShowAddContact(!showAddContact);
                 }}
                 className="min-h-[44px] sm:min-h-[40px] px-3.5 py-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
               >
@@ -910,15 +999,19 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
           </div>
         </div>
 
-        {/* Add Contact Inline Form */}
+        {/* Add / Edit Contact Inline Form */}
         {showAddContact && (
           <form
             onSubmit={handleAddContact}
             className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/70 border border-[#E5E2DC] dark:border-slate-700 space-y-3 text-xs animate-in fade-in duration-150"
           >
             <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs">
-              <Plus className="w-4 h-4 text-teal-700 dark:text-teal-400" />
-              <span>新增個人或飯店緊急聯絡人</span>
+              {editingContactId ? (
+                <Edit2 className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+              ) : (
+                <Plus className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+              )}
+              <span>{editingContactId ? '編輯緊急聯絡人' : '新增個人或飯店緊急聯絡人'}</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div className="space-y-1">
@@ -973,16 +1066,19 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => setShowAddContact(false)}
-                className="px-4 py-2 min-h-[40px] border border-[#E5E2DC] dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
+                onClick={() => {
+                  resetContactForm();
+                  setShowAddContact(false);
+                }}
+                className="px-4 py-2 min-h-[44px] sm:min-h-[40px] border border-[#E5E2DC] dark:border-slate-700 rounded-xl text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
               >
                 取消
               </button>
               <button
                 type="submit"
-                className="px-5 py-2 min-h-[40px] bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold rounded-xl shadow-2xs cursor-pointer"
+                className="px-5 py-2 min-h-[44px] sm:min-h-[40px] bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold rounded-xl shadow-2xs cursor-pointer"
               >
-                儲存聯絡人
+                {editingContactId ? '儲存變更' : '儲存聯絡人'}
               </button>
             </div>
           </form>
@@ -1003,20 +1099,31 @@ export const MemoTab: React.FC<MemoTabProps> = ({ trip, lang, canEdit = true, on
                   className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800 flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-700 transition"
                 >
                   <div>
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-900 dark:text-white text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-slate-900 dark:text-white text-xs truncate">
                         {contact.name}
                       </span>
                       {canEdit && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteContact(contact.id)}
-                          className="w-10 h-10 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
-                          title="刪除此聯絡人"
-                          aria-label="刪除此聯絡人"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleStartEditContact(contact)}
+                            className="w-11 h-11 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-teal-700 dark:hover:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
+                            title="編輯此聯絡人"
+                            aria-label="編輯此聯絡人"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteContact(contact.id)}
+                            className="w-11 h-11 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                            title="刪除此聯絡人"
+                            aria-label="刪除此聯絡人"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       )}
                     </div>
 

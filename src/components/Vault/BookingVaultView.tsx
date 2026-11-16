@@ -172,10 +172,9 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     setShowForm(true);
   };
 
-  const handleSaveVoucher = (e: React.FormEvent) => {
-    e.preventDefault();
+  const performSaveVoucher = () => {
     if (!canEdit || !formTitle.trim() || !formCode.trim()) return;
-    if (requireAuth && !requireAuth(() => handleSaveVoucher(e), isZh ? '儲存訂位憑證' : 'Save booking voucher')) {
+    if (requireAuth && !requireAuth(performSaveVoucher, isZh ? '儲存訂位憑證' : 'Save booking voucher')) {
       return;
     }
 
@@ -235,6 +234,11 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
 
     setShowForm(false);
     resetForm();
+  };
+
+  const handleSaveVoucher = (e: React.FormEvent) => {
+    e.preventDefault();
+    performSaveVoucher();
   };
 
   const handleDeleteVoucher = (id: string) => {

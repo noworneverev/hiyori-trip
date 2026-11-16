@@ -451,6 +451,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
   const handleSaveOverlayGoogleUrl = () => {
     if (!canEdit || !overlaySpotPhoto) return;
+    if (requireAuth && !requireAuth(handleSaveOverlayGoogleUrl, lang === 'zh' ? '修改相片連結' : 'Edit photo link')) {
+      return;
+    }
     const finalUrl = sanitizeExternalUrl(overlayEditUrl) || '';
     const targetItemId = overlaySpotPhoto.item.id;
 
@@ -608,7 +611,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       e.stopPropagation();
     }
     if (!canEdit) return;
-    if (requireAuth && !requireAuth(() => handleToggleComplete(itemId, e), lang === 'zh' ? '標記景點完成狀態' : 'Mark spot completed')) {
+    if (requireAuth && !requireAuth(() => handleToggleComplete(itemId), lang === 'zh' ? '標記景點完成狀態' : 'Mark spot completed')) {
       return;
     }
     const updatedDays = trip.days.map((day) => ({

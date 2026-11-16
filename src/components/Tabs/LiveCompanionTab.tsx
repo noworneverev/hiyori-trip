@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Trip, ItineraryItem, CategoryType } from '../../types/itinerary';
 import { getGoogleMapsNavigationUrl, calculateDistanceKm, formatDistance } from '../../utils/geo';
-import { formatDateSlash, formatMonthDaySlash, getTodayLocal } from '../../utils/date';
+import { formatDateSlash, formatMonthDaySlash, getTodayLocal, getSuggestedNextStartTime } from '../../utils/date';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
 import {
   WeatherData,
@@ -45,6 +45,7 @@ import {
   Ticket,
   Copy,
   Check,
+  Edit2,
 } from 'lucide-react';
 import { MediaImage } from '../UI/MediaImage';
 
@@ -54,6 +55,8 @@ interface LiveCompanionTabProps {
   canEdit?: boolean;
   onUpdateTrip: (updatedTrip: Trip) => void;
   onNavigateToTimelineDay?: (dayNumber: number) => void;
+  onOpenEditItem?: (item: ItineraryItem, dayNumber: number) => void;
+  onOpenAddItem?: (dayNumber: number, suggestedStartTime?: string) => void;
   onOpenQuickAction?: (tab: 'expense' | 'todos') => void;
   requireAuth?: (action: () => void, reason?: string) => boolean;
 }
@@ -73,6 +76,8 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   lang,
   canEdit = true,
   onUpdateTrip,
+  onOpenEditItem,
+  onOpenAddItem,
   onOpenQuickAction,
   requireAuth,
 }) => {
@@ -118,6 +123,15 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   const [userGpsCoords, setUserGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [isWeatherExpanded, setIsWeatherExpanded] = useState(false);
   const [copiedBookingKey, setCopiedBookingKey] = useState<string | null>(null);
+
+  // Inline Day Theme & Notes Editing States
+  const [isEditingFocus, setIsEditingFocus] = useState(false);
+  const [focusThemeInput, setFocusThemeInput] = useState('');
+  const [focusNotesInput, setFocusNotesInput] = useState('');
+
+  useEffect(() => {
+    setIsEditingFocus(false);
+  }, [selectedDayNumber, trip.id]);
 
   const handleCopyBookingCode = async (code: string, keyId: string) => {
     const ok = await copyTextToClipboard(code);
@@ -246,6 +260,32 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
     onUpdateTrip({ ...trip, days: updatedDays, updatedAt: Date.now() });
   };
 
+  const handleStartEditFocus = () => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(handleStartEditFocus, lang === 'zh' ? '編輯今日焦點與備註' : 'Edit day focus')) {
+      return;
+    }
+    setFocusThemeInput(activeDay.theme || '');
+    setFocusNotesInput(activeDay.notes || '');
+    setIsEditingFocus(true);
+  };
+
+  const handleSaveDayFocus = () => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(handleSaveDayFocus, lang === 'zh' ? '儲存今日焦點與備註' : 'Save day focus')) {
+      return;
+    }
+    const trimmedTheme = focusThemeInput.trim();
+    const trimmedNotes = focusNotesInput.trim();
+    const updatedDays = trip.days.map((d) =>
+      d.dayNumber === activeDay.dayNumber
+        ? { ...d, theme: trimmedTheme || undefined, notes: trimmedNotes || undefined }
+        : d
+    );
+    onUpdateTrip({ ...trip, days: updatedDays, updatedAt: Date.now() });
+    setIsEditingFocus(false);
+  };
+
   // Calculate distance from user's live GPS position to destination/next spot
   let gpsDistanceToSpot: string | null = null;
   if (userGpsCoords && nextItem && typeof nextItem.lat === 'number' && typeof nextItem.lng === 'number') {
@@ -324,33 +364,94 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
             )}
           </div>
 
-          {/* 2. Daily Theme & Day Highlights Card */}
-          {(activeDay.theme || activeDay.notes) && (
+          {/* 2. Daily Theme & Day Highlights Card (Inline Editable) */}
+          {(activeDay.theme || activeDay.notes || canEdit) && (
             <div className="rounded-2xl bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-3.5 sm:p-4 shadow-2xs">
-              <div className="flex items-start gap-2.5">
-                <div className="p-2 rounded-xl bg-teal-700 dark:bg-teal-600 text-white shrink-0 mt-0.5 shadow-2xs">
-                  <MapPin className="w-4 h-4" />
+              {isEditingFocus ? (
+                <div className="space-y-2.5 text-xs animate-in fade-in duration-100">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-teal-700 dark:text-teal-400 flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5" />
+                      <span>{lang === 'zh' ? `Day ${activeDay.dayNumber} 今日焦點與筆記` : `Day ${activeDay.dayNumber} Focus & Notes`}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingFocus(false)}
+                      className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 px-2 py-1 rounded-lg cursor-pointer"
+                    >
+                      {lang === 'zh' ? '取消' : 'Cancel'}
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={focusThemeInput}
+                    onChange={(e) => setFocusThemeInput(e.target.value)}
+                    placeholder={lang === 'zh' ? '今日主題（例如：京都古寺巡禮）' : 'Day focus title...'}
+                    className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-teal-600"
+                  />
+                  <textarea
+                    rows={2}
+                    value={focusNotesInput}
+                    onChange={(e) => setFocusNotesInput(e.target.value)}
+                    placeholder={lang === 'zh' ? '今日提醒事項（例如：記得帶 ICOCA、提前預約車票）' : 'Day notes...'}
+                    className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-teal-600 resize-none"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveDayFocus}
+                      className="min-h-[40px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{lang === 'zh' ? '儲存焦點' : 'Save'}</span>
+                    </button>
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  {activeDay.theme && (
-                    <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                      <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400">
-                        {lang === 'zh' ? '今日焦點' : 'Focus'}
-                      </span>
-                      <span className="text-slate-300 dark:text-slate-600">·</span>
-                      <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
-                        {activeDay.theme}
-                      </h4>
+              ) : (
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                    <div className="p-2 rounded-xl bg-teal-700 dark:bg-teal-600 text-white shrink-0 mt-0.5 shadow-2xs">
+                      <MapPin className="w-4 h-4" />
                     </div>
-                  )}
-                  {activeDay.notes && (
-                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mt-1 flex items-start gap-1.5">
-                      <FileText className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
-                      <span>{activeDay.notes}</span>
-                    </p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                        <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400">
+                          {lang === 'zh' ? '今日焦點' : 'Focus'}
+                        </span>
+                        {activeDay.theme ? (
+                          <>
+                            <span className="text-slate-300 dark:text-slate-600">·</span>
+                            <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
+                              {activeDay.theme}
+                            </h4>
+                          </>
+                        ) : (
+                          <span className="text-xs text-slate-400 dark:text-slate-500 font-normal">
+                            {lang === 'zh' ? '尚未設定今日主題' : 'No focus set yet'}
+                          </span>
+                        )}
+                      </div>
+                      {activeDay.notes && (
+                        <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mt-1 flex items-start gap-1.5">
+                          <FileText className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
+                          <span>{activeDay.notes}</span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={handleStartEditFocus}
+                      className="min-w-[44px] min-h-[44px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 hover:bg-white dark:hover:bg-slate-800 border border-transparent hover:border-[#E5E2DC] dark:hover:border-slate-700 transition shrink-0 cursor-pointer"
+                      title={lang === 'zh' ? '編輯今日焦點與備註' : 'Edit day focus'}
+                      aria-label={lang === 'zh' ? '編輯今日焦點與備註' : 'Edit day focus'}
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
                   )}
                 </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -570,25 +671,36 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
           )}
 
           {/* Action Buttons */}
-          <div className={`mt-5 grid gap-2.5 ${canEdit ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className={`mt-5 grid gap-2 ${canEdit && onOpenEditItem ? 'grid-cols-3' : canEdit ? 'grid-cols-2' : 'grid-cols-1'}`}>
             <a
               href={getGoogleMapsNavigationUrl(nextItem)}
               target="_blank"
               rel="noopener noreferrer"
-              className="min-h-[44px] py-2.5 px-3 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95"
+              className="min-h-[44px] py-2.5 px-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95"
             >
-              <Navigation className="w-4 h-4" />
-              <span>{t.navGoogle}</span>
+              <Navigation className="w-4 h-4 shrink-0" />
+              <span className="truncate">{t.navGoogle}</span>
             </a>
+
+            {canEdit && onOpenEditItem && (
+              <button
+                type="button"
+                onClick={() => onOpenEditItem(nextItem, activeDay.dayNumber)}
+                className="min-h-[44px] py-2.5 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center justify-center gap-1.5 border border-white/15 transition active:scale-95 cursor-pointer"
+              >
+                <Edit2 className="w-3.5 h-3.5 text-teal-300 shrink-0" />
+                <span className="truncate">{lang === 'zh' ? '編輯景點' : 'Edit'}</span>
+              </button>
+            )}
 
             {canEdit && (
               <button
                 type="button"
                 onClick={(e) => handleToggleComplete(nextItem.id, e)}
-                className="min-h-[44px] py-2.5 px-3 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs flex items-center justify-center gap-1.5 border border-white/20 transition active:scale-95 cursor-pointer"
+                className="min-h-[44px] py-2.5 px-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-xs flex items-center justify-center gap-1.5 border border-white/20 transition active:scale-95 cursor-pointer"
               >
-                <CheckCircle2 className="w-4 h-4 text-teal-300" />
-                <span>{t.checked}</span>
+                <CheckCircle2 className="w-4 h-4 text-teal-300 shrink-0" />
+                <span className="truncate">{t.checked}</span>
               </button>
             )}
           </div>
@@ -783,7 +895,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                     </div>
                   </div>
 
-                  {/* Right actions: Navigation & Note expand toggle */}
+                  {/* Right actions: Navigation, Edit & Note expand toggle */}
                   <div className="flex items-center gap-1.5 shrink-0">
                     <a
                       href={getGoogleMapsNavigationUrl(item)}
@@ -794,6 +906,17 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                     >
                       <Navigation className="w-4 h-4" />
                     </a>
+                    {canEdit && onOpenEditItem && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenEditItem(item, activeDay.dayNumber)}
+                        className="w-11 h-11 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 hover:border-teal-500/60 transition active:scale-95 cursor-pointer"
+                        title={lang === 'zh' ? '編輯景點資訊' : 'Edit spot'}
+                        aria-label={lang === 'zh' ? '編輯景點資訊' : 'Edit spot'}
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                    )}
                     {(item.notes || item.transportNote) && (
                       <button
                         type="button"
@@ -867,6 +990,17 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
               </div>
             );
           })}
+
+          {canEdit && onOpenAddItem && (
+            <button
+              type="button"
+              onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
+              className="w-full min-h-[44px] py-3 px-4 rounded-2xl border-2 border-dashed border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600/60 dark:hover:border-teal-500/60 hover:bg-teal-50/40 dark:hover:bg-teal-950/20 text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-98 cursor-pointer"
+            >
+              <Plus className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+              <span>{lang === 'zh' ? `新增 Day ${activeDay.dayNumber} 行程景點` : `Add Spot to Day ${activeDay.dayNumber}`}</span>
+            </button>
+          )}
         </div>
       </div>
       </div>

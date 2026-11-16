@@ -623,6 +623,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   // Add custom category
   const handleAddCustomCategory = () => {
     if (!canEdit) return;
+    if (requireAuth && !requireAuth(handleAddCustomCategory, lang === 'zh' ? '新增自訂類別' : 'Add category')) {
+      return;
+    }
     const trimmed = newCatName.trim();
     if (!trimmed) return;
     if (DEFAULT_CATEGORIES[trimmed] || customCategories.includes(trimmed)) {
@@ -647,6 +650,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   // Rename custom category or customize default category display name
   const handleRenameCategory = (oldKey: string, newName: string) => {
     if (!canEdit) return;
+    if (requireAuth && !requireAuth(() => handleRenameCategory(oldKey, newName), lang === 'zh' ? '重新命名支出類別' : 'Rename category')) {
+      return;
+    }
     const trimmed = newName.trim();
     if (!trimmed || trimmed === oldKey) {
       setEditingCategoryKey(null);
@@ -891,11 +897,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     setPendingDeleteExpense(item);
   };
 
-  // Add a companion to splitting list
-  const handleAddCompanion = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const performAddCompanion = () => {
     if (!canEdit) return;
-    if (requireAuth && !requireAuth(() => handleAddCompanion(e), lang === 'zh' ? '新增分帳旅伴' : 'Add companion')) {
+    if (requireAuth && !requireAuth(performAddCompanion, lang === 'zh' ? '新增分帳旅伴' : 'Add companion')) {
       return;
     }
     const trimmed = newCompanionName.trim();
@@ -915,6 +919,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     });
     setNewCompanionName('');
     setShowAddCompanionInput(false);
+  };
+
+  // Add a companion to splitting list
+  const handleAddCompanion = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    performAddCompanion();
   };
 
   // Remove companion member
@@ -1967,14 +1977,21 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   return (
                     <div
                       key={exp.id}
-                      className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 text-xs"
+                      onClick={() => canEdit && handleOpenEditExpense(exp)}
+                      className={`p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 flex items-center justify-between gap-3 text-xs transition ${
+                        canEdit
+                          ? 'cursor-pointer hover:border-teal-600/50 hover:bg-teal-50/40 dark:hover:bg-slate-800 active:scale-[0.99] group'
+                          : ''
+                      }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <span className="p-1.5 rounded-lg bg-slate-200/60 dark:bg-slate-700/60 text-slate-700 dark:text-slate-300 shrink-0">
                           <catMeta.Icon className="w-3.5 h-3.5" />
                         </span>
                         <div className="min-w-0">
-                          <p className="font-bold text-slate-900 dark:text-white truncate">{exp.title}</p>
+                          <p className="font-bold text-slate-900 dark:text-white truncate group-hover:text-teal-700 dark:group-hover:text-teal-300 transition">
+                            {exp.title}
+                          </p>
                           <div className="text-[10px] text-slate-400 flex items-center gap-1.5 font-mono">
                             <span>{formatDateSlash(exp.date)}</span>
                             <span>·</span>
@@ -1994,14 +2011,24 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                         </div>
                       </div>
 
-                      <div className="text-right shrink-0">
-                        <p className="font-black font-mono tabular-nums text-sm text-slate-900 dark:text-white">
-                          {formatCurrencyAmount(exp.amount, exp.currency)}
-                        </p>
-                        {exp.currency !== baseCurrency && (
-                          <p className="text-[10px] font-mono tabular-nums text-teal-600 dark:text-teal-400">
-                            ≈ {formatCurrencyAmount(getItemConvertedAmount(exp), baseCurrency)}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="text-right">
+                          <p className="font-black font-mono tabular-nums text-sm text-slate-900 dark:text-white">
+                            {formatCurrencyAmount(exp.amount, exp.currency)}
                           </p>
+                          {exp.currency !== baseCurrency && (
+                            <p className="text-[10px] font-mono tabular-nums text-teal-600 dark:text-teal-400">
+                              ≈ {formatCurrencyAmount(getItemConvertedAmount(exp), baseCurrency)}
+                            </p>
+                          )}
+                        </div>
+                        {canEdit && (
+                          <span
+                            className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 group-hover:text-teal-700 dark:group-hover:text-teal-300 group-hover:bg-teal-50 dark:group-hover:bg-teal-950/40 transition shrink-0"
+                            aria-hidden="true"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </span>
                         )}
                       </div>
                     </div>
@@ -2242,7 +2269,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                                           return (
                                             <div
                                               key={item.id}
-                                              className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 flex items-start justify-between gap-2.5 shadow-2xs hover:border-teal-300 dark:hover:border-teal-700 transition"
+                                              onClick={() => canEdit && handleOpenEditExpense(item)}
+                                              className={`p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 flex items-start justify-between gap-2.5 shadow-2xs transition ${
+                                                canEdit ? 'cursor-pointer hover:border-teal-500/60 dark:hover:border-teal-600/60' : ''
+                                              }`}
                                             >
                                               <div className="flex items-start gap-2.5 min-w-0">
                                                 <div className={`w-8 h-8 rounded-xl ${catMeta.bg} flex items-center justify-center text-sm shrink-0`}>
@@ -2322,7 +2352,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                                                           e.stopPropagation();
                                                           handleOpenEditExpense(item);
                                                         }}
-                                                        className="min-h-[40px] sm:min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-500 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 flex items-center gap-1 border border-slate-200 dark:border-slate-700 cursor-pointer"
+                                                        className="min-h-[44px] sm:min-h-[34px] px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-slate-800 flex items-center gap-1 border border-slate-200 dark:border-slate-700 cursor-pointer"
                                                         title="編輯此筆"
                                                       >
                                                         <Pencil className="w-3 h-3" />
@@ -2332,9 +2362,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                                                         type="button"
                                                         onClick={(e) => {
                                                           e.stopPropagation();
-                                                          handleDeleteExpense(item.id);
+                                                          requestDeleteExpense(item);
                                                         }}
-                                                        className="min-h-[40px] sm:min-h-[32px] px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-800 flex items-center gap-1 border border-slate-200 dark:border-slate-700 cursor-pointer"
+                                                        className="min-h-[44px] sm:min-h-[34px] px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-slate-800 flex items-center gap-1 border border-slate-200 dark:border-slate-700 cursor-pointer"
                                                         title="刪除此筆"
                                                       >
                                                         <Trash2 className="w-3 h-3" />
@@ -2880,26 +2910,29 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                           </div>
 
                           {canEdit && (
-                            <div className="hidden md:flex items-center gap-1 md:opacity-70 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition" onClick={(e) => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenEditExpense(item)}
-                                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
-                                title="編輯"
-                                aria-label="編輯"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => requestDeleteExpense(item)}
-                                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
-                                title="刪除"
-                                aria-label="刪除"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
+                            <>
+                              <ChevronRight className="w-4 h-4 text-slate-300 dark:text-slate-600 md:hidden shrink-0" aria-hidden="true" />
+                              <div className="hidden md:flex items-center gap-1 md:opacity-70 md:group-hover:opacity-100 md:group-focus-within:opacity-100 transition" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditExpense(item)}
+                                  className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
+                                  title="編輯"
+                                  aria-label="編輯"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => requestDeleteExpense(item)}
+                                  className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                                  title="刪除"
+                                  aria-label="刪除"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </>
                           )}
                         </div>
                       </SwipeableExpenseRow>
@@ -3725,7 +3758,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             </div>
 
             {/* Bottom bar */}
-            <div className="p-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+            <div className="p-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
               <span className="text-[11px] text-slate-400">
                 可多張左右滑動切換
               </span>
@@ -3740,7 +3773,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                         handleOpenEditExpense(targetExp);
                       }
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 text-amber-800 dark:text-amber-300 font-bold flex items-center gap-1 transition"
+                    className="min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200 dark:border-teal-800 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-800 dark:text-teal-300 font-bold flex items-center gap-1 transition cursor-pointer"
                   >
                     <Pencil className="w-3.5 h-3.5" />
                     <span>{lang === 'zh' ? '編輯此筆記帳' : 'Edit Expense'}</span>
@@ -3749,14 +3782,15 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 <button
                   type="button"
                   onClick={handleDownloadCurrentReceipt}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold flex items-center gap-1 transition cursor-pointer"
+                  className="min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold flex items-center gap-1 transition cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>下載圖片</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => setViewingReceiptGallery(null)}
-                  className="px-4 py-1.5 rounded-xl bg-teal-600 text-white font-bold hover:bg-teal-700 transition"
+                  className="min-h-[44px] sm:min-h-[36px] px-4 py-1.5 rounded-xl bg-teal-700 text-white font-bold hover:bg-teal-800 transition cursor-pointer"
                 >
                   完成
                 </button>

@@ -175,10 +175,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     return () => window.removeEventListener('cloud_sync_status', handleSyncEvent);
   }, []);
 
-  // Manual forced sync handler for a specific memory / entire trip
-  const handleForceSyncMemory = async (mem: TripMemoryItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-
+  const performForceSyncMemory = async (mem: TripMemoryItem) => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setToastMessage(
         lang === 'zh'
@@ -192,7 +189,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
     if (!auth.currentUser) {
       if (requireAuth) {
-        requireAuth(() => handleForceSyncMemory(mem, e), lang === 'zh' ? '同步照片至雲端資料庫' : 'Sync photo to cloud');
+        requireAuth(() => performForceSyncMemory(mem), lang === 'zh' ? '同步照片至雲端資料庫' : 'Sync photo to cloud');
       } else {
         await loginWithGoogle();
       }
@@ -231,6 +228,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         return next;
       });
     }
+  };
+
+  // Manual forced sync handler for a specific memory / entire trip
+  const handleForceSyncMemory = async (mem: TripMemoryItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await performForceSyncMemory(mem);
   };
 
   // Render Google Photos style sync status badge for each photo card corner (Color-Blind Friendly)

@@ -1,28 +1,29 @@
 import React, { useRef, useState } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 
-interface SwipeableExpenseRowProps {
+export interface SwipeableActionRowProps {
   id: string;
   isOpen: boolean;
   canEdit: boolean;
   onOpenChange: (id: string | null) => void;
   onSwipeRevealed?: () => void;
-  onRowClick: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
+  onRowClick?: () => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
   editLabel?: string;
   deleteLabel?: string;
   className?: string;
+  containerClassName?: string;
   children: React.ReactNode;
 }
 
-const ACTION_TRAY_WIDTH = 136; // 68px Edit + 68px Delete
+const ACTION_BTN_WIDTH = 68;
 const EDGE_GUARD_PX = 24; // Preserve browser left-edge back navigation gesture
 const DEAD_ZONE_PX = 10;
-const SNAP_THRESHOLD_PX = 64;
+const SNAP_THRESHOLD_PX = 56;
 const FLICK_VELOCITY_PX_MS = -0.35;
 
-export const SwipeableExpenseRow: React.FC<SwipeableExpenseRowProps> = ({
+export const SwipeableActionRow: React.FC<SwipeableActionRowProps> = ({
   id,
   isOpen,
   canEdit,
@@ -34,9 +35,15 @@ export const SwipeableExpenseRow: React.FC<SwipeableExpenseRowProps> = ({
   editLabel = '編輯',
   deleteLabel = '刪除',
   className = '',
+  containerClassName = 'bg-white dark:bg-[#111827]',
   children,
 }) => {
+  const actionCount = (onEdit ? 1 : 0) + (onDelete ? 1 : 0);
+  const trayWidth = actionCount * ACTION_BTN_WIDTH;
+  const swipeEnabled = canEdit && actionCount > 0;
+
   const [dragOffset, setDragOffset] = useState<number | null>(null);
+  const dragOffsetRef = useRef<number | null>(null);
   const suppressClickUntilRef = useRef<number>(0);
 
   const gestureRef = useRef<{
@@ -55,8 +62,13 @@ export const SwipeableExpenseRow: React.FC<SwipeableExpenseRowProps> = ({
     axisLock: 'none',
   });
 
+  const updateDragOffset = (val: number | null) => {
+    dragOffsetRef.current = val;
+    setDragOffset(val);
+  };
+
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (!canEdit || e.touches.length !== 1) return;
+    if (!swipeEnabled || e.touches.length !== 1) return;
     if (typeof window !== 'undefined' && window.innerWidth >= 768) return;
 
     const target = e.target as HTMLElement | null;
@@ -70,7 +82,7 @@ export const SwipeableExpenseRow: React.FC<SwipeableExpenseRowProps> = ({
       startX: touch.clientX,
       startY: touch.clientY,
       startTime: Date.now(),
-      initialOffset: isOpen ? -ACTION_TRAY_WIDTH : 0,
+      initialOffset: isOpen ? -trayWidth : 0,
       axisLock: 'none',
     };
   };
@@ -103,11 +115,11 @@ export const SwipeableExpenseRow: React.FC<SwipeableExpenseRowProps> = ({
 
     const rawOffset = g.initialOffset + dx;
     let clampedOffset = Math.min(0, rawOffset);
-    if (clampedOffset < -ACTION_TRAY_WIDTH) {
-      const overshoot = clampedOffset + ACTION_TRAY_WIDTH;
-      clampedOffset = Math.max(-ACTION_TRAY_WIDTH - 28, -ACTION_TRAY_WIDTH + overshoot * 0.25);
+    if (clampedOffset < -trayWidth) {
+      const overshoot = clampedOffset + trayWidth;
+      clampedOffset = Math.max(-trayWidth - 28, -trayWidth + overshoot * 0.25);
     }
-    setDragOffset(clampedOffset);
+    updateDragOffset(clampedOffset);
   };
 
   const finishGesture = (clientX?: number) => {
@@ -116,21 +128,23 @@ export const SwipeableExpenseRow: React.FC<SwipeableExpenseRowProps> = ({
     g.active = false;
 
     if (g.axisLock !== 'horizontal') {
-      setDragOffset(null);
+      updateDragOffset(null);
       return;
     }
 
     const dx = typeof clientX === 'number' ? clientX - g.startX : 0;
     const elapsed = Math.max(1, Date.now() - g.startTime);
     const velocityX = dx / elapsed;
-    const current = dragOffset !== null ? dragOffset : isOpen ? -ACTION_TRAY_WIDTH : 0;
+    const liveOffset = dragOffsetRef.current;
+    const current = liveOffset !== null ? liveOffset : isOpen ? -trayWidth : 0;
+    const snapThreshold = Math.min(SNAP_THRESHOLD_PX, Math.max(36, trayWidth * 0.42));
 
     const shouldOpen =
-      current <= -SNAP_THRESHOLD_PX ||
-      (velocityX < FLICK_VELOCITY_PX_MS && current < -24);
+      current <= -snapThreshold ||
+      (velocityX < FLICK_VELOCITY_PX_MS && current < -20);
 
     suppressClickUntilRef.current = Date.now() + 280;
-    setDragOffset(null);
+    updateDragOffset(null);
     onOpenChange(shouldOpen ? id : null);
     if (shouldOpen) {
       onSwipeRevealed?.();
@@ -152,74 +166,79 @@ export const SwipeableExpenseRow: React.FC<SwipeableExpenseRowProps> = ({
       onOpenChange(null);
       return;
     }
-    onRowClick();
+    onRowClick?.();
   };
 
   const isDragging = dragOffset !== null;
-  const effectiveOffset = !canEdit
+  const effectiveOffset = !swipeEnabled
     ? 0
     : dragOffset !== null
     ? dragOffset
     : isOpen
-    ? -ACTION_TRAY_WIDTH
+    ? -trayWidth
     : 0;
 
   return (
     <div
-      className="relative overflow-hidden bg-white dark:bg-[#111827]"
+      className={`relative overflow-hidden ${containerClassName}`}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onTouchCancel={handleTouchCancel}
     >
       {/* Mobile Underlay Action Tray (revealed on left-swipe) */}
-      {canEdit && (
+      {swipeEnabled && (
         <div
           data-swipe-action="true"
           aria-hidden={!isOpen}
-          className={`md:hidden absolute inset-y-0 right-0 w-[136px] flex items-stretch select-none ${
+          style={{ width: `${trayWidth}px` }}
+          className={`md:hidden absolute inset-y-0 right-0 flex items-stretch select-none ${
             isOpen ? 'pointer-events-auto' : 'pointer-events-none'
           }`}
         >
-          <button
-            type="button"
-            tabIndex={isOpen ? 0 : -1}
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenChange(null);
-              onEdit();
-            }}
-            className="w-[68px] min-h-[44px] bg-teal-600 active:bg-teal-700 text-white flex flex-col items-center justify-center gap-1 text-[11px] font-bold transition-colors cursor-pointer"
-            aria-label={editLabel}
-          >
-            <Pencil className="w-4 h-4" />
-            <span>{editLabel}</span>
-          </button>
-          <button
-            type="button"
-            tabIndex={isOpen ? 0 : -1}
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenChange(null);
-              onDelete();
-            }}
-            className="w-[68px] min-h-[44px] bg-rose-600 active:bg-rose-700 text-white flex flex-col items-center justify-center gap-1 text-[11px] font-bold transition-colors cursor-pointer"
-            aria-label={deleteLabel}
-          >
-            <Trash2 className="w-4 h-4" />
-            <span>{deleteLabel}</span>
-          </button>
+          {onEdit && (
+            <button
+              type="button"
+              tabIndex={isOpen ? 0 : -1}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenChange(null);
+                onEdit();
+              }}
+              className="w-[68px] min-h-[44px] bg-teal-600 active:bg-teal-700 text-white flex flex-col items-center justify-center gap-1 text-[11px] font-bold transition-colors cursor-pointer"
+              aria-label={editLabel}
+            >
+              <Pencil className="w-4 h-4" />
+              <span>{editLabel}</span>
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              tabIndex={isOpen ? 0 : -1}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenChange(null);
+                onDelete();
+              }}
+              className="w-[68px] min-h-[44px] bg-rose-600 active:bg-rose-700 text-white flex flex-col items-center justify-center gap-1 text-[11px] font-bold transition-colors cursor-pointer"
+              aria-label={deleteLabel}
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>{deleteLabel}</span>
+            </button>
+          )}
         </div>
       )}
 
-      {/* Foreground Expense Row Surface */}
+      {/* Foreground Row Surface */}
       <div
         onClick={handleForegroundClick}
         style={{
           transform: `translate3d(${effectiveOffset}px, 0, 0)`,
-          touchAction: canEdit ? 'pan-y' : 'auto',
+          touchAction: swipeEnabled ? 'pan-y' : 'auto',
         }}
-        className={`relative z-10 bg-white dark:bg-[#111827] ${
+        className={`relative z-10 ${containerClassName} ${
           isDragging
             ? ''
             : 'transition-transform duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none'
@@ -230,3 +249,5 @@ export const SwipeableExpenseRow: React.FC<SwipeableExpenseRowProps> = ({
     </div>
   );
 };
+
+export const SwipeableExpenseRow = SwipeableActionRow;

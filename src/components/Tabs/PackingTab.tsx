@@ -17,7 +17,9 @@ import {
   Smartphone,
   Shirt,
   ShieldCheck,
+  Edit2,
 } from 'lucide-react';
+import { SwipeableActionRow } from '../UI/SwipeableExpenseRow';
 
 interface PackingTabProps {
   trip: Trip;
@@ -92,10 +94,15 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
   useBodyScrollLock(isPackingModalOpen);
   const [packingCategoryFilter, setPackingCategoryFilter] = useState<PackingCategory | 'all'>('all');
   const [inlinePackingTitle, setInlinePackingTitle] = useState('');
+  const [editingPackingId, setEditingPackingId] = useState<string | null>(null);
+  const [editPackingName, setEditPackingName] = useState('');
+  const [editPackingCategory, setEditPackingCategory] = useState<PackingCategory>('other');
 
-  // Quick Addition Sheet State for detailed Todo creation
+  // Quick Addition / Edit Sheet State for detailed Todo
   const [isAddSheetOpen, setIsAddSheetOpen] = useState(false);
   useBodyScrollLock(isAddSheetOpen);
+  const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
+  const [openTodoSwipeId, setOpenTodoSwipeId] = useState<string | null>(null);
   const [inputTitle, setInputTitle] = useState('');
   const [inputDueDate, setInputDueDate] = useState('');
 
@@ -103,8 +110,13 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
     if (!isPackingModalOpen && !isAddSheetOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (isAddSheetOpen) setIsAddSheetOpen(false);
-        else if (isPackingModalOpen) setIsPackingModalOpen(false);
+        if (isAddSheetOpen) {
+          setIsAddSheetOpen(false);
+          setEditingTodoId(null);
+        } else if (isPackingModalOpen) {
+          setIsPackingModalOpen(false);
+          setEditingPackingId(null);
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -163,12 +175,11 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
     });
   };
 
-  const handleInlineAdd = (e: React.FormEvent) => {
-    e.preventDefault();
+  const performInlineAdd = () => {
     if (!canEdit) return;
     const text = inlineTitle.trim();
     if (!text) return;
-    if (requireAuth && !requireAuth(() => handleInlineAdd(e), lang === 'zh' ? '新增待辦事項' : 'Add todo')) {
+    if (requireAuth && !requireAuth(performInlineAdd, lang === 'zh' ? '新增待辦事項' : 'Add todo')) {
       return;
     }
 
@@ -182,26 +193,83 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
     setInlineTitle('');
   };
 
-  const handleDetailedAdd = (e: React.FormEvent) => {
+  const handleInlineAdd = (e: React.FormEvent) => {
     e.preventDefault();
+    performInlineAdd();
+  };
+
+  const openAddTodoSheet = () => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(openAddTodoSheet, lang === 'zh' ? '新增待辦事項' : 'Add todo')) {
+      return;
+    }
+    setEditingTodoId(null);
+    setInputTitle('');
+    setInputDueDate('');
+    setIsAddSheetOpen(true);
+  };
+
+  const openEditTodoSheet = (todo: TodoItem) => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(() => openEditTodoSheet(todo), lang === 'zh' ? '編輯待辦事項' : 'Edit todo')) {
+      return;
+    }
+    setEditingTodoId(todo.id);
+    setInputTitle(todo.title);
+    setInputDueDate(todo.dueDate || '');
+    setIsAddSheetOpen(true);
+  };
+
+  const performSaveTodoSheet = () => {
     if (!canEdit) return;
     const text = inputTitle.trim();
     if (!text) return;
-    if (requireAuth && !requireAuth(() => handleDetailedAdd(e), lang === 'zh' ? '新增待辦事項' : 'Add todo')) {
+    if (
+      requireAuth &&
+      !requireAuth(
+        performSaveTodoSheet,
+        editingTodoId
+          ? lang === 'zh'
+            ? '編輯待辦事項'
+            : 'Edit todo'
+          : lang === 'zh'
+          ? '新增待辦事項'
+          : 'Add todo'
+      )
+    ) {
       return;
     }
 
-    const newTodo: TodoItem = {
-      id: `todo-${Date.now()}`,
-      title: text,
-      category: 'other',
-      completed: false,
-      dueDate: inputDueDate || undefined,
-    };
-    onUpdateTrip({ ...trip, todos: [newTodo, ...todos], updatedAt: Date.now() });
+    if (editingTodoId) {
+      const updated = todos.map((t) =>
+        t.id === editingTodoId
+          ? {
+              ...t,
+              title: text,
+              dueDate: inputDueDate || undefined,
+            }
+          : t
+      );
+      onUpdateTrip({ ...trip, todos: updated, updatedAt: Date.now() });
+    } else {
+      const newTodo: TodoItem = {
+        id: `todo-${Date.now()}`,
+        title: text,
+        category: 'other',
+        completed: false,
+        dueDate: inputDueDate || undefined,
+      };
+      onUpdateTrip({ ...trip, todos: [newTodo, ...todos], updatedAt: Date.now() });
+    }
+    setEditingTodoId(null);
     setInputTitle('');
     setInputDueDate('');
     setIsAddSheetOpen(false);
+  };
+
+  const handleDetailedAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    performSaveTodoSheet();
   };
 
   const handleLoadRecommendedTodos = () => {
@@ -240,14 +308,40 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
       deletedItemIds: { ...(trip.deletedItemIds || {}), [id]: Date.now() },
       updatedAt: Date.now(),
     });
+    if (editingPackingId === id) setEditingPackingId(null);
   };
 
-  const handleInlineAddPacking = (e: React.FormEvent) => {
-    e.preventDefault();
+  const startEditPacking = (item: PackingItem) => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(() => startEditPacking(item), lang === 'zh' ? '編輯行李物品' : 'Edit packing item')) {
+      return;
+    }
+    setEditingPackingId(item.id);
+    setEditPackingName(item.name);
+    setEditPackingCategory(item.category || 'other');
+  };
+
+  const saveEditPacking = () => {
+    if (!canEdit || !editingPackingId) return;
+    const trimmed = editPackingName.trim();
+    if (!trimmed) return;
+    if (requireAuth && !requireAuth(saveEditPacking, lang === 'zh' ? '儲存行李物品' : 'Save packing item')) {
+      return;
+    }
+    const updated = packingList.map((p) =>
+      p.id === editingPackingId
+        ? { ...p, name: trimmed, category: editPackingCategory }
+        : p
+    );
+    onUpdateTrip({ ...trip, packingList: updated, updatedAt: Date.now() });
+    setEditingPackingId(null);
+  };
+
+  const performInlineAddPacking = () => {
     if (!canEdit) return;
     const text = inlinePackingTitle.trim();
     if (!text) return;
-    if (requireAuth && !requireAuth(() => handleInlineAddPacking(e), lang === 'zh' ? '新增行李物品' : 'Add packing item')) {
+    if (requireAuth && !requireAuth(performInlineAddPacking, lang === 'zh' ? '新增行李物品' : 'Add packing item')) {
       return;
     }
 
@@ -259,6 +353,11 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
     };
     onUpdateTrip({ ...trip, packingList: [newPack, ...packingList], updatedAt: Date.now() });
     setInlinePackingTitle('');
+  };
+
+  const handleInlineAddPacking = (e: React.FormEvent) => {
+    e.preventDefault();
+    performInlineAddPacking();
   };
 
   const handleLoadRecommendedPacking = () => {
@@ -359,13 +458,8 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
-                onClick={() => {
-                  if (requireAuth && !requireAuth(() => setIsAddSheetOpen(true), lang === 'zh' ? '新增待辦事項' : 'Add todo')) {
-                    return;
-                  }
-                  setIsAddSheetOpen(true);
-                }}
-                className="min-h-[36px] px-2.5 py-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer text-xs font-medium"
+                onClick={openAddTodoSheet}
+                className="min-h-[44px] sm:min-h-[36px] px-2.5 py-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer text-xs font-medium"
                 title="設定日期與詳細項目"
               >
                 詳細
@@ -399,15 +493,27 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
           <div className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800/80">
             {displayedTodos.map((todo) => {
               return (
-                <div
+                <SwipeableActionRow
                   key={todo.id}
-                  className="flex items-center justify-between p-3.5 sm:p-4 hover:bg-[#FAF9F6] dark:hover:bg-slate-900/50 transition group"
+                  id={todo.id}
+                  isOpen={openTodoSwipeId === todo.id}
+                  canEdit={canEdit}
+                  onOpenChange={setOpenTodoSwipeId}
+                  onRowClick={canEdit ? () => openEditTodoSheet(todo) : undefined}
+                  onEdit={() => openEditTodoSheet(todo)}
+                  onDelete={() => handleDeleteTodo(todo.id)}
+                  className={`flex items-center justify-between p-3.5 sm:p-4 md:hover:bg-[#FAF9F6] md:dark:hover:bg-slate-900/50 transition group ${
+                    canEdit ? 'cursor-pointer' : ''
+                  }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0 flex-1">
                     {/* Touch Checkbox with >=44px mobile hitbox */}
                     <button
                       type="button"
-                      onClick={() => handleToggleTodo(todo.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleTodo(todo.id);
+                      }}
                       className="w-11 h-11 sm:w-9 sm:h-9 -ml-2 flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 group/chk"
                       title="標記完成"
                       aria-label="標記完成"
@@ -431,17 +537,31 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                   </div>
 
                   {canEdit && (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteTodo(todo.id)}
-                      className="w-11 h-11 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer opacity-80 sm:opacity-0 group-hover:opacity-100 ml-1 shrink-0"
-                      title="刪除"
-                      aria-label="刪除"
+                    <div
+                      className="hidden md:flex items-center gap-1 ml-1 shrink-0"
+                      onClick={(e) => e.stopPropagation()}
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => openEditTodoSheet(todo)}
+                        className="w-9 h-9 flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-700 dark:text-slate-500 dark:hover:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer opacity-70 group-hover:opacity-100"
+                        title="編輯待辦"
+                        aria-label="編輯待辦"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteTodo(todo.id)}
+                        className="w-9 h-9 flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer opacity-70 group-hover:opacity-100"
+                        title="刪除"
+                        aria-label="刪除"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   )}
-                </div>
+                </SwipeableActionRow>
               );
             })}
           </div>
@@ -626,6 +746,64 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                 displayedPacking.map((item) => {
                   const meta = PACKING_CATEGORY_MAP[item.category || 'other'];
                   const IconComp = meta?.Icon || Luggage;
+                  const isEditingPack = editingPackingId === item.id;
+
+                  if (isEditingPack) {
+                    return (
+                      <div
+                        key={item.id}
+                        className="p-2.5 my-1 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-teal-600/70 dark:border-teal-500/70 space-y-2"
+                      >
+                        <input
+                          type="text"
+                          value={editPackingName}
+                          onChange={(e) => setEditPackingName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              saveEditPacking();
+                            } else if (e.key === 'Escape') {
+                              setEditingPackingId(null);
+                            }
+                          }}
+                          autoFocus
+                          placeholder="物品名稱..."
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-teal-600"
+                        />
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <select
+                            value={editPackingCategory}
+                            onChange={(e) => setEditPackingCategory(e.target.value as PackingCategory)}
+                            className="min-h-[44px] sm:min-h-[34px] px-2.5 py-1 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-xs text-slate-700 dark:text-slate-200 focus:outline-hidden focus:ring-2 focus:ring-teal-600"
+                          >
+                            {(Object.keys(PACKING_CATEGORY_MAP) as PackingCategory[]).map((cat) => (
+                              <option key={cat} value={cat}>
+                                {PACKING_CATEGORY_MAP[cat].label}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setEditingPackingId(null)}
+                              className="min-h-[44px] sm:min-h-[34px] px-3 py-1 rounded-xl border border-[#E5E2DC] dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                            >
+                              取消
+                            </button>
+                            <button
+                              type="button"
+                              onClick={saveEditPacking}
+                              disabled={!editPackingName.trim()}
+                              className="min-h-[44px] sm:min-h-[34px] px-3.5 py-1 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-xs font-bold disabled:opacity-50 cursor-pointer flex items-center gap-1"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>儲存</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
 
                   return (
                     <div
@@ -636,32 +814,51 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                         <button
                           type="button"
                           onClick={() => handleTogglePacking(item.id)}
-                          className="w-10 h-10 sm:w-9 sm:h-9 -ml-1 flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 group/pchk"
+                          className="w-11 h-11 sm:w-9 sm:h-9 -ml-1 flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 group/pchk"
                           aria-label="標記打包"
                         >
                           <span className="w-4 h-4 rounded-full border-2 border-slate-300 dark:border-slate-600 group-hover/pchk:border-teal-600 flex items-center justify-center transition">
                             {item.packed && <Check className="w-2.5 h-2.5 text-teal-700 dark:text-teal-400" />}
                           </span>
                         </button>
-                        <span className="text-xs sm:text-sm text-slate-900 dark:text-slate-100 font-medium truncate">
-                          {item.name}
-                        </span>
-                        <span className="inline-flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500 shrink-0">
-                          <span>·</span>
-                          <IconComp className="w-3 h-3" />
-                          <span>{meta?.label}</span>
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => canEdit && startEditPacking(item)}
+                          disabled={!canEdit}
+                          className={`min-w-0 flex-1 text-left flex items-center gap-1.5 ${canEdit ? 'cursor-pointer' : 'cursor-default'}`}
+                        >
+                          <span className="text-xs sm:text-sm text-slate-900 dark:text-slate-100 font-medium truncate">
+                            {item.name}
+                          </span>
+                          <span className="inline-flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500 shrink-0">
+                            <span>·</span>
+                            <IconComp className="w-3 h-3" />
+                            <span>{meta?.label}</span>
+                          </span>
+                        </button>
                       </div>
 
                       {canEdit && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeletePacking(item.id)}
-                          className="w-9 h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 transition cursor-pointer ml-1 shrink-0"
-                          aria-label="刪除物品"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-0.5 ml-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => startEditPacking(item)}
+                            className="w-11 h-11 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-teal-700 dark:text-slate-500 dark:hover:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
+                            aria-label="編輯物品"
+                            title="編輯物品"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeletePacking(item.id)}
+                            className="w-11 h-11 sm:w-9 sm:h-9 flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 dark:text-slate-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                            aria-label="刪除物品"
+                            title="刪除物品"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       )}
                     </div>
                   );
@@ -713,11 +910,14 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
         </div>
       )}
 
-      {/* Detailed Todo Modal (Detailed Sheet) */}
+      {/* Detailed Todo Modal (Add / Edit Sheet) */}
       {isAddSheetOpen && (
         <div
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-150"
-          onClick={() => setIsAddSheetOpen(false)}
+          onClick={() => {
+            setIsAddSheetOpen(false);
+            setEditingTodoId(null);
+          }}
         >
           <div
             className="w-full sm:max-w-md bg-white dark:bg-[#111827] rounded-t-3xl sm:rounded-3xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl overflow-hidden p-5 animate-in slide-in-from-bottom duration-200"
@@ -725,12 +925,15 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
           >
             <div className="flex items-center justify-between pb-3 border-b border-[#E5E2DC] dark:border-slate-800">
               <h4 className="font-bold text-base text-slate-900 dark:text-white">
-                新增待辦事項
+                {editingTodoId ? '編輯待辦事項' : '新增待辦事項'}
               </h4>
               <button
                 type="button"
-                onClick={() => setIsAddSheetOpen(false)}
-                className="w-10 h-10 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                onClick={() => {
+                  setIsAddSheetOpen(false);
+                  setEditingTodoId(null);
+                }}
+                className="w-11 h-11 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -765,7 +968,10 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
               <div className="pt-2 flex items-center justify-end gap-2.5">
                 <button
                   type="button"
-                  onClick={() => setIsAddSheetOpen(false)}
+                  onClick={() => {
+                    setIsAddSheetOpen(false);
+                    setEditingTodoId(null);
+                  }}
                   className="min-h-[44px] px-4 py-2.5 rounded-2xl border border-[#E5E2DC] dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-800 transition cursor-pointer"
                 >
                   取消
@@ -775,7 +981,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({ trip, lang, canEdit = tr
                   disabled={!inputTitle.trim()}
                   className="min-h-[44px] px-5 py-2.5 rounded-2xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white text-xs font-bold transition disabled:opacity-50 cursor-pointer shadow-2xs"
                 >
-                  確認新增
+                  {editingTodoId ? '儲存變更' : '確認新增'}
                 </button>
               </div>
             </form>

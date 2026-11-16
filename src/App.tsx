@@ -392,15 +392,26 @@ export default function App() {
   const [authModalReason, setAuthModalReason] = useState<string>('');
   const pendingActionRef = useRef<(() => void) | null>(null);
 
-  const requireAuth = (action: () => void, reason?: string): boolean => {
+  // Strict check-only guard for child components: returns true when authenticated without executing retryAction.
+  const requireAuth = (retryAction: () => void, reason?: string): boolean => {
+    if (currentUserRef.current) {
+      return true;
+    }
+    pendingActionRef.current = retryAction;
+    setAuthModalReason(reason || (lang === 'zh' ? '編輯與儲存行程' : 'Edit and save trip'));
+    setShowAuthModal(true);
+    return false;
+  };
+
+  // Callback runner for App-level handlers: runs action immediately if signed in, or queues it pending login.
+  const runWithAuth = (action: () => void, reason?: string): void => {
     if (currentUserRef.current) {
       action();
-      return true;
+      return;
     }
     pendingActionRef.current = action;
     setAuthModalReason(reason || (lang === 'zh' ? '編輯與儲存行程' : 'Edit and save trip'));
     setShowAuthModal(true);
-    return false;
   };
 
   const markTripsSyncedLocally = (syncedAtByTripId: Record<string, number>) => {
@@ -808,7 +819,7 @@ export default function App() {
   const handleUpdateTrip = (updatedTrip: Trip) => {
     const user = currentUserRef.current;
     if (!user) {
-      requireAuth(() => {
+      runWithAuth(() => {
         const perm = checkUserTripPermission(updatedTrip, currentUserRef.current);
         if (updatedTrip.isCollaborative && !perm.canEdit) {
           showToast(lang === 'zh' ? '僅檢視權限，無法編輯' : 'View-only permission');
@@ -854,7 +865,7 @@ export default function App() {
   const handleSaveTripModal = (data: Partial<Trip> | Trip) => {
     const user = currentUserRef.current;
     if (!user) {
-      requireAuth(() => handleSaveTripModal(data), lang === 'zh' ? '建立與儲存旅程' : 'Save trip');
+      runWithAuth(() => handleSaveTripModal(data), lang === 'zh' ? '建立與儲存旅程' : 'Save trip');
       return;
     }
     if (tripModalData) {
@@ -947,7 +958,7 @@ export default function App() {
     if (trips.length <= 1) return;
     const user = currentUserRef.current;
     if (!user) {
-      requireAuth(() => handleConfirmDeleteTrip(), lang === 'zh' ? '刪除旅程' : 'Delete trip');
+      runWithAuth(() => handleConfirmDeleteTrip(), lang === 'zh' ? '刪除旅程' : 'Delete trip');
       return;
     }
     if (currentTrip.isCollaborative && !permission.isOwner) {
@@ -989,7 +1000,7 @@ export default function App() {
     if (!currentTrip || !editingItemData) return;
     const user = currentUserRef.current;
     if (!user) {
-      requireAuth(() => handleSaveItem(itemData, existingId), lang === 'zh' ? '儲存景點資訊' : 'Save spot');
+      runWithAuth(() => handleSaveItem(itemData, existingId), lang === 'zh' ? '儲存景點資訊' : 'Save spot');
       return;
     }
     if (currentTrip.isCollaborative && !permission.canEdit) {
@@ -1163,7 +1174,7 @@ export default function App() {
   };
 
   const handleImportTrip = (imported: Trip) => {
-    requireAuth(async () => {
+    runWithAuth(async () => {
       const exists = tripsRef.current.some((t) => t.id === imported.id);
       let baseTrip = imported;
       if (exists) {
@@ -1240,7 +1251,7 @@ export default function App() {
                       <button
                         onClick={() => {
                           setShowTripSwitcher(false);
-                          requireAuth(() => {
+                          runWithAuth(() => {
                             setShowTripModal(true);
                             setTripModalData(null);
                           }, lang === 'zh' ? '建立新旅程' : 'Create new trip');
@@ -1307,7 +1318,7 @@ export default function App() {
             {/* Primary Action: New Trip (Desktop / Tablet) */}
             <button
               onClick={() => {
-                requireAuth(() => {
+                runWithAuth(() => {
                   setShowTripModal(true);
                   setTripModalData(null);
                 }, lang === 'zh' ? '建立新旅程' : 'Create new trip');
@@ -1380,7 +1391,7 @@ export default function App() {
             <div className="flex items-center gap-1.5 shrink-0 ml-auto">
               <button
                 onClick={() => {
-                  requireAuth(async () => {
+                  runWithAuth(async () => {
                     const newId = `trip-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
                     const rebound = await rebindTripMediaIds(sharedBannerTrip, newId);
                     const copyTrip: Trip = {
@@ -1454,7 +1465,7 @@ export default function App() {
               {permission.canEdit && (
                 <button
                   onClick={() => {
-                    requireAuth(() => {
+                    runWithAuth(() => {
                       setTripModalData(currentTrip);
                       setShowTripModal(true);
                     }, lang === 'zh' ? '編輯行程資訊' : 'Edit trip details');
@@ -1554,7 +1565,7 @@ export default function App() {
                 {permission.canEdit && (
                   <button
                     onClick={() => {
-                      requireAuth(() => {
+                      runWithAuth(() => {
                         setTripModalData(currentTrip);
                         setShowTripModal(true);
                       }, lang === 'zh' ? '編輯行程資訊' : 'Edit trip details');
@@ -1569,7 +1580,7 @@ export default function App() {
                 {permission.isOwner && (
                   <button
                     onClick={() => {
-                      requireAuth(handleDeleteCurrentTrip, lang === 'zh' ? '刪除旅程' : 'Delete trip');
+                      runWithAuth(handleDeleteCurrentTrip, lang === 'zh' ? '刪除旅程' : 'Delete trip');
                     }}
                     className="min-w-[40px] min-h-[40px] rounded-xl border border-[#E5E2DC] dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-800 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-slate-500 hover:text-rose-700 dark:text-slate-400 dark:hover:text-rose-300 flex items-center justify-center transition cursor-pointer"
                     title={t.deleteTrip}
@@ -1602,7 +1613,7 @@ export default function App() {
               </span>
             </div>
             <button
-              onClick={() => requireAuth(() => {}, lang === 'zh' ? '編輯並同步' : 'Edit & sync')}
+              onClick={() => runWithAuth(() => {}, lang === 'zh' ? '編輯並同步' : 'Edit & sync')}
               className="min-h-[36px] px-3 py-1 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-[11px] shrink-0 transition active:scale-95 whitespace-nowrap cursor-pointer"
             >
               {lang === 'zh' ? 'Google 登入' : 'Sign In'}
@@ -1706,7 +1717,7 @@ export default function App() {
                   showToast(lang === 'zh' ? '目前為僅檢視權限' : 'View-only mode');
                   return;
                 }
-                requireAuth(() => {
+                runWithAuth(() => {
                   setEditingItemData({ dayNumber, initialStartTime: suggestedStartTime });
                   setShowItemModal(true);
                 }, lang === 'zh' ? '新增行程景點' : 'Add itinerary spot');
@@ -1716,7 +1727,7 @@ export default function App() {
                   showToast(lang === 'zh' ? '目前為僅檢視權限' : 'View-only mode');
                   return;
                 }
-                requireAuth(() => {
+                runWithAuth(() => {
                   setEditingItemData({ item, dayNumber });
                   setShowItemModal(true);
                 }, lang === 'zh' ? '編輯景點資訊' : 'Edit spot details');
@@ -1740,6 +1751,26 @@ export default function App() {
               canEdit={permission.canEdit}
               onUpdateTrip={handleUpdateTrip}
               requireAuth={requireAuth}
+              onOpenEditItem={(item, dayNumber) => {
+                if (currentTrip.isCollaborative && !permission.canEdit) {
+                  showToast(lang === 'zh' ? '目前為僅檢視權限' : 'View-only mode');
+                  return;
+                }
+                runWithAuth(() => {
+                  setEditingItemData({ item, dayNumber });
+                  setShowItemModal(true);
+                }, lang === 'zh' ? '編輯景點資訊' : 'Edit spot details');
+              }}
+              onOpenAddItem={(dayNumber, suggestedStartTime) => {
+                if (currentTrip.isCollaborative && !permission.canEdit) {
+                  showToast(lang === 'zh' ? '目前為僅檢視權限' : 'View-only mode');
+                  return;
+                }
+                runWithAuth(() => {
+                  setEditingItemData({ dayNumber, initialStartTime: suggestedStartTime });
+                  setShowItemModal(true);
+                }, lang === 'zh' ? '新增行程景點' : 'Add itinerary spot');
+              }}
               onNavigateToTimelineDay={(dayNum) => {
                 setRequestedTimelineDay({ dayNumber: dayNum, nonce: Date.now() });
                 setActiveTab('timeline');
@@ -1749,7 +1780,7 @@ export default function App() {
                   showToast(lang === 'zh' ? '目前為僅檢視權限' : 'View-only mode');
                   return;
                 }
-                requireAuth(() => {
+                runWithAuth(() => {
                   setQuickActionTab(tab);
                   setShowQuickActionModal(true);
                 }, lang === 'zh' ? '快速記帳與筆記' : 'Quick action');
@@ -1997,7 +2028,7 @@ export default function App() {
           trip={currentTrip}
           userId={currentUser?.uid}
           currentUser={currentUser}
-          onRequireAuth={() => requireAuth(() => {}, lang === 'zh' ? '建立分享連結' : 'Create share link')}
+          onRequireAuth={() => runWithAuth(() => {}, lang === 'zh' ? '建立分享連結' : 'Create share link')}
           onUpdateTrip={handleUpdateTrip}
           lang={lang}
           onClose={() => setShowShareModal(false)}
@@ -2009,7 +2040,7 @@ export default function App() {
           trip={currentTrip}
           currentUser={currentUser}
           lang={lang}
-          onRequireAuth={() => requireAuth(() => {}, lang === 'zh' ? '建立共編連結' : 'Create collaboration link')}
+          onRequireAuth={() => runWithAuth(() => {}, lang === 'zh' ? '建立共編連結' : 'Create collaboration link')}
           onUpdateTrip={handleUpdateTrip}
           onClose={() => setShowCollabModal(false)}
         />
@@ -2070,7 +2101,7 @@ export default function App() {
           requireAuth={requireAuth}
           onCreateMemoryTrip={() => {
             setShowGlobalHubModal(false);
-            requireAuth(() => {
+            runWithAuth(() => {
               setTripModalData(null);
               setTripModalInitialMode('memory');
               setShowTripModal(true);
@@ -2132,7 +2163,7 @@ export default function App() {
           {showFabNote && (
             <button
               onClick={() => {
-                requireAuth(() => {
+                runWithAuth(() => {
                   setShowFabNote(false);
                   setQuickActionTab('todos');
                   setShowQuickActionModal(true);
@@ -2148,7 +2179,7 @@ export default function App() {
           {/* Primary Circular Expense FAB */}
           <button
             onClick={() => {
-              requireAuth(() => {
+              runWithAuth(() => {
                 setQuickActionTab('expense');
                 setShowQuickActionModal(true);
               }, lang === 'zh' ? '快速記帳' : 'Quick expense');
