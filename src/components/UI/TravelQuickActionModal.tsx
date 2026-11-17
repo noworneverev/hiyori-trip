@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { Trip, ExpenseItem, TodoItem } from '../../types/itinerary';
+import { Trip, ExpenseItem } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { getTodayLocal } from '../../utils/date';
 import { compressImageFile, resolveMediaSrc, storeImageAsMediaRef, extractMediaId, isMediaRef } from '../../utils/image';
 import { idbDeleteMedia } from '../../utils/indexedDb';
 import { MediaImage } from './MediaImage';
-import { SwipeableActionRow } from './SwipeableExpenseRow';
 import { convertAmount, detectTripCurrency } from '../../utils/currency';
 import {
   TiantianExpenseEditor,
@@ -14,17 +13,11 @@ import {
   parseExpenseDescription,
 } from '../Expenses/TiantianExpenseEditor';
 import { resolveExpenseCategoryMeta } from '../Expenses/expenseMeta';
+import { RemindersTodoList } from '../Todos/RemindersTodoList';
 import {
   X,
   DollarSign,
-  Plus,
-  Trash2,
-  Check,
   CheckSquare,
-  Edit2,
-  Calendar,
-  ChevronDown,
-  ChevronUp,
 } from 'lucide-react';
 
 interface TravelQuickActionModalProps {
@@ -216,122 +209,8 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     }
   };
 
-  // --- 2. Synced Trip Todos States & Handlers (Simple Inline Add + Click Row to Edit) ---
-  const [newTodoTitle, setNewTodoTitle] = useState('');
-  const [newTodoDueDate, setNewTodoDueDate] = useState('');
-  const [showTodoDatePicker, setShowTodoDatePicker] = useState(false);
-  const [showCompletedTodos, setShowCompletedTodos] = useState(false);
-  const [editingTodoId, setEditingTodoId] = useState<string | null>(null);
-  const [editTodoTitle, setEditTodoTitle] = useState('');
-  const [editTodoDueDate, setEditTodoDueDate] = useState('');
-  const [openTodoSwipeId, setOpenTodoSwipeId] = useState<string | null>(null);
-
-  const todos = trip.todos || [];
-  const pendingTodos = todos.filter((t) => !t.completed);
-  const completedTodos = todos.filter((t) => t.completed);
-
-  const handleAddTodo = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!canEdit) {
-      onShowToast?.('目前為僅檢視權限');
-      return;
-    }
-    const title = newTodoTitle.trim();
-    if (!title) return;
-
-    const newTodo: TodoItem = {
-      id: `todo-${Date.now()}`,
-      title,
-      category: 'other',
-      completed: false,
-      dueDate: newTodoDueDate || undefined,
-    };
-
-    onUpdateTrip({
-      ...trip,
-      todos: [newTodo, ...todos],
-      updatedAt: Date.now(),
-    });
-    setNewTodoTitle('');
-    setNewTodoDueDate('');
-    setShowTodoDatePicker(false);
-    onShowToast?.('已新增待辦事項！');
-  };
-
-  const handleStartEditTodo = (todo: TodoItem) => {
-    if (!canEdit) return;
-    setOpenTodoSwipeId(null);
-    setEditingTodoId(todo.id);
-    setEditTodoTitle(todo.title);
-    setEditTodoDueDate(todo.dueDate || '');
-  };
-
-  const handleSaveEditTodo = () => {
-    if (!canEdit || !editingTodoId) return;
-    const trimmed = editTodoTitle.trim();
-    if (!trimmed) return;
-    const updated = todos.map((t) =>
-      t.id === editingTodoId
-        ? { ...t, title: trimmed, dueDate: editTodoDueDate || undefined }
-        : t
-    );
-    onUpdateTrip({
-      ...trip,
-      todos: updated,
-      updatedAt: Date.now(),
-    });
-    setEditingTodoId(null);
-    onShowToast?.('已更新待辦事項');
-  };
-
-  const handleToggleTodo = (id: string) => {
-    if (!canEdit) return;
-    const updated = todos.map((t) =>
-      t.id === id ? { ...t, completed: !t.completed } : t
-    );
-    onUpdateTrip({
-      ...trip,
-      todos: updated,
-      updatedAt: Date.now(),
-    });
-    if (editingTodoId === id) setEditingTodoId(null);
-  };
-
-  const handleDeleteTodo = (id: string) => {
-    if (!canEdit) return;
-    const updated = todos.filter((t) => t.id !== id);
-    onUpdateTrip({
-      ...trip,
-      todos: updated,
-      deletedItemIds: {
-        ...(trip.deletedItemIds || {}),
-        [id]: Date.now(),
-      },
-      updatedAt: Date.now(),
-    });
-    if (editingTodoId === id) setEditingTodoId(null);
-    onShowToast?.('已刪除待辦事項');
-  };
-
-  const handleClearCompletedTodos = () => {
-    if (!canEdit) return;
-    const now = Date.now();
-    const removedIds: Record<string, number> = {};
-    todos.filter((t) => t.completed).forEach((t) => {
-      removedIds[t.id] = now;
-    });
-    const remaining = todos.filter((t) => !t.completed);
-    onUpdateTrip({
-      ...trip,
-      todos: remaining,
-      deletedItemIds: {
-        ...(trip.deletedItemIds || {}),
-        ...removedIds,
-      },
-      updatedAt: now,
-    });
-    onShowToast?.('已清除所有已完成項目');
-  };
+  // --- 2. Synced Trip Todos Count for Tab Badge ---
+  const pendingTodos = (trip.todos || []).filter((t) => !t.completed);
 
   const handleDownloadLightboxImage = async () => {
     if (!previewImage) return;
@@ -362,61 +241,6 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [previewImage]);
-
-  const renderInlineTodoEditRow = (todo: TodoItem) => (
-    <div key={todo.id} className="p-3 sm:p-3.5 bg-teal-50/45 dark:bg-teal-950/20 space-y-2.5">
-      <input
-        type="text"
-        value={editTodoTitle}
-        onChange={(e) => setEditTodoTitle(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            handleSaveEditTodo();
-          } else if (e.key === 'Escape') {
-            setEditingTodoId(null);
-          }
-        }}
-        autoFocus
-        placeholder="待辦名稱..."
-        className="w-full min-h-[40px] px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-teal-600/70 dark:border-teal-500/70 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-teal-500"
-      />
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <input
-          type="date"
-          value={editTodoDueDate}
-          onChange={(e) => setEditTodoDueDate(e.target.value)}
-          className="min-h-[44px] sm:min-h-[34px] px-2.5 py-1 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-mono tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-teal-500"
-        />
-        <div className="flex items-center gap-1.5 ml-auto">
-          <button
-            type="button"
-            onClick={() => handleDeleteTodo(todo.id)}
-            className="min-h-[44px] sm:min-h-[34px] px-2.5 py-1 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer flex items-center gap-1"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>刪除</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setEditingTodoId(null)}
-            className="min-h-[44px] sm:min-h-[34px] px-3 py-1 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={handleSaveEditTodo}
-            disabled={!editTodoTitle.trim()}
-            className="min-h-[44px] sm:min-h-[34px] px-3.5 py-1 rounded-xl bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
-          >
-            <Check className="w-3.5 h-3.5" />
-            <span>儲存</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 
   return (
     <div
@@ -499,242 +323,17 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
           />
         )}
 
-        {/* ================= TAB 2: SIMPLE INLINE TRIP TODOS ================= */}
+        {/* ================= TAB 2: iPHONE REMINDERS-STYLE TRIP TODOS ================= */}
         {activeTab === 'todos' && (
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden max-w-full">
-            {/* Inline Quick Add Form */}
-            <form
-              onSubmit={handleAddTodo}
-              className="p-3.5 sm:p-4 bg-[#FAF9F6] dark:bg-slate-900/50 border-b border-[#E5E2DC] dark:border-slate-800 shrink-0 space-y-2.5"
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-5 h-5 rounded-full border border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center shrink-0">
-                  <Plus className="w-3 h-3 text-slate-400 dark:text-slate-500" />
-                </div>
-                <input
-                  type="text"
-                  value={newTodoTitle}
-                  onChange={(e) => setNewTodoTitle(e.target.value)}
-                  placeholder="新增待辦，或點擊下方項目直接編輯..."
-                  className="flex-1 min-h-[38px] bg-transparent text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowTodoDatePicker(!showTodoDatePicker)}
-                  className={`min-w-[38px] min-h-[38px] rounded-xl border transition cursor-pointer flex items-center justify-center ${
-                    showTodoDatePicker || newTodoDueDate
-                      ? 'bg-teal-50 dark:bg-teal-950/60 border-teal-500 text-teal-700 dark:text-teal-300'
-                      : 'border-[#E5E2DC] dark:border-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'
-                  }`}
-                  title="設定到期日"
-                >
-                  <Calendar className="w-4 h-4" />
-                </button>
-                <button
-                  type="submit"
-                  disabled={!newTodoTitle.trim()}
-                  className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-600 disabled:opacity-40 text-white text-xs font-bold transition shadow-xs cursor-pointer shrink-0"
-                >
-                  新增
-                </button>
-              </div>
-
-              {showTodoDatePicker && (
-                <div className="flex items-center gap-2 pt-1 animate-in fade-in duration-150">
-                  <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 shrink-0">
-                    預計日期：
-                  </span>
-                  <input
-                    type="date"
-                    value={newTodoDueDate}
-                    onChange={(e) => setNewTodoDueDate(e.target.value)}
-                    className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white text-xs font-mono focus:outline-hidden focus:ring-1 focus:ring-teal-500"
-                  />
-                  {newTodoDueDate && (
-                    <button
-                      type="button"
-                      onClick={() => setNewTodoDueDate('')}
-                      className="text-[11px] text-slate-400 hover:text-rose-500 transition cursor-pointer"
-                    >
-                      清除
-                    </button>
-                  )}
-                </div>
-              )}
-            </form>
-
-            {/* Todos List Container */}
-            <div className="flex-1 overflow-y-auto overflow-x-hidden p-3.5 sm:p-4 space-y-3 touch-pan-y max-w-full">
-              {pendingTodos.length === 0 ? (
-                <div className="py-12 text-center px-4">
-                  <div className="w-12 h-12 rounded-full bg-teal-50 dark:bg-teal-950/60 text-teal-600 dark:text-teal-400 flex items-center justify-center mx-auto mb-3">
-                    <Check className="w-6 h-6 stroke-[2.5]" />
-                  </div>
-                  <p className="text-sm font-medium text-slate-700 dark:text-zinc-300">
-                    目前沒有未完成的待辦事項！
-                  </p>
-                  <p className="text-xs text-slate-400 dark:text-zinc-500 mt-1">
-                    於上方快速輸入，或點擊任何列即可行內編輯
-                  </p>
-                </div>
-              ) : (
-                <div className="divide-y divide-[#E5E2DC]/80 dark:divide-slate-800 rounded-2xl bg-white dark:bg-slate-800/70 border border-[#E5E2DC] dark:border-slate-700/80 overflow-hidden shadow-2xs">
-                  {pendingTodos.map((todo) => {
-                    if (editingTodoId === todo.id) {
-                      return renderInlineTodoEditRow(todo);
-                    }
-
-                    return (
-                      <SwipeableActionRow
-                        key={todo.id}
-                        id={todo.id}
-                        isOpen={openTodoSwipeId === todo.id}
-                        canEdit={canEdit}
-                        onOpenChange={setOpenTodoSwipeId}
-                        onRowClick={canEdit ? () => handleStartEditTodo(todo) : undefined}
-                        onEdit={() => handleStartEditTodo(todo)}
-                        onDelete={() => handleDeleteTodo(todo.id)}
-                        className={`flex items-center justify-between p-3 sm:p-3.5 md:hover:bg-[#FAF9F6] md:dark:hover:bg-white/5 transition group ${
-                          canEdit ? 'cursor-pointer' : ''
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleToggleTodo(todo.id);
-                            }}
-                            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] -ml-1.5 flex items-center justify-center rounded-xl transition cursor-pointer shrink-0 group/qchk"
-                            title="標記完成"
-                            aria-label="標記完成"
-                          >
-                            <span className="w-5 h-5 rounded-full border-2 border-slate-300 dark:border-slate-600 group-hover/qchk:border-teal-500 dark:group-hover/qchk:border-teal-400 flex items-center justify-center transition">
-                              {todo.completed && <Check className="w-3 h-3 text-teal-600" />}
-                            </span>
-                          </button>
-
-                          <div className="min-w-0 flex-1 text-left">
-                            <span className="text-xs sm:text-sm text-slate-900 dark:text-zinc-100 font-medium block leading-snug break-words">
-                              {todo.title}
-                            </span>
-                            {todo.dueDate && (
-                              <div className="flex items-center gap-1.5 text-slate-500 dark:text-zinc-400 font-mono tabular-nums text-[11px] mt-1">
-                                <Calendar className="w-3 h-3 text-slate-400" />
-                                <span>{todo.dueDate}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {canEdit && (
-                          <div
-                            className="hidden md:flex items-center gap-0.5 ml-1 shrink-0"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => handleStartEditTodo(todo)}
-                              className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-600 dark:text-zinc-500 dark:hover:text-teal-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
-                              title="編輯"
-                              aria-label="編輯待辦"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteTodo(todo.id)}
-                              className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-500 dark:text-zinc-500 dark:hover:text-rose-400 transition cursor-pointer opacity-70 group-hover:opacity-100"
-                              title="刪除"
-                              aria-label="刪除待辦"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        )}
-                      </SwipeableActionRow>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Completed Todos Accordion */}
-              {completedTodos.length > 0 && (
-                <div className="rounded-2xl border border-[#E5E2DC] dark:border-slate-800 overflow-hidden bg-[#FAF9F6] dark:bg-slate-900/40">
-                  <div className="px-3.5 py-2.5 flex items-center justify-between">
-                    <button
-                      type="button"
-                      onClick={() => setShowCompletedTodos(!showCompletedTodos)}
-                      className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-zinc-200 transition cursor-pointer select-none"
-                    >
-                      {showCompletedTodos ? (
-                        <ChevronUp className="w-3.5 h-3.5" />
-                      ) : (
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      )}
-                      <span>已完成項目 ({completedTodos.length})</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleClearCompletedTodos}
-                      className="text-[11px] text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 font-semibold transition cursor-pointer"
-                    >
-                      全部清除
-                    </button>
-                  </div>
-
-                  {showCompletedTodos && (
-                    <div className="divide-y divide-[#E5E2DC]/60 dark:divide-slate-800/60 border-t border-[#E5E2DC]/80 dark:border-slate-800 px-2 py-1">
-                      {completedTodos.map((todo) => {
-                        if (editingTodoId === todo.id) {
-                          return renderInlineTodoEditRow(todo);
-                        }
-                        return (
-                          <div
-                            key={todo.id}
-                            onClick={() => canEdit && handleStartEditTodo(todo)}
-                            className={`flex items-center justify-between p-2.5 rounded-xl hover:bg-slate-100/50 dark:hover:bg-slate-800/40 transition group opacity-75 ${
-                              canEdit ? 'cursor-pointer' : ''
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 min-w-0 flex-1">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleToggleTodo(todo.id);
-                                }}
-                                className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] -ml-1.5 flex items-center justify-center rounded-xl shrink-0 cursor-pointer"
-                                title="恢復待辦"
-                                aria-label="恢復待辦"
-                              >
-                                <span className="w-5 h-5 rounded-full bg-teal-600 dark:bg-teal-500 text-white flex items-center justify-center shadow-xs">
-                                  <Check className="w-3 h-3 stroke-[2.5]" />
-                                </span>
-                              </button>
-                              <span className="text-xs sm:text-sm line-through text-slate-400 dark:text-zinc-500 truncate flex-1">
-                                {todo.title}
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteTodo(todo.id);
-                              }}
-                              className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center text-slate-400 hover:text-rose-500 dark:text-zinc-500 dark:hover:text-rose-400 transition cursor-pointer opacity-80 sm:opacity-0 sm:group-hover:opacity-100"
-                              title="刪除"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+          <div className="flex-1 overflow-y-auto overflow-x-hidden touch-pan-y pb-[env(safe-area-inset-bottom,0px)]">
+            <RemindersTodoList
+              trip={trip}
+              lang={lang}
+              canEdit={canEdit}
+              onUpdateTrip={onUpdateTrip}
+              onShowToast={onShowToast}
+              compact={true}
+            />
           </div>
         )}
       </div>

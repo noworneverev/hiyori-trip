@@ -75,6 +75,15 @@ h1, h2, h3 {
   text-wrap: balance;
 }
 
+/* Prevent iOS Safari / mobile PWA auto-zoom when focusing inputs (< 16px triggers zoom) */
+@media (max-width: 767px), (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="hidden"]):not(.text-lg):not(.text-xl):not(.text-2xl):not(.text-3xl):not(.text-4xl),
+  textarea:not(.text-lg):not(.text-xl):not(.text-2xl),
+  select:not(.text-lg):not(.text-xl):not(.text-2xl) {
+    font-size: max(16px, 1rem);
+  }
+}
+
 /* Cross-browser scrollbar hiding utility (eliminates jitter and unwanted horizontal scrollbars) */
 .scrollbar-none::-webkit-scrollbar,
 .no-scrollbar::-webkit-scrollbar {
