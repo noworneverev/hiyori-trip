@@ -2,9 +2,9 @@ import React, { useState, useMemo } from 'react';
 import { Trip } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { PackingTab } from './PackingTab';
-import { MemoTab } from './MemoTab';
+import { LuggagePackingList } from '../Todos/LuggagePackingList';
 import { BookingVaultView } from '../Vault/BookingVaultView';
-import { CheckSquare, ShieldAlert, Ticket } from 'lucide-react';
+import { CheckSquare, Luggage, Ticket } from 'lucide-react';
 
 interface NotesAndPrepTabProps {
   trip: Trip;
@@ -23,13 +23,24 @@ export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
   requireAuth,
   onJumpToDay,
 }) => {
-  const [subTab, setSubTab] = useState<'checklist' | 'bookings' | 'memo'>('checklist');
+  const [subTab, setSubTab] = useState<'checklist' | 'packing' | 'bookings'>('checklist');
   const isZh = lang === 'zh' || lang === 'zh-CN';
+
+  const pendingTodosCount = useMemo(
+    () => (trip.todos || []).filter((t) => !t.completed).length,
+    [trip.todos]
+  );
+
+  const pendingPackingCount = useMemo(
+    () => (trip.packingList || []).filter((p) => !p.packed).length,
+    [trip.packingList]
+  );
 
   const totalBookingCount = useMemo(() => {
     const standalone = (trip.bookings || []).length;
     const inDays = (trip.days || []).reduce(
-      (sum, d) => sum + (d.items || []).filter((it) => Boolean(it.bookingCode && it.bookingCode.trim())).length,
+      (sum, d) =>
+        sum + (d.items || []).filter((it) => Boolean(it.bookingCode && it.bookingCode.trim())).length,
       0
     );
     return standalone + inDays;
@@ -37,7 +48,7 @@ export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
 
   return (
     <div className="space-y-5">
-      {/* Unified Sub-tab Switcher */}
+      {/* Unified Sub-tab Switcher: 待辦事項 / 行李打包 / 訂位憑證 */}
       <div>
         <div className="inline-flex w-full sm:w-auto p-1 rounded-2xl bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 gap-1 overflow-x-auto scrollbar-none">
           <button
@@ -50,7 +61,30 @@ export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
             }`}
           >
             <CheckSquare className="w-3.5 h-3.5" />
-            <span>{isZh ? '待辦與行李' : 'Checklist & Packing'}</span>
+            <span>{isZh ? '待辦事項' : 'To-Dos'}</span>
+            {pendingTodosCount > 0 && (
+              <span className="font-mono tabular-nums text-[11px] opacity-80">
+                {pendingTodosCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSubTab('packing')}
+            className={`flex-1 sm:flex-initial min-h-[44px] sm:min-h-[38px] px-3.5 sm:px-4 py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition whitespace-nowrap shrink-0 cursor-pointer ${
+              subTab === 'packing'
+                ? 'bg-white dark:bg-slate-800 text-teal-700 dark:text-teal-300 shadow-2xs border border-[#E5E2DC]/60 dark:border-slate-700'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+            }`}
+          >
+            <Luggage className="w-3.5 h-3.5" />
+            <span>{isZh ? '行李打包' : 'Packing'}</span>
+            {pendingPackingCount > 0 && (
+              <span className="font-mono tabular-nums text-[11px] opacity-80">
+                {pendingPackingCount}
+              </span>
+            )}
           </button>
 
           <button
@@ -70,25 +104,26 @@ export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
               </span>
             )}
           </button>
-
-          <button
-            type="button"
-            onClick={() => setSubTab('memo')}
-            className={`flex-1 sm:flex-initial min-h-[44px] sm:min-h-[38px] px-3.5 sm:px-4 py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition whitespace-nowrap shrink-0 cursor-pointer ${
-              subTab === 'memo'
-                ? 'bg-white dark:bg-slate-800 text-teal-700 dark:text-teal-300 shadow-2xs border border-[#E5E2DC]/60 dark:border-slate-700'
-                : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>{isZh ? '筆記與急救' : 'Notes & SOS'}</span>
-          </button>
         </div>
       </div>
 
       {subTab === 'checklist' ? (
-        <PackingTab trip={trip} lang={lang} canEdit={canEdit} onUpdateTrip={onUpdateTrip} requireAuth={requireAuth} />
-      ) : subTab === 'bookings' ? (
+        <PackingTab
+          trip={trip}
+          lang={lang}
+          canEdit={canEdit}
+          onUpdateTrip={onUpdateTrip}
+          requireAuth={requireAuth}
+        />
+      ) : subTab === 'packing' ? (
+        <LuggagePackingList
+          trip={trip}
+          lang={lang}
+          canEdit={canEdit}
+          onUpdateTrip={onUpdateTrip}
+          requireAuth={requireAuth}
+        />
+      ) : (
         <BookingVaultView
           trip={trip}
           lang={lang}
@@ -97,10 +132,7 @@ export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
           requireAuth={requireAuth}
           onJumpToDay={onJumpToDay}
         />
-      ) : (
-        <MemoTab trip={trip} lang={lang} canEdit={canEdit} onUpdateTrip={onUpdateTrip} requireAuth={requireAuth} />
       )}
     </div>
   );
 };
-

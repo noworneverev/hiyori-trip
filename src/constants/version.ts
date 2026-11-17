@@ -2,14 +2,14 @@
  * Application Version and Release Metadata
  * Displayed across the App Menu, Settings, and Update Engine
  */
-export const APP_VERSION = 'v1.9.2';
+export const APP_VERSION = 'v1.9.3';
 export const BUILD_DATE = '2026.11.17';
-export const BUILD_ID = `build-${BUILD_DATE.replace(/\./g, '')}-v192`;
+export const BUILD_ID = `build-${BUILD_DATE.replace(/\./g, '')}-v193`;
 
 export const RELEASE_HIGHLIGHTS = [
-  '待辦事項 iPhone「提醒事項」原生級體驗：點擊文字直接無邊框原位編輯、離開即自動儲存；右側 (i) 資訊按鈕可開啟 iOS 風格詳細資訊設定日期與備註',
-  '全站手機版輸入防自動放大：統一調整觸控裝置輸入框與選單字級，徹底杜絕 iOS Safari / PWA 點擊輸入時畫面自動 Zoom In',
-  '記帳編輯畫面極簡淨化：移除快速加額按鍵與冗餘描述標題，改為單一純淨文字輸入框並無損兼容既有備註',
-  '全站手機版安全邊界 (Safe-Area) 全面修復：確保各類彈窗於手機全螢幕與 PWA 模式下不與頂部時間、電量重疊',
-  '記帳可收合月曆切換日期與天天記帳式排版：支援前後日切換、點擊挑選類別／帳戶／成員／標籤與「再記一筆」連續記帳',
+  '清單分頁重整與行李打包獨立分頁：移除「筆記與急救」分頁，改為「待辦事項／行李打包／訂位憑證」三大直覺分頁並消除卡片內多餘按鈕',
+  '行李打包同步升級 iPhone「提醒事項」編輯體驗：支援無邊框原位編輯自動儲存、左滑刪除，及右側 (i) 資訊視窗一鍵切換行李分類',
+  '修復 (i) 詳細資訊視窗背景滑動穿透：透過頂層 Portal 掛載與防背景滾動鎖定，徹底消除開啟詳情彈窗時背後畫面仍可滑動的問題',
+  '待辦事項 iPhone「提醒事項」原生級體驗與全站手機防 Zoom In：點擊文字即刻無邊框編輯，離開自動儲存並杜絕輸入自動放大',
+  '記帳編輯畫面極簡淨化與安全邊界 (Safe-Area) 修復：單一純淨文字輸入框、可收合月曆切換與完整頂部／底部安全區適配',
 ];

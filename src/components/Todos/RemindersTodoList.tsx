@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Plus,
   Check,
@@ -13,6 +14,7 @@ import { Trip, TodoItem } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { getTodayLocal } from '../../utils/date';
 import { SwipeableActionRow } from '../UI/SwipeableExpenseRow';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 
 interface RemindersTodoListProps {
   trip: Trip;
@@ -33,7 +35,7 @@ interface AutoGrowTitleInputProps {
   onCommit: (nextTitle: string) => void;
 }
 
-const AutoGrowTitleInput: React.FC<AutoGrowTitleInputProps> = ({
+export const AutoGrowTitleInput: React.FC<AutoGrowTitleInputProps> = ({
   value,
   disabled = false,
   completed = false,
@@ -154,7 +156,9 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
   const [detailDueDate, setDetailDueDate] = useState('');
 
   const newInputRef = useRef<HTMLInputElement | null>(null);
-  const isZh = lang === 'zh';
+  const isZh = lang === 'zh' || lang === 'zh-CN';
+
+  useBodyScrollLock(Boolean(detailTodo));
 
   useEffect(() => {
     if (!detailTodo) return;
@@ -507,42 +511,44 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
         </div>
       )}
 
-      {/* iPhone Reminders-style "(i)" Details Sheet Modal */}
-      {detailTodo && (
-        <div
-          className="fixed inset-0 z-70 flex items-end sm:items-center justify-center pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-4 bg-black/55 backdrop-blur-xs animate-in fade-in duration-150"
-          onClick={() => setDetailTodo(null)}
-          role="dialog"
-          aria-modal="true"
-          aria-label={isZh ? '詳細資訊' : 'Details'}
-        >
+      {/* iPhone Reminders-style "(i)" Details Sheet Modal (Portaled & Scroll-Locked) */}
+      {detailTodo &&
+        typeof document !== 'undefined' &&
+        createPortal(
           <div
-            className="w-full sm:max-w-md rounded-t-[24px] sm:rounded-3xl bg-[#F2F2F7] dark:bg-[#1C1C1E] border-t sm:border border-[#E5E2DC] dark:border-slate-800 shadow-2xl max-h-full sm:max-h-[85dvh] pb-[env(safe-area-inset-bottom,0px)] sm:pb-0 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-80 flex items-end sm:items-center justify-center pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-4 bg-black/55 backdrop-blur-xs touch-none overscroll-none animate-in fade-in duration-150"
+            onClick={() => setDetailTodo(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-label={isZh ? '詳細資訊' : 'Details'}
           >
-            {/* iOS Navigation Bar Header */}
-            <div className="px-4 py-3 border-b border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-[#2C2C2E]/90 backdrop-blur-md flex items-center justify-between shrink-0">
-              <button
-                type="button"
-                onClick={() => setDetailTodo(null)}
-                className="min-h-[44px] sm:min-h-[36px] px-2 text-base sm:text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white cursor-pointer"
-              >
-                {isZh ? '取消' : 'Cancel'}
-              </button>
-              <h4 className="font-bold text-base text-slate-900 dark:text-white">
-                {isZh ? '詳細資訊' : 'Details'}
-              </h4>
-              <button
-                type="button"
-                onClick={handleSaveDetails}
-                className="min-h-[44px] sm:min-h-[36px] px-2 text-base sm:text-sm font-bold text-teal-700 dark:text-teal-400 hover:text-teal-800 dark:hover:text-teal-300 cursor-pointer"
-              >
-                {isZh ? '完成' : 'Done'}
-              </button>
-            </div>
+            <div
+              className="w-full sm:max-w-md rounded-t-[24px] sm:rounded-3xl bg-[#F2F2F7] dark:bg-[#1C1C1E] border-t sm:border border-[#E5E2DC] dark:border-slate-800 shadow-2xl max-h-full sm:max-h-[85dvh] pb-[env(safe-area-inset-bottom,0px)] sm:pb-0 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* iOS Navigation Bar Header */}
+              <div className="px-4 py-3 border-b border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-[#2C2C2E]/90 backdrop-blur-md flex items-center justify-between shrink-0 touch-none">
+                <button
+                  type="button"
+                  onClick={() => setDetailTodo(null)}
+                  className="min-h-[44px] sm:min-h-[36px] px-2 text-base sm:text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                >
+                  {isZh ? '取消' : 'Cancel'}
+                </button>
+                <h4 className="font-bold text-base text-slate-900 dark:text-white">
+                  {isZh ? '詳細資訊' : 'Details'}
+                </h4>
+                <button
+                  type="button"
+                  onClick={handleSaveDetails}
+                  className="min-h-[44px] sm:min-h-[36px] px-2 text-base sm:text-sm font-bold text-teal-700 dark:text-teal-400 hover:text-teal-800 dark:hover:text-teal-300 cursor-pointer"
+                >
+                  {isZh ? '完成' : 'Done'}
+                </button>
+              </div>
 
-            {/* iOS Inset Grouped Sections */}
-            <div className="p-4 space-y-4 overflow-y-auto flex-1">
+              {/* iOS Inset Grouped Sections */}
+              <div className="p-4 space-y-4 overflow-y-auto overscroll-contain touch-pan-y flex-1">
               {/* Group 1: Title & Notes */}
               <div className="rounded-2xl bg-white dark:bg-[#2C2C2E] divide-y divide-slate-100 dark:divide-slate-700/60 overflow-hidden shadow-2xs">
                 <div className="px-4 py-2.5">
@@ -657,21 +663,22 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
                 )}
               </div>
 
-              {/* Group 3: Explicit Delete Row */}
-              <div className="rounded-2xl bg-white dark:bg-[#2C2C2E] overflow-hidden shadow-2xs">
-                <button
-                  type="button"
-                  onClick={() => handleDeleteTodo(detailTodo.id)}
-                  className="w-full min-h-[48px] px-4 py-3 text-rose-600 dark:text-rose-400 hover:bg-rose-50/70 dark:hover:bg-rose-950/30 font-semibold text-base sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  <span>{isZh ? '刪除提醒事項' : 'Delete Reminder'}</span>
-                </button>
+                {/* Group 3: Explicit Delete Row */}
+                <div className="rounded-2xl bg-white dark:bg-[#2C2C2E] overflow-hidden shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteTodo(detailTodo.id)}
+                    className="w-full min-h-[48px] px-4 py-3 text-rose-600 dark:text-rose-400 hover:bg-rose-50/70 dark:hover:bg-rose-950/30 font-semibold text-base sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>{isZh ? '刪除提醒事項' : 'Delete Reminder'}</span>
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };
