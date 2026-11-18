@@ -129,6 +129,13 @@ export async function flushPendingSyncQueue(
   let successCount = 0;
   let failedCount = 0;
 
+  const deletedIds = new Set(getDeletedTripIds());
+  const queuedDeleteIds = new Set(
+    queue
+      .filter((q) => q.type === 'delete_trip' && q.userId === activeUserId && q.tripId)
+      .map((q) => q.tripId as string)
+  );
+
   for (const item of queue) {
     // Keep another user's queued operations untouched until that account signs in
     if ((item.type === 'save_trip' || item.type === 'delete_trip') && item.userId !== activeUserId) {
@@ -143,12 +150,19 @@ export async function flushPendingSyncQueue(
 
     try {
       if (item.type === 'save_trip' && item.userId && item.trip) {
+        if (deletedIds.has(item.trip.id) || queuedDeleteIds.has(item.trip.id)) {
+          // Drop stale save tasks for trips that were deleted
+          continue;
+        }
         await saveTripToCloud(item.userId, item.trip);
         successCount++;
       } else if (item.type === 'delete_trip' && item.userId && item.tripId) {
         await deleteTripFromCloud(item.userId, item.tripId);
         successCount++;
       } else if (item.type === 'sync_collab' && item.collabId && item.trip) {
+        if (deletedIds.has(item.trip.id) || queuedDeleteIds.has(item.trip.id)) {
+          continue;
+        }
         await syncCollaborativeTrip(item.collabId, item.trip, item.editorName);
         successCount++;
       }
@@ -484,10 +498,11 @@ export function mergeTrips(
   const mergedMap = new Map<string, Trip>();
   const localDeletedIds = new Set(getDeletedTripIds());
 
+  const TOMBSTONE_CLOCK_SKEW_MS = 15 * 60 * 1000;
   const isTombstoned = (tripId: string, updatedAt = 0) => {
     if (localDeletedIds.has(tripId)) return true;
     const cloudDeletedAt = cloudTombstones[tripId];
-    return typeof cloudDeletedAt === 'number' && cloudDeletedAt >= updatedAt;
+    return typeof cloudDeletedAt === 'number' && cloudDeletedAt + TOMBSTONE_CLOCK_SKEW_MS >= updatedAt;
   };
 
   const validCloudTrips = (cloudTrips || []).filter((c) => !isTombstoned(c.id, c.updatedAt || 0));
@@ -507,8 +522,8 @@ export function mergeTrips(
     const existing = mergedMap.get(lTrip.id);
     if (!existing) {
       // If trip was previously synced to cloud and is now missing from authoritative server list,
-      // it was deleted on another device — do NOT resurrect it!
-      if (isServerAuthoritative && lTrip.lastSyncedAt && !lTrip.id.startsWith('preset-')) {
+      // it was deleted on another device — purge stale cache (including synced presets) instead of resurrecting!
+      if (isServerAuthoritative && lTrip.lastSyncedAt) {
         deletedLocalTripIds.push(lTrip.id);
         continue;
       }

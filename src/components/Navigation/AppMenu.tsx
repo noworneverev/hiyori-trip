@@ -1,9 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import { useIsMobileViewport } from '../../hooks/useIsMobileViewport';
 import { Language, TRANSLATIONS, LANGUAGE_OPTIONS } from '../../utils/i18n';
 import { performAppUpdate, UpdateState } from '../../utils/pwaUpdater';
 import { APP_VERSION, BUILD_DATE } from '../../constants/version';
-import { getSavedAccessibilityScale, applyAccessibilityScale, AccessibilityScale, ACCESSIBILITY_OPTIONS } from '../../utils/accessibility';
+import { getSavedAccessibilityScale, applyAccessibilityScale, AccessibilityScale } from '../../utils/accessibility';
 import { getStorageUsage, getStorageUsageAsync, resetAllLocalData } from '../../utils/storage';
 import {
   Menu,
@@ -41,6 +43,7 @@ interface AppMenuProps {
   onOpenShareTrip?: () => void;
   onOpenCollaborate?: () => void;
   onResetData?: () => void;
+  onOpenChange?: (isOpen: boolean) => void;
 }
 
 export const AppMenu: React.FC<AppMenuProps> = ({
@@ -53,8 +56,10 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   onOpenShareTrip,
   onOpenCollaborate,
   onResetData,
+  onOpenChange,
 }) => {
   const { isInstallable, install } = usePWAInstall();
+  const isMobile = useIsMobileViewport();
   const [isOpen, setIsOpen] = useState(false);
   const [showLangSubmenu, setShowLangSubmenu] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -62,6 +67,10 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle' });
   const [scale, setScale] = useState<AccessibilityScale>(getSavedAccessibilityScale);
   const [storageInfo, setStorageInfo] = useState(getStorageUsage);
+
+  useEffect(() => {
+    onOpenChange?.(isOpen);
+  }, [isOpen, onOpenChange]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -74,8 +83,9 @@ export const AppMenu: React.FC<AppMenuProps> = ({
     };
   }, [isOpen]);
 
-  useBodyScrollLock(updateState.status === 'checking' || updateState.status === 'updating');
+  useBodyScrollLock(updateState.status === 'checking' || updateState.status === 'updating' || (isOpen && isMobile));
   const menuRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
   const t = TRANSLATIONS[lang];
 
   useEffect(() => {
@@ -94,7 +104,10 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   // Close menu on click/touch outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent | TouchEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inMenu = menuRef.current?.contains(target);
+      const inSheet = sheetRef.current?.contains(target);
+      if (!inMenu && !inSheet) {
         setIsOpen(false);
         setShowLangSubmenu(false);
       }
@@ -119,48 +132,50 @@ export const AppMenu: React.FC<AppMenuProps> = ({
 
   const currentLangOption = LANGUAGE_OPTIONS.find((l) => l.code === lang) || LANGUAGE_OPTIONS[0];
 
-  return (
-    <div className="relative" ref={menuRef}>
-      {/* Menu Trigger Button */}
-      <button
-        onClick={() => {
-          setIsOpen(!isOpen);
-          setShowLangSubmenu(false);
-        }}
-        className="w-10 h-10 sm:w-9 sm:h-9 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center transition active:scale-95 cursor-pointer"
-        title={lang === 'zh' ? '功能與設定' : 'Menu & Settings'}
-        aria-label="Menu"
-      >
-        {isOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-      </button>
+  const closeMenu = () => {
+    setIsOpen(false);
+    setShowLangSubmenu(false);
+  };
 
-      {/* Popover Menu */}
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-[calc(100vw-24px)] max-w-[316px] sm:w-[324px] max-h-[85vh] overflow-y-auto bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-2.5 z-50 animate-in fade-in zoom-in-95 duration-150 text-xs">
-          {/* Header Label (Zero-Pill) */}
-          <div className="px-3 py-2 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between">
-            <div>
-              <p className="font-bold text-slate-900 dark:text-slate-100">
-                {lang === 'zh' ? '功能與設定' : 'Menu & Settings'}
-              </p>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums mt-0.5">
-                日和手帳 Hiyori · {APP_VERSION}
-              </p>
-            </div>
+  const renderMenuInner = () => (
+    <>
+      {/* Header Label (Zero-Pill) */}
+      <div className="px-3 sm:px-3 py-2 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between shrink-0">
+        <div>
+          <p className="font-bold text-sm sm:text-xs text-slate-900 dark:text-slate-100">
+            {lang === 'zh' ? '功能與設定' : 'Menu & Settings'}
+          </p>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums mt-0.5">
+            日和手帳 Hiyori · {APP_VERSION}
+          </p>
+        </div>
 
-            {/* GitHub Link */}
-            <a
-              href="https://github.com/noworneverev/hiyori-trip"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-              title="GitHub Repository"
+        <div className="flex items-center gap-1">
+          {/* GitHub Link */}
+          <a
+            href="https://github.com/noworneverev/hiyori-trip"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+            title="GitHub Repository"
+          >
+            <Github className="w-4 h-4" />
+          </a>
+
+          {isMobile && (
+            <button
+              type="button"
+              onClick={closeMenu}
+              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              aria-label={lang === 'zh' ? '關閉' : 'Close'}
             >
-              <Github className="w-4 h-4" />
-            </a>
-          </div>
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+      </div>
 
-          <div className="py-1 space-y-2.5">
+      <div className="py-2 space-y-2.5 flex-1 overflow-y-auto overscroll-contain touch-pan-y px-1 sm:px-0">
             {/* Section 1: Display & Reading Preferences */}
             <div className="space-y-1">
               <p className="px-2 pt-1 text-[11px] font-bold text-slate-500 dark:text-slate-400">
@@ -502,7 +517,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           </div>
 
           {/* Footer note */}
-          <div className="px-3 py-2 border-t border-[#E5E2DC] dark:border-slate-800 text-[10px] text-slate-400 flex items-center justify-between">
+          <div className="px-3 py-2.5 border-t border-[#E5E2DC] dark:border-slate-800 text-[10px] text-slate-400 flex items-center justify-between shrink-0">
             <span className="flex items-center gap-1 text-teal-700 dark:text-teal-400 font-semibold">
               <ShieldCheck className="w-3 h-3" />
               {t.localPrivacy}
@@ -517,24 +532,67 @@ export const AppMenu: React.FC<AppMenuProps> = ({
               <ExternalLink className="w-2.5 h-2.5" />
             </a>
           </div>
+    </>
+  );
+
+  return (
+    <div className="relative" ref={menuRef}>
+      {/* Menu Trigger Button */}
+      <button
+        onClick={() => {
+          setIsOpen(!isOpen);
+          setShowLangSubmenu(false);
+        }}
+        className="w-10 h-10 sm:w-9 sm:h-9 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center transition active:scale-95 cursor-pointer"
+        title={lang === 'zh' ? '功能與設定' : 'Menu & Settings'}
+        aria-label="Menu"
+      >
+        {isOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+      </button>
+
+      {/* Mobile Bottom Sheet (Portaled & Scroll-Locked) */}
+      {isOpen && isMobile && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/50 backdrop-blur-[2px] touch-none overscroll-none animate-in fade-in duration-150"
+          onClick={closeMenu}
+        >
+          <div
+            ref={sheetRef}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-h-[86dvh] rounded-t-3xl bg-white dark:bg-[#111827] border-t border-[#E5E2DC] dark:border-slate-800 shadow-2xl flex flex-col px-3 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] animate-in slide-in-from-bottom duration-200 text-xs"
+          >
+            <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto my-2 shrink-0" />
+            {renderMenuInner()}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Desktop Popover Menu */}
+      {isOpen && !isMobile && (
+        <div className="absolute right-0 top-full mt-2 w-[324px] max-h-[82dvh] flex flex-col overflow-hidden bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-2.5 z-50 animate-in fade-in zoom-in-95 duration-150 text-xs">
+          {renderMenuInner()}
         </div>
       )}
 
       {/* Global App Update Transition Overlay */}
-      {(updateState.status === 'checking' || updateState.status === 'updating') && (
-        <div className="fixed inset-0 z-100 flex items-center justify-center bg-slate-950/70 backdrop-blur-xs px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150">
-          <div className="bg-white dark:bg-[#111827] rounded-3xl p-6 shadow-2xl border border-[#E5E2DC] dark:border-slate-800 flex flex-col items-center gap-3 text-center max-w-xs animate-in zoom-in-95 duration-150">
-            <div className="w-12 h-12 rounded-2xl bg-teal-50 dark:bg-teal-950/80 text-teal-700 dark:text-teal-400 flex items-center justify-center">
-              <RotateCcw className="w-6 h-6 animate-spin" />
+      {(updateState.status === 'checking' || updateState.status === 'updating') &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 backdrop-blur-xs touch-none overscroll-none px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150">
+            <div className="bg-white dark:bg-[#111827] rounded-3xl p-6 shadow-2xl border border-[#E5E2DC] dark:border-slate-800 flex flex-col items-center gap-3 text-center max-w-xs animate-in zoom-in-95 duration-150">
+              <div className="w-12 h-12 rounded-2xl bg-teal-50 dark:bg-teal-950/80 text-teal-700 dark:text-teal-400 flex items-center justify-center">
+                <RotateCcw className="w-6 h-6 animate-spin" />
+              </div>
+              <div>
+                <h4 className="font-bold text-sm text-slate-900 dark:text-white">
+                  {updateState.message || (lang === 'zh' ? '正在更新...' : 'Updating...')}
+                </h4>
+              </div>
             </div>
-            <div>
-              <h4 className="font-bold text-sm text-slate-900 dark:text-white">
-                {updateState.message || (lang === 'zh' ? '正在更新...' : 'Updating...')}
-              </h4>
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { getStorageUsage, getStorageUsageAsync, exportAllTripsToJSON } from '../../utils/storage';
-import { auth, loginWithGoogleDetailed, logoutFirebase, saveTripToCloud } from '../../utils/firebase';
+import { getStorageUsage, getStorageUsageAsync, exportAllTripsToJSON, getDeletedTripIds } from '../../utils/storage';
+import { auth, fetchUserTombstones, loginWithGoogleDetailed, logoutFirebase, saveTripToCloud } from '../../utils/firebase';
 import { Trip } from '../../types/itinerary';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -68,7 +69,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (!currentUser) return;
     setIsSyncing(true);
     try {
-      for (const trip of trips) {
+      const localDeletedIds = new Set(getDeletedTripIds());
+      const cloudTombstones = await fetchUserTombstones(currentUser.uid);
+      const TOMBSTONE_SKEW_MS = 15 * 60 * 1000;
+
+      const validTrips = trips.filter((trip) => {
+        if (localDeletedIds.has(trip.id)) return false;
+        const deletedAt = cloudTombstones[trip.id];
+        if (typeof deletedAt === 'number' && deletedAt + TOMBSTONE_SKEW_MS >= (trip.updatedAt || 0)) {
+          return false;
+        }
+        return true;
+      });
+
+      for (const trip of validTrips) {
         await saveTripToCloud(currentUser.uid, trip);
       }
       setSyncDone(true);
@@ -96,17 +110,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  return (
+  const modalContent = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs px-3 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] overflow-hidden"
+      className="fixed inset-0 z-[85] flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs px-0 sm:px-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-0 sm:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] touch-none overscroll-none overflow-hidden animate-in fade-in duration-150"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-full sm:max-h-[90dvh]"
+        className="w-full max-w-lg rounded-t-3xl sm:rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 sm:my-auto animate-in slide-in-from-bottom sm:fade-in sm:zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[88dvh] sm:max-h-[90dvh]"
         onClick={(e) => e.stopPropagation()}
       >
+        <div className="sm:hidden w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-2.5 mb-0.5 shrink-0" />
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/70">
+        <div className="flex items-center justify-between px-5 py-3.5 sm:py-4 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/70 shrink-0">
           <div>
             <h3 className="font-bold text-base text-slate-900 dark:text-white">
               {t.settings}
@@ -137,7 +152,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="p-5 overflow-y-auto space-y-4 text-xs">
+        <div className="p-5 overflow-y-auto overscroll-contain touch-pan-y space-y-4 text-xs flex-1">
           {/* Cloud Sync & Account Status */}
           <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/25 border border-teal-200/70 dark:border-teal-900/60 space-y-3">
             <div className="flex items-center justify-between">
@@ -422,7 +437,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex items-center justify-between">
+        <div className="px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] sm:pb-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex items-center justify-between shrink-0">
           <a
             href="https://github.com/noworneverev/hiyori-trip"
             target="_blank"
@@ -445,4 +460,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       </div>
     </div>
   );
+
+  if (typeof document !== 'undefined') {
+    return createPortal(modalContent, document.body);
+  }
+  return modalContent;
 };

@@ -669,8 +669,19 @@ function normalizeTripData(id: string, data: Record<string, any>, fallbackOwnerI
 // 6. User Tombstones Helpers
 export async function fetchUserTombstones(userId: string): Promise<Record<string, number>> {
   const path = `users/${userId}/meta/tombstones`;
+  const docRef = doc(db, path);
   try {
-    const snap = await getDoc(doc(db, path));
+    if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+      try {
+        const serverSnap = await getDocFromServer(docRef);
+        if (!serverSnap.exists()) return {};
+        const data = serverSnap.data();
+        return (data?.deletedTrips as Record<string, number>) || {};
+      } catch {
+        // Fallback to cached snapshot if server unreachable or offline
+      }
+    }
+    const snap = await getDoc(docRef);
     if (!snap.exists()) return {};
     const data = snap.data();
     return (data?.deletedTrips as Record<string, number>) || {};
@@ -680,13 +691,44 @@ export async function fetchUserTombstones(userId: string): Promise<Record<string
   }
 }
 
+export function subscribeUserTombstones(
+  userId: string,
+  onTombstonesChange: (tombstones: Record<string, number>, meta: SnapshotMeta) => void,
+  onError?: (error: unknown) => void
+) {
+  const path = `users/${userId}/meta/tombstones`;
+  const docRef = doc(db, path);
+
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      const data = snap.exists() ? snap.data() : null;
+      const deletedTrips = (data?.deletedTrips as Record<string, number>) || {};
+      onTombstonesChange(deletedTrips, {
+        hasPendingWrites: snap.metadata.hasPendingWrites,
+        fromCache: snap.metadata.fromCache,
+      });
+    },
+    (error) => {
+      console.error('[Firestore] subscribeUserTombstones error:', error);
+      onError?.(error);
+      try {
+        handleFirestoreError(error, OperationType.GET, path);
+      } catch {
+        // Structured error logged without crashing listener lifecycle
+      }
+    }
+  );
+}
+
 export async function recordCloudTripTombstone(userId: string, tripId: string): Promise<void> {
   const path = `users/${userId}/meta/tombstones`;
   try {
     const existing = await fetchUserTombstones(userId);
+    const now = Date.now();
     const nextMap: Record<string, number> = {
       ...existing,
-      [tripId]: Date.now(),
+      [tripId]: Math.max(now, existing[tripId] || 0),
     };
     // Cap to most recent 100 deleted trips
     const sorted = Object.entries(nextMap).sort((a, b) => b[1] - a[1]).slice(0, 100);
@@ -695,7 +737,7 @@ export async function recordCloudTripTombstone(userId: string, tripId: string): 
       sanitizeForFirestore({
         ownerId: userId,
         deletedTrips: Object.fromEntries(sorted),
-        updatedAt: Date.now(),
+        updatedAt: now,
       })
     );
   } catch (error) {

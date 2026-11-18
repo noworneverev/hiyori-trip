@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Trip, ItineraryItem } from './types/itinerary';
 import { PRESET_TRIPS } from './data/presetTrips';
 import {
@@ -8,7 +9,6 @@ import {
   setCurrentTripId,
   getDeletedTripIds,
   recordDeletedTripId,
-  clearDeletedTripId,
   hydrateStorageFromIndexedDB,
   resetAllLocalData,
 } from './utils/storage';
@@ -18,6 +18,8 @@ import { formatDateSlash, getTodayLocal, sortItineraryItemsByTime, findInsertion
 import { Language, TRANSLATIONS, getStoredLanguage, setStoredLanguage } from './utils/i18n';
 import { useDarkMode } from './hooks/useDarkMode';
 import { useScrollDirection } from './hooks/useScrollDirection';
+import { useBodyScrollLock } from './hooks/useBodyScrollLock';
+import { useIsMobileViewport } from './hooks/useIsMobileViewport';
 import { TimelineTab } from './components/Tabs/TimelineTab';
 import { LiveCompanionTab } from './components/Tabs/LiveCompanionTab';
 import { ExpensesTab } from './components/Tabs/ExpensesTab';
@@ -50,6 +52,7 @@ import {
   checkUserTripPermission,
   mergeSingleTrip,
   fetchUserTombstones,
+  subscribeUserTombstones,
   SnapshotMeta,
 } from './utils/firebase';
 import {
@@ -141,6 +144,7 @@ export default function App() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [showCollabModal, setShowCollabModal] = useState(false);
   const [showDeleteTripModal, setShowDeleteTripModal] = useState(false);
+  const [deleteTargetTripId, setDeleteTargetTripId] = useState<string | null>(null);
   const [showGlobalHubModal, setShowGlobalHubModal] = useState(false);
   const [showQuickActionModal, setShowQuickActionModal] = useState(false);
   const [quickActionTab, setQuickActionTab] = useState<'expense' | 'todos'>('expense');
@@ -154,13 +158,32 @@ export default function App() {
   const [showConflictModal, setShowConflictModal] = useState(false);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Mobile scroll-to-hide dynamic chrome
-  const { isNavHidden, resetNavVisibility } = useScrollDirection();
+  const isMobile = useIsMobileViewport();
+  const [showTripSwitcher, setShowTripSwitcher] = useState(false);
+  const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
+  const [isAuthMenuOpen, setIsAuthMenuOpen] = useState(false);
+  const tripSwitcherRef = useRef<HTMLDivElement>(null);
+  const tripSwitcherSheetRef = useRef<HTMLDivElement>(null);
 
-  // Reset navigation visibility whenever switching tabs or opening modals
+  const isAnyOverlayOpen =
+    showTripSwitcher ||
+    isAppMenuOpen ||
+    isAuthMenuOpen ||
+    showSettingsModal ||
+    showDeleteTripModal ||
+    showTripModal ||
+    showGlobalHubModal ||
+    showQuickActionModal;
+
+  // Mobile scroll-to-hide dynamic chrome (paused whenever header menus/modals are open)
+  const { isNavHidden, resetNavVisibility } = useScrollDirection({ paused: isAnyOverlayOpen });
+
+  useBodyScrollLock(showTripSwitcher && isMobile);
+
+  // Reset navigation visibility whenever switching tabs or opening menus/modals
   useEffect(() => {
     resetNavVisibility();
-  }, [activeTab, showQuickActionModal, showGlobalHubModal, resetNavVisibility]);
+  }, [activeTab, isAnyOverlayOpen, resetNavVisibility]);
 
   const showToast = (msg: string) => {
     if (toastTimeoutRef.current) {
@@ -177,23 +200,29 @@ export default function App() {
   const [isPickMode, setIsPickMode] = useState(false);
   const [pickedCoords, setPickedCoords] = useState<{ lat: number; lng: number } | null>(null);
 
-  // Dropdown for switching trips
-  const [showTripSwitcher, setShowTripSwitcher] = useState(false);
-  const tripSwitcherRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent | TouchEvent) => {
-      if (tripSwitcherRef.current && !tripSwitcherRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const inTrigger = tripSwitcherRef.current?.contains(target);
+      const inSheet = tripSwitcherSheetRef.current?.contains(target);
+      if (!inTrigger && !inSheet) {
+        setShowTripSwitcher(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
         setShowTripSwitcher(false);
       }
     };
     if (showTripSwitcher) {
       document.addEventListener('mousedown', handleClickOutside);
-      document.addEventListener('touchstart', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside, { passive: true });
+      window.addEventListener('keydown', handleKeyDown);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
     };
   }, [showTripSwitcher]);
 
@@ -434,9 +463,10 @@ export default function App() {
     });
   };
 
-  // Listen to Auth State and subscribe to cloud trips
+  // Listen to Auth State and subscribe to cloud trips & live tombstones
   useEffect(() => {
     let unsubscribeFirestore: (() => void) | null = null;
+    let unsubscribeTombstones: (() => void) | null = null;
     let isEffectMounted = true;
 
     // Resolve any pending mobile/PWA redirect sign-in result on app startup
@@ -462,10 +492,14 @@ export default function App() {
       currentUserRef.current = user;
       setAuthReady(true);
 
-      // Clean up previous Firestore listener if user switched or logged out
+      // Clean up previous Firestore listeners if user switched or logged out
       if (unsubscribeFirestore) {
         unsubscribeFirestore();
         unsubscribeFirestore = null;
+      }
+      if (unsubscribeTombstones) {
+        unsubscribeTombstones();
+        unsubscribeTombstones = null;
       }
 
       // Automatically execute pending action upon successful sign in
@@ -496,9 +530,14 @@ export default function App() {
       (async () => {
         try {
           const localTrips = getStoredTrips();
+          const deletedSet = new Set(getDeletedTripIds());
           const updatedLocal: Trip[] = [];
           let anyMigrated = false;
           for (const tr of localTrips) {
+            if (deletedSet.has(tr.id)) {
+              updatedLocal.push(tr);
+              continue;
+            }
             const { trip: lightweight, extractedRecords } = await extractInlineImagesToMediaRefs(tr);
             if (extractedRecords.length > 0) {
               anyMigrated = true;
@@ -517,106 +556,130 @@ export default function App() {
         }
       })();
 
-      // 3. Fetch cloud tombstones before subscribing to user trips
+      // 3. Authoritative server tombstone state + live tombstone & trips listeners
       let cloudTombstones: Record<string, number> = {};
+      let tombstonesFromServerReady = false;
+      let latestCloudTrips: Trip[] | null = null;
+      let tripsFromServerReady = false;
+      let reconcileQueue: Promise<void> = Promise.resolve();
+
       try {
         cloudTombstones = await fetchUserTombstones(user.uid);
+        if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+          tombstonesFromServerReady = true;
+        }
       } catch {
         cloudTombstones = {};
       }
       if (!isEffectMounted || currentUserRef.current?.uid !== user.uid) return;
 
-      // 4. Subscribe to user cloud trips with echo suppression & tombstone awareness
-      unsubscribeFirestore = subscribeUserTrips(
-        user.uid,
-        async (cloudTrips, meta: SnapshotMeta) => {
-          if (meta.hasPendingWrites) return;
-          if (meta.fromCache && (!cloudTrips || cloudTrips.length === 0) && Object.keys(cloudTombstones).length === 0) {
-            return;
+      const cancelPendingWriteForTrip = (tripId: string, collabId?: string) => {
+        const userKey = `user:${user.uid}:${tripId}`;
+        const existingUserTimer = cloudSaveTimersRef.current.get(userKey);
+        if (existingUserTimer) {
+          clearTimeout(existingUserTimer);
+          cloudSaveTimersRef.current.delete(userKey);
+        }
+        pendingCloudWritesRef.current.delete(userKey);
+
+        if (collabId) {
+          const collabKey = `collab:${collabId}`;
+          const existingCollabTimer = cloudSaveTimersRef.current.get(collabKey);
+          if (existingCollabTimer) {
+            clearTimeout(existingCollabTimer);
+            cloudSaveTimersRef.current.delete(collabKey);
+          }
+          pendingCloudWritesRef.current.delete(collabKey);
+        }
+      };
+
+      const reconcileNow = async () => {
+        if (!isEffectMounted || currentUserRef.current?.uid !== user.uid) return;
+        if (latestCloudTrips === null) return;
+
+        const hasTombstones = Object.keys(cloudTombstones).length > 0;
+        if (!tripsFromServerReady && latestCloudTrips.length === 0 && !hasTombstones) {
+          return;
+        }
+
+        const currentLocal = getStoredTrips();
+        const deletedIds = new Set(getDeletedTripIds());
+
+        // Cancel any pending debounced saves for deleted or tombstoned trips
+        for (const lTrip of currentLocal) {
+          if (deletedIds.has(lTrip.id) || typeof cloudTombstones[lTrip.id] === 'number') {
+            cancelPendingWriteForTrip(lTrip.id, lTrip.collabId);
+          }
+        }
+
+        const filteredCloud = latestCloudTrips.filter((c) => !deletedIds.has(c.id));
+        const isServerAuthoritative =
+          tripsFromServerReady && (tombstonesFromServerReady || hasTombstones || filteredCloud.length > 0);
+        const hasPreviouslySyncedLocal = currentLocal.some((l) => Boolean(l.lastSyncedAt));
+
+        if (filteredCloud.length > 0 || hasTombstones || (tripsFromServerReady && hasPreviouslySyncedLocal)) {
+          const { merged, tripsToUpload, deletedLocalTripIds, conflicts } = mergeTrips(
+            currentLocal,
+            filteredCloud,
+            cloudTombstones,
+            isServerAuthoritative
+          );
+
+          for (const id of deletedLocalTripIds) {
+            recordDeletedTripId(id);
+            const target = currentLocal.find((t) => t.id === id);
+            cancelPendingWriteForTrip(id, target?.collabId);
+            idbDeleteMediaByTrip(id).catch(() => {});
           }
 
-          if ((cloudTrips && cloudTrips.length > 0) || Object.keys(cloudTombstones).length > 0) {
-            const currentLocal = getStoredTrips();
-            const deletedIds = new Set(getDeletedTripIds());
-            const filteredCloud = (cloudTrips || []).filter((c) => !deletedIds.has(c.id));
+          if (conflicts.length > 0) {
+            setPendingConflicts((prev) => {
+              const map = new Map(prev.map((c) => [c.tripId, c]));
+              conflicts.forEach((c) => map.set(c.tripId, c));
+              return Array.from(map.values());
+            });
+            setShowConflictModal(true);
+          }
 
-            const { merged, tripsToUpload, deletedLocalTripIds, conflicts } = mergeTrips(
-              currentLocal,
-              filteredCloud,
-              cloudTombstones,
-              !meta.fromCache
-            );
-
-            deletedLocalTripIds.forEach((id) => recordDeletedTripId(id));
-
-            if (conflicts.length > 0) {
-              setPendingConflicts((prev) => {
-                const map = new Map(prev.map((c) => [c.tripId, c]));
-                conflicts.forEach((c) => map.set(c.tripId, c));
-                return Array.from(map.values());
-              });
-              setShowConflictModal(true);
-            }
-
-            const conflictIds = new Set(conflicts.map((c) => c.tripId));
-            const uploadIds = new Set(tripsToUpload.map((t) => t.id));
-            const normalizedMerged = merged.map((m) => {
-              if (!conflictIds.has(m.id) && !uploadIds.has(m.id)) {
-                const baseline = Math.max(m.lastSyncedAt || 0, m.updatedAt || 0);
-                if (baseline > (m.lastSyncedAt || 0)) {
-                  return { ...m, lastSyncedAt: baseline };
-                }
+          const conflictIds = new Set(conflicts.map((c) => c.tripId));
+          const uploadIds = new Set(tripsToUpload.map((t) => t.id));
+          const normalizedMerged = merged.map((m) => {
+            if (!conflictIds.has(m.id) && !uploadIds.has(m.id)) {
+              const baseline = Math.max(m.lastSyncedAt || 0, m.updatedAt || 0);
+              if (baseline > (m.lastSyncedAt || 0)) {
+                return { ...m, lastSyncedAt: baseline };
               }
-              return m;
+            }
+            return m;
+          });
+
+          const hasChange =
+            normalizedMerged.length !== currentLocal.length ||
+            normalizedMerged.some((m) => {
+              const l = currentLocal.find((x) => x.id === m.id);
+              return !l || hasTripContentDifference(m, l) || (m.lastSyncedAt || 0) > (l.lastSyncedAt || 0);
+            }) ||
+            currentLocal.some((l) => {
+              const m = normalizedMerged.find((x) => x.id === l.id);
+              return !m || hasTripContentDifference(m, l);
             });
 
-            const hasChange =
-              normalizedMerged.length !== currentLocal.length ||
-              normalizedMerged.some((m) => {
-                const l = currentLocal.find((x) => x.id === m.id);
-                return !l || hasTripContentDifference(m, l) || (m.lastSyncedAt || 0) > (l.lastSyncedAt || 0);
-              }) ||
-              currentLocal.some((l) => {
-                const m = normalizedMerged.find((x) => x.id === l.id);
-                return !m || hasTripContentDifference(m, l);
-              });
-
-            if (hasChange || deletedLocalTripIds.length > 0) {
-              setTrips(normalizedMerged);
-              saveTrips(normalizedMerged);
+          if (hasChange || deletedLocalTripIds.length > 0) {
+            setTrips(normalizedMerged);
+            saveTrips(normalizedMerged);
+            if (deletedLocalTripIds.length > 0) {
+              garbageCollectOrphanedMedia(normalizedMerged).catch(() => {});
             }
+          }
 
-            if (tripsToUpload.length > 0) {
-              const syncedMap: Record<string, number> = {};
-              for (const tr of tripsToUpload) {
-                if (!deletedIds.has(tr.id)) {
-                  try {
-                    await saveTripToCloud(user.uid, tr);
-                    syncedMap[tr.id] = Math.max(Date.now(), tr.updatedAt || 0);
-                  } catch {
-                    enqueueTripSave(user.uid, tr);
-                  }
-                }
-              }
-              markTripsSyncedLocally(syncedMap);
-              showToast(lang === 'zh' ? '已將本機行程與相片同步至雲端' : 'Local trips & photos synced to cloud');
-            }
-
-            const activeId = getCurrentTripId();
-            const exists = normalizedMerged.find((t) => t.id === activeId);
-            if (!exists) {
-              const fallbackId = normalizedMerged[0]?.id || '';
-              setCurrentTripIdState(fallbackId);
-              setCurrentTripId(fallbackId);
-            }
-          } else {
-            // First login with empty cloud: auto-sync existing local trips to user's Firestore
-            const currentLocal = getStoredTrips();
-            const deletedIds = new Set(getDeletedTripIds());
-            const toSync = (currentLocal || []).filter((tr) => !deletedIds.has(tr.id));
-            if (toSync.length > 0) {
-              const syncedMap: Record<string, number> = {};
-              for (const tr of toSync) {
+          if (tripsToUpload.length > 0) {
+            const refreshedDeletedIds = new Set(getDeletedTripIds());
+            const syncedMap: Record<string, number> = {};
+            for (const tr of tripsToUpload) {
+              const isRemoteTombstoned =
+                typeof cloudTombstones[tr.id] === 'number' &&
+                cloudTombstones[tr.id] + 15 * 60 * 1000 >= (tr.updatedAt || 0);
+              if (!refreshedDeletedIds.has(tr.id) && !isRemoteTombstoned) {
                 try {
                   await saveTripToCloud(user.uid, tr);
                   syncedMap[tr.id] = Math.max(Date.now(), tr.updatedAt || 0);
@@ -624,10 +687,73 @@ export default function App() {
                   enqueueTripSave(user.uid, tr);
                 }
               }
+            }
+            if (Object.keys(syncedMap).length > 0) {
               markTripsSyncedLocally(syncedMap);
-              showToast(lang === 'zh' ? '已將本機既有行程同步至雲端' : 'Local trips synced to cloud');
+              showToast(lang === 'zh' ? '已將本機行程與相片同步至雲端' : 'Local trips & photos synced to cloud');
             }
           }
+
+          const activeId = getCurrentTripId();
+          const exists = normalizedMerged.find((t) => t.id === activeId);
+          if (!exists) {
+            const fallbackId = normalizedMerged[0]?.id || '';
+            setCurrentTripIdState(fallbackId);
+            setCurrentTripId(fallbackId);
+          }
+        } else if (tripsFromServerReady) {
+          // True first login with authoritative empty cloud & no tombstones
+          const toSync = (currentLocal || []).filter(
+            (tr) => !deletedIds.has(tr.id) && typeof cloudTombstones[tr.id] !== 'number'
+          );
+          if (toSync.length > 0) {
+            const syncedMap: Record<string, number> = {};
+            for (const tr of toSync) {
+              try {
+                await saveTripToCloud(user.uid, tr);
+                syncedMap[tr.id] = Math.max(Date.now(), tr.updatedAt || 0);
+              } catch {
+                enqueueTripSave(user.uid, tr);
+              }
+            }
+            markTripsSyncedLocally(syncedMap);
+            showToast(lang === 'zh' ? '已將本機既有行程同步至雲端' : 'Local trips synced to cloud');
+          }
+        }
+      };
+
+      const scheduleReconcile = () => {
+        reconcileQueue = reconcileQueue.then(reconcileNow).catch((err) => {
+          console.warn('[CloudSync] reconcile warning:', err);
+        });
+      };
+
+      // Subscribe live to cloud tombstones so deletes on mobile purge desktop immediately
+      unsubscribeTombstones = subscribeUserTombstones(
+        user.uid,
+        (nextTombstones, meta: SnapshotMeta) => {
+          if (meta.hasPendingWrites) return;
+          cloudTombstones = nextTombstones;
+          if (!meta.fromCache) {
+            tombstonesFromServerReady = true;
+          }
+          scheduleReconcile();
+        },
+        () => {
+          // Non-fatal; fallback relies on fetched tombstones
+        }
+      );
+
+      // 4. Subscribe to user cloud trips with echo suppression & tombstone awareness
+      unsubscribeFirestore = subscribeUserTrips(
+        user.uid,
+        (cloudTrips, meta: SnapshotMeta) => {
+          if (meta.hasPendingWrites) return;
+          latestCloudTrips = cloudTrips || [];
+          if (!meta.fromCache) {
+            tripsFromServerReady = true;
+          }
+          scheduleReconcile();
         },
         () => {
           showToast(lang === 'zh' ? '雲端連線不穩，資料已安全保留於本機' : 'Cloud sync unavailable, saved locally');
@@ -641,6 +767,10 @@ export default function App() {
       if (unsubscribeFirestore) {
         unsubscribeFirestore();
         unsubscribeFirestore = null;
+      }
+      if (unsubscribeTombstones) {
+        unsubscribeTombstones();
+        unsubscribeTombstones = null;
       }
       unsubscribeAuth();
     };
@@ -950,32 +1080,75 @@ export default function App() {
     setTripModalInitialMode('planner');
   };
 
+  const tripPendingDelete =
+    (deleteTargetTripId ? trips.find((t) => t.id === deleteTargetTripId) : null) || currentTrip;
+
   const handleDeleteCurrentTrip = () => {
+    setDeleteTargetTripId(currentTrip.id);
+    setShowDeleteTripModal(true);
+  };
+
+  const handleRequestDeleteTrip = (trip: Trip) => {
+    const targetPerm = checkUserTripPermission(trip, currentUserRef.current);
+    if (trip.isCollaborative && !targetPerm.isOwner) {
+      showToast(lang === 'zh' ? '僅擁有者可刪除共編旅程' : 'Only owner can delete this trip');
+      return;
+    }
+    setShowTripSwitcher(false);
+    setDeleteTargetTripId(trip.id);
     setShowDeleteTripModal(true);
   };
 
   const handleConfirmDeleteTrip = () => {
     if (trips.length <= 1) return;
+    const targetTrip = tripPendingDelete;
+    if (!targetTrip) return;
+
     const user = currentUserRef.current;
     if (!user) {
       runWithAuth(() => handleConfirmDeleteTrip(), lang === 'zh' ? '刪除旅程' : 'Delete trip');
       return;
     }
-    if (currentTrip.isCollaborative && !permission.isOwner) {
+    const targetPerm = checkUserTripPermission(targetTrip, user);
+    if (targetTrip.isCollaborative && !targetPerm.isOwner) {
       showToast(lang === 'zh' ? '僅擁有者可刪除共編旅程' : 'Only owner can delete this trip');
       return;
     }
 
-    const tripToDeleteId = currentTrip.id;
+    const tripToDeleteId = targetTrip.id;
+
+    // Cancel any queued debounced cloud saves for this trip before deleting
+    const userWriteKey = `user:${user.uid}:${tripToDeleteId}`;
+    const userTimer = cloudSaveTimersRef.current.get(userWriteKey);
+    if (userTimer) {
+      clearTimeout(userTimer);
+      cloudSaveTimersRef.current.delete(userWriteKey);
+    }
+    pendingCloudWritesRef.current.delete(userWriteKey);
+
+    if (targetTrip.collabId) {
+      const collabKey = `collab:${targetTrip.collabId}`;
+      const collabTimer = cloudSaveTimersRef.current.get(collabKey);
+      if (collabTimer) {
+        clearTimeout(collabTimer);
+        cloudSaveTimersRef.current.delete(collabKey);
+      }
+      pendingCloudWritesRef.current.delete(collabKey);
+    }
+
+    // Keep local deleted ledger permanently bounded (prevents preset re-seeding & cross-device resurrection)
     recordDeletedTripId(tripToDeleteId);
 
     const remaining = trips.filter((t) => t.id !== tripToDeleteId);
     setTrips(remaining);
     saveTrips(remaining);
-    const nextActiveId = remaining[0]?.id || '';
-    setCurrentTripIdState(nextActiveId);
-    setCurrentTripId(nextActiveId);
+    if (tripToDeleteId === currentTrip.id) {
+      const nextActiveId = remaining[0]?.id || '';
+      setCurrentTripIdState(nextActiveId);
+      setCurrentTripId(nextActiveId);
+    }
     setShowDeleteTripModal(false);
+    setDeleteTargetTripId(null);
 
     idbDeleteMediaByTrip(tripToDeleteId)
       .then(() => garbageCollectOrphanedMedia(remaining))
@@ -984,14 +1157,10 @@ export default function App() {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       enqueueTripDelete(user.uid, tripToDeleteId);
     } else {
-      deleteTripFromCloud(user.uid, tripToDeleteId)
-        .then(() => {
-          clearDeletedTripId(tripToDeleteId);
-        })
-        .catch((err) => {
-          console.warn('Cloud delete failed, enqueuing for offline reconnect:', err);
-          enqueueTripDelete(user.uid, tripToDeleteId);
-        });
+      deleteTripFromCloud(user.uid, tripToDeleteId).catch((err) => {
+        console.warn('Cloud delete failed, enqueuing for offline reconnect:', err);
+        enqueueTripDelete(user.uid, tripToDeleteId);
+      });
     }
     showToast(lang === 'zh' ? '已成功刪除旅程' : 'Trip deleted');
   };
@@ -1238,70 +1407,164 @@ export default function App() {
                 <ChevronDown className="w-3 h-3 text-slate-400 shrink-0 ml-0.5" />
               </button>
 
-              {showTripSwitcher && (
-                <>
-                  {/* Backdrop for closing dropdown */}
-                  <div
-                    className="fixed inset-0 z-40 bg-black/15 backdrop-blur-[0.5px] sm:hidden"
-                    onClick={() => setShowTripSwitcher(false)}
-                  />
-                  <div className="fixed inset-x-3 top-14 sm:absolute sm:inset-x-auto sm:left-0 sm:right-auto sm:top-full mt-1.5 w-auto sm:w-80 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-[#111827] rounded-2xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-2 z-50 animate-in fade-in zoom-in-95 duration-100">
-                    <div className="px-2.5 py-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-400 border-b border-[#E5E2DC] dark:border-slate-800 flex justify-between items-center font-mono tabular-nums">
+              {(() => {
+                if (!showTripSwitcher) return null;
+
+                const switcherBody = (
+                  <>
+                    <div className="px-2.5 py-2 text-xs sm:text-[11px] font-bold text-slate-600 dark:text-slate-300 border-b border-[#E5E2DC] dark:border-slate-800 flex justify-between items-center font-mono tabular-nums shrink-0">
                       <span>{lang === 'zh' ? '所有旅程' : 'All Trips'} ({trips.length})</span>
-                      <button
-                        onClick={() => {
-                          setShowTripSwitcher(false);
-                          runWithAuth(() => {
-                            setShowTripModal(true);
-                            setTripModalData(null);
-                          }, lang === 'zh' ? '建立新旅程' : 'Create new trip');
-                        }}
-                        className="text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-0.5 font-sans cursor-pointer"
-                      >
-                        <Plus className="w-3 h-3" />
-                        <span>{t.newTrip}</span>
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowTripSwitcher(false);
+                            runWithAuth(() => {
+                              setShowTripModal(true);
+                              setTripModalData(null);
+                            }, lang === 'zh' ? '建立新旅程' : 'Create new trip');
+                          }}
+                          className="min-h-[36px] sm:min-h-0 px-2 py-1 text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1 font-sans text-xs font-semibold cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>{t.newTrip}</span>
+                        </button>
+                        {isMobile && (
+                          <button
+                            type="button"
+                            onClick={() => setShowTripSwitcher(false)}
+                            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                            aria-label={lang === 'zh' ? '關閉' : 'Close'}
+                          >
+                            <X className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="max-h-60 overflow-y-auto divide-y divide-[#E5E2DC]/70 dark:divide-slate-800 my-1">
-                      {trips.map((tr) => (
-                        <div
-                          key={tr.id}
-                          onClick={() => {
-                            handleSelectTrip(tr.id);
-                            setShowTripSwitcher(false);
-                          }}
-                          className={`p-2.5 min-h-[44px] rounded-xl cursor-pointer transition text-xs flex items-center justify-between ${
-                            tr.id === currentTrip.id
-                              ? 'bg-teal-50 dark:bg-teal-950/50 text-teal-800 dark:text-teal-200 font-bold'
-                              : 'hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
-                          }`}
-                        >
-                          <div className="truncate pr-2">
-                            <p className="truncate font-semibold">{tr.title}</p>
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{tr.destination}</p>
+                    <div className="flex-1 max-h-[54dvh] sm:max-h-72 overflow-y-auto overscroll-contain touch-pan-y divide-y divide-[#E5E2DC]/70 dark:divide-slate-800 my-1">
+                      {trips.map((tr) => {
+                        const rowPerm = checkUserTripPermission(tr, currentUser);
+                        const canEditRow = !tr.isCollaborative || rowPerm.canEdit;
+                        const canDeleteRow = !tr.isCollaborative || rowPerm.isOwner;
+                        const isActive = tr.id === currentTrip.id;
+
+                        return (
+                          <div
+                            key={tr.id}
+                            className={`px-2.5 py-2 min-h-[56px] sm:min-h-[48px] rounded-xl transition text-xs flex items-center justify-between gap-2 ${
+                              isActive
+                                ? 'bg-teal-50/90 dark:bg-teal-950/50 text-teal-900 dark:text-teal-100'
+                                : 'hover:bg-[#F3F1EC] dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-300'
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                handleSelectTrip(tr.id);
+                                setShowTripSwitcher(false);
+                              }}
+                              className="flex-1 min-w-0 text-left flex items-center gap-2 py-1 cursor-pointer"
+                            >
+                              {isActive && (
+                                <Check className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <p className={`truncate ${isActive ? 'font-bold' : 'font-semibold'}`}>
+                                  {tr.title}
+                                </p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                  {tr.destination} · {formatDateSlash(tr.startDate)}
+                                </p>
+                              </div>
+                            </button>
+
+                            <div className="flex items-center gap-0.5 shrink-0">
+                              {canEditRow && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowTripSwitcher(false);
+                                    runWithAuth(() => {
+                                      setTripModalData(tr);
+                                      setShowTripModal(true);
+                                    }, lang === 'zh' ? '編輯旅程設定' : 'Edit trip settings');
+                                  }}
+                                  className="min-w-[44px] min-h-[44px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 hover:bg-white/80 dark:hover:bg-slate-700/70 transition cursor-pointer"
+                                  title={lang === 'zh' ? '編輯旅程' : 'Edit trip'}
+                                  aria-label={lang === 'zh' ? `編輯 ${tr.title}` : `Edit ${tr.title}`}
+                                >
+                                  <Edit className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                                </button>
+                              )}
+
+                              {canDeleteRow && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRequestDeleteTrip(tr);
+                                  }}
+                                  className={`min-w-[44px] min-h-[44px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-xl transition cursor-pointer ${
+                                    trips.length <= 1
+                                      ? 'text-slate-300 dark:text-slate-600'
+                                      : 'text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50'
+                                  }`}
+                                  title={lang === 'zh' ? '刪除旅程' : 'Delete trip'}
+                                  aria-label={lang === 'zh' ? `刪除 ${tr.title}` : `Delete ${tr.title}`}
+                                >
+                                  <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          {tr.id === currentTrip.id && <Check className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
 
                     {/* Quick Access to Global Travel Memory Hub */}
-                    <div className="pt-1.5 mt-1 border-t border-[#E5E2DC] dark:border-slate-800">
+                    <div className="pt-2 mt-1 border-t border-[#E5E2DC] dark:border-slate-800 shrink-0">
                       <button
+                        type="button"
                         onClick={() => {
                           setShowTripSwitcher(false);
                           setShowGlobalHubModal(true);
                         }}
-                        className="w-full min-h-[40px] py-2 px-3 rounded-xl bg-[#FAF9F6] hover:bg-[#F3F1EC] dark:bg-slate-900 dark:hover:bg-slate-800 text-teal-700 dark:text-teal-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        className="w-full min-h-[44px] sm:min-h-[40px] py-2 px-3 rounded-xl bg-[#FAF9F6] hover:bg-[#F3F1EC] dark:bg-slate-900 dark:hover:bg-slate-800 text-teal-700 dark:text-teal-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                       >
                         <Compass className="w-3.5 h-3.5 shrink-0" />
                         <span>足跡時光庫</span>
                       </button>
                     </div>
+                  </>
+                );
+
+                if (isMobile && typeof document !== 'undefined') {
+                  return createPortal(
+                    <div
+                      className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/50 backdrop-blur-[2px] touch-none overscroll-none animate-in fade-in duration-150"
+                      onClick={() => setShowTripSwitcher(false)}
+                    >
+                      <div
+                        ref={tripSwitcherSheetRef}
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full max-h-[85dvh] rounded-t-3xl bg-white dark:bg-[#111827] border-t border-[#E5E2DC] dark:border-slate-800 shadow-2xl flex flex-col px-3 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] animate-in slide-in-from-bottom duration-200"
+                      >
+                        <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto my-2 shrink-0" />
+                        {switcherBody}
+                      </div>
+                    </div>,
+                    document.body
+                  );
+                }
+
+                return (
+                  <div className="absolute left-0 top-full mt-1.5 w-[348px] max-h-[80dvh] flex flex-col bg-white dark:bg-[#111827] rounded-2xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-2 z-50 animate-in fade-in zoom-in-95 duration-100">
+                    {switcherBody}
                   </div>
-                </>
-              )}
+                );
+              })()}
             </div>
 
             {/* Global Travel Memory & Footprint Hub Trigger in Header (Desktop / Tablet) */}
@@ -1332,7 +1595,11 @@ export default function App() {
             </button>
 
             {/* Google Cloud Auth & Sync */}
-            <AuthButton lang={lang} localTrips={trips} />
+            <AuthButton
+              lang={lang}
+              localTrips={trips}
+              onOpenChange={setIsAuthMenuOpen}
+            />
 
             {/* Unified App Menu */}
             <AppMenu
@@ -1347,6 +1614,7 @@ export default function App() {
               onOpenExportPDF={() => setShowPDFExportModal(true)}
               onOpenShareTrip={() => setShowShareModal(true)}
               onOpenCollaborate={() => setShowCollabModal(true)}
+              onOpenChange={setIsAppMenuOpen}
               onResetData={async () => {
                 await resetAllLocalData();
                 window.location.reload();
@@ -2048,10 +2316,13 @@ export default function App() {
 
       {showDeleteTripModal && (
         <DeleteConfirmModal
-          tripTitle={currentTrip.title}
+          tripTitle={tripPendingDelete.title}
           isLastTrip={trips.length <= 1}
           onConfirm={handleConfirmDeleteTrip}
-          onClose={() => setShowDeleteTripModal(false)}
+          onClose={() => {
+            setShowDeleteTripModal(false);
+            setDeleteTargetTripId(null);
+          }}
         />
       )}
 

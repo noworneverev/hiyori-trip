@@ -1,13 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import {
   auth,
   connectGoogleDrive,
+  fetchUserTombstones,
   hasDriveAccessToken,
   loginWithGoogleDetailed,
   logoutFirebase,
   saveTripToCloud,
 } from '../../utils/firebase';
+import { getDeletedTripIds } from '../../utils/storage';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import { useIsMobileViewport } from '../../hooks/useIsMobileViewport';
 import { Trip } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { CloudCheck, HardDrive, LogOut, UploadCloud, User as UserIcon, Check, X } from 'lucide-react';
@@ -16,9 +21,16 @@ interface AuthButtonProps {
   lang: Language;
   localTrips: Trip[];
   onCloudSyncSuccess?: () => void;
+  onOpenChange?: (isOpen: boolean) => void;
 }
 
-export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onCloudSyncSuccess }) => {
+export const AuthButton: React.FC<AuthButtonProps> = ({
+  lang,
+  localTrips,
+  onCloudSyncSuccess,
+  onOpenChange,
+}) => {
+  const isMobile = useIsMobileViewport();
   const [user, setUser] = useState<User | null>(() => auth.currentUser);
   const [authReady, setAuthReady] = useState<boolean>(() => Boolean(auth.currentUser));
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -30,6 +42,14 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
   const [isConnectingDrive, setIsConnectingDrive] = useState(false);
   const [driveError, setDriveError] = useState<string | null>(null);
   const authDropdownRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+
+  const isOverlayOpen = showDropdown || Boolean(authError);
+  useBodyScrollLock(isMobile && isOverlayOpen);
+
+  useEffect(() => {
+    onOpenChange?.(isOverlayOpen);
+  }, [isOverlayOpen, onOpenChange]);
 
   useEffect(() => {
     const syncDriveState = () => setDriveConnected(hasDriveAccessToken());
@@ -38,8 +58,11 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
   }, []);
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (authDropdownRef.current && !authDropdownRef.current.contains(e.target as Node)) {
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      const inTrigger = authDropdownRef.current?.contains(target);
+      const inSheet = sheetRef.current?.contains(target);
+      if (!inTrigger && !inSheet) {
         setShowDropdown(false);
         setAuthError(null);
       }
@@ -50,15 +73,17 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
         setAuthError(null);
       }
     };
-    if (showDropdown || authError) {
+    if (isOverlayOpen) {
       document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside, { passive: true });
       window.addEventListener('keydown', handleKeyDown);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [showDropdown, authError]);
+  }, [isOverlayOpen]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -98,7 +123,20 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
     if (!user) return;
     setIsSyncing(true);
     try {
-      for (const trip of localTrips) {
+      const localDeletedIds = new Set(getDeletedTripIds());
+      const cloudTombstones = await fetchUserTombstones(user.uid);
+      const TOMBSTONE_SKEW_MS = 15 * 60 * 1000;
+
+      const validTrips = localTrips.filter((trip) => {
+        if (localDeletedIds.has(trip.id)) return false;
+        const deletedAt = cloudTombstones[trip.id];
+        if (typeof deletedAt === 'number' && deletedAt + TOMBSTONE_SKEW_MS >= (trip.updatedAt || 0)) {
+          return false;
+        }
+        return true;
+      });
+
+      for (const trip of validTrips) {
         await saveTripToCloud(user.uid, trip);
       }
       setSyncDone(true);
@@ -159,7 +197,7 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
           </span>
         </button>
 
-        {authError && (
+        {authError && !isMobile && (
           <div className="absolute right-0 top-full mt-1.5 w-72 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-[#111827] rounded-2xl shadow-xl border border-rose-200 dark:border-rose-900/60 p-3 z-50 text-xs space-y-2 animate-in fade-in zoom-in-95 duration-100">
             <div className="flex items-start justify-between gap-2">
               <p className="text-[11px] font-medium text-rose-700 dark:text-rose-300 leading-relaxed">
@@ -176,9 +214,147 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
             </div>
           </div>
         )}
+
+        {authError && isMobile && typeof document !== 'undefined' && createPortal(
+          <div
+            className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/50 backdrop-blur-[2px] touch-none overscroll-none animate-in fade-in duration-150"
+            onClick={() => setAuthError(null)}
+          >
+            <div
+              ref={sheetRef}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full rounded-t-3xl bg-white dark:bg-[#111827] border-t border-rose-200 dark:border-rose-900/60 shadow-2xl px-4 pt-1 pb-[max(1rem,env(safe-area-inset-bottom,0px))] space-y-3 animate-in slide-in-from-bottom duration-200"
+            >
+              <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto my-2" />
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-medium text-rose-700 dark:text-rose-300 leading-relaxed pt-1">
+                  {authError}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setAuthError(null)}
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 shrink-0 cursor-pointer"
+                  aria-label="關閉提示"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
       </div>
     );
   }
+
+  const renderAccountMenuContent = () => (
+    <>
+      <div className="px-2 py-2 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between gap-2 shrink-0">
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <div className="flex items-center gap-2">
+            <p className="font-bold text-sm sm:text-xs text-slate-900 dark:text-slate-100 truncate">
+              {user.displayName || (lang === 'zh' ? '已登入用戶' : 'Signed In')}
+            </p>
+            <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 shrink-0">
+              {lang === 'zh' ? '雲端同步' : 'Synced'}
+            </span>
+          </div>
+          {activeEmail && (
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate font-mono">{activeEmail}</p>
+          )}
+        </div>
+
+        {isMobile && (
+          <button
+            type="button"
+            onClick={() => setShowDropdown(false)}
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
+            aria-label={lang === 'zh' ? '關閉' : 'Close'}
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+      </div>
+
+      <div className="py-1.5 space-y-1 overflow-y-auto overscroll-contain touch-pan-y">
+        <button
+          onClick={handleUploadAllLocalToCloud}
+          disabled={isSyncing}
+          className="w-full min-h-[44px] text-left px-3 sm:px-2.5 py-2 sm:py-1.5 rounded-xl hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-between transition cursor-pointer"
+        >
+          <div className="flex items-center gap-2.5 sm:gap-2">
+            <UploadCloud className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-teal-700 dark:text-teal-400" />
+            <span>{lang === 'zh' ? '同步全部旅程至雲端' : 'Sync All Trips'}</span>
+          </div>
+          {syncDone ? (
+            <Check className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-teal-700 dark:text-teal-400" />
+          ) : isSyncing ? (
+            <span className="text-[11px] text-teal-700 dark:text-teal-400 font-mono">...</span>
+          ) : null}
+        </button>
+
+        <button
+          type="button"
+          onClick={async () => {
+            if (driveConnected || isConnectingDrive) return;
+            setDriveError(null);
+            setIsConnectingDrive(true);
+            try {
+              const token = await connectGoogleDrive();
+              const ok = Boolean(token) || hasDriveAccessToken();
+              setDriveConnected(ok);
+              if (!ok) {
+                setDriveError(
+                  lang === 'zh'
+                    ? 'Google Drive 授權已取消或彈窗被封鎖'
+                    : 'Drive authorization cancelled or popup blocked'
+                );
+              }
+            } finally {
+              setIsConnectingDrive(false);
+            }
+          }}
+          className="w-full min-h-[44px] text-left px-3 sm:px-2.5 py-2 sm:py-1.5 rounded-xl hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-between gap-2 transition cursor-pointer"
+        >
+          <div className="flex items-center gap-2.5 sm:gap-2 min-w-0">
+            <HardDrive className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+            <span className="truncate">
+              {driveConnected
+                ? lang === 'zh'
+                  ? 'Drive 原圖備份已連線'
+                  : 'Drive Originals Connected'
+                : lang === 'zh'
+                ? '連線 Google Drive 原圖空間'
+                : 'Connect Google Drive Originals'}
+            </span>
+          </div>
+          {driveConnected ? (
+            <Check className="w-4 h-4 sm:w-3.5 sm:h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+          ) : (
+            <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400 shrink-0">
+              {isConnectingDrive ? '...' : '授權'}
+            </span>
+          )}
+        </button>
+
+        {driveError && (
+          <p className="px-3 sm:px-2.5 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-300 leading-snug">
+            {driveError}
+          </p>
+        )}
+
+        <div className="pt-1.5 mt-1 border-t border-[#E5E2DC] dark:border-slate-800">
+          <button
+            onClick={handleLogout}
+            className="w-full min-h-[44px] text-left px-3 sm:px-2.5 py-2 sm:py-1.5 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-700 dark:text-rose-400 flex items-center gap-2.5 sm:gap-2 transition cursor-pointer"
+          >
+            <LogOut className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+            <span>{lang === 'zh' ? '登出帳號' : 'Sign Out'}</span>
+          </button>
+        </div>
+      </div>
+    </>
+  );
 
   return (
     <div className="relative" ref={authDropdownRef}>
@@ -204,97 +380,28 @@ export const AuthButton: React.FC<AuthButtonProps> = ({ lang, localTrips, onClou
         <CloudCheck className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
       </button>
 
-      {showDropdown && (
-        <div className="absolute right-0 top-full mt-1.5 w-64 max-w-[calc(100vw-1.5rem)] bg-white dark:bg-[#111827] rounded-2xl shadow-xl border border-[#E5E2DC] dark:border-slate-800 p-2.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 space-y-1.5">
-          <div className="px-2 py-1.5 border-b border-[#E5E2DC] dark:border-slate-800 space-y-1">
-            <div className="flex items-center justify-between gap-2">
-              <p className="font-bold text-slate-900 dark:text-slate-100 truncate">
-                {user.displayName || (lang === 'zh' ? '已登入用戶' : 'Signed In')}
-              </p>
-              <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 shrink-0">
-                {lang === 'zh' ? '雲端同步' : 'Synced'}
-              </span>
-            </div>
-            {activeEmail && (
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate font-mono">{activeEmail}</p>
-            )}
-          </div>
-
-          <button
-            onClick={handleUploadAllLocalToCloud}
-            disabled={isSyncing}
-            className="w-full min-h-[44px] text-left px-2.5 py-1.5 rounded-xl hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-between transition cursor-pointer"
+      {/* Mobile Bottom Sheet */}
+      {showDropdown && isMobile && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/50 backdrop-blur-[2px] touch-none overscroll-none animate-in fade-in duration-150"
+          onClick={() => setShowDropdown(false)}
+        >
+          <div
+            ref={sheetRef}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-h-[80dvh] rounded-t-3xl bg-white dark:bg-[#111827] border-t border-[#E5E2DC] dark:border-slate-800 shadow-2xl flex flex-col px-3 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] text-xs animate-in slide-in-from-bottom duration-200"
           >
-            <div className="flex items-center gap-2">
-              <UploadCloud className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-              <span>{lang === 'zh' ? '同步全部旅程至雲端' : 'Sync All Trips'}</span>
-            </div>
-            {syncDone ? (
-              <Check className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-            ) : isSyncing ? (
-              <span className="text-[11px] text-teal-700 dark:text-teal-400 font-mono">...</span>
-            ) : null}
-          </button>
-
-          <button
-            type="button"
-            onClick={async () => {
-              if (driveConnected || isConnectingDrive) return;
-              setDriveError(null);
-              setIsConnectingDrive(true);
-              try {
-                const token = await connectGoogleDrive();
-                const ok = Boolean(token) || hasDriveAccessToken();
-                setDriveConnected(ok);
-                if (!ok) {
-                  setDriveError(
-                    lang === 'zh'
-                      ? 'Google Drive 授權已取消或彈窗被封鎖'
-                      : 'Drive authorization cancelled or popup blocked'
-                  );
-                }
-              } finally {
-                setIsConnectingDrive(false);
-              }
-            }}
-            className="w-full min-h-[44px] text-left px-2.5 py-1.5 rounded-xl hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-between gap-2 transition cursor-pointer"
-          >
-            <div className="flex items-center gap-2 min-w-0">
-              <HardDrive className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
-              <span className="truncate">
-                {driveConnected
-                  ? lang === 'zh'
-                    ? 'Drive 原圖備份已連線'
-                    : 'Drive Originals Connected'
-                  : lang === 'zh'
-                  ? '連線 Google Drive 原圖空間'
-                  : 'Connect Google Drive Originals'}
-              </span>
-            </div>
-            {driveConnected ? (
-              <Check className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
-            ) : (
-              <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400 shrink-0">
-                {isConnectingDrive ? '...' : '授權'}
-              </span>
-            )}
-          </button>
-
-          {driveError && (
-            <p className="px-2.5 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-300 leading-snug">
-              {driveError}
-            </p>
-          )}
-
-          <div className="pt-1 border-t border-[#E5E2DC] dark:border-slate-800">
-            <button
-              onClick={handleLogout}
-              className="w-full min-h-[44px] text-left px-2.5 py-1.5 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-700 dark:text-rose-400 flex items-center gap-2 transition cursor-pointer"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>{lang === 'zh' ? '登出帳號' : 'Sign Out'}</span>
-            </button>
+            <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto my-2 shrink-0" />
+            {renderAccountMenuContent()}
           </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Desktop Dropdown Popover */}
+      {showDropdown && !isMobile && (
+        <div className="absolute right-0 top-full mt-1.5 w-64 bg-white dark:bg-[#111827] rounded-2xl shadow-xl border border-[#E5E2DC] dark:border-slate-800 p-2.5 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 flex flex-col">
+          {renderAccountMenuContent()}
         </div>
       )}
     </div>

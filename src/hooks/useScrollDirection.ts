@@ -4,6 +4,7 @@ interface UseScrollDirectionOptions {
   thresholdDown?: number; // Scroll distance in px before hiding (default: 10)
   thresholdUp?: number;   // Scroll distance in px before revealing (default: 6)
   topOffset?: number;     // Scroll offset from page top where nav is always visible (default: 32)
+  paused?: boolean;       // Pause hiding while top-bar menus/modals are open
 }
 
 /**
@@ -14,23 +15,48 @@ export function useScrollDirection({
   thresholdDown = 10,
   thresholdUp = 6,
   topOffset = 32,
+  paused = false,
 }: UseScrollDirectionOptions = {}) {
   const [isNavHidden, setIsNavHidden] = useState(false);
   const lastScrollY = useRef(0);
   const accumulatedDelta = useRef(0);
   const ticking = useRef(false);
+  const pausedRef = useRef(paused);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+    if (paused) {
+      setIsNavHidden(false);
+      accumulatedDelta.current = 0;
+    } else if (typeof window !== 'undefined') {
+      lastScrollY.current = Math.max(0, window.scrollY);
+      accumulatedDelta.current = 0;
+    }
+  }, [paused]);
 
   const resetNavVisibility = useCallback(() => {
     setIsNavHidden(false);
     accumulatedDelta.current = 0;
+    if (typeof window !== 'undefined') {
+      lastScrollY.current = Math.max(0, window.scrollY);
+    }
   }, []);
 
   useEffect(() => {
     const isMobile = () => typeof window !== 'undefined' && window.innerWidth < 640;
 
     const handleScroll = () => {
+      if (pausedRef.current || (typeof document !== 'undefined' && document.body.hasAttribute('data-scroll-locked'))) {
+        return;
+      }
+
       if (!ticking.current) {
         window.requestAnimationFrame(() => {
+          if (pausedRef.current || (typeof document !== 'undefined' && document.body.hasAttribute('data-scroll-locked'))) {
+            ticking.current = false;
+            return;
+          }
+
           // If desktop or tablet, never hide nav
           if (!isMobile()) {
             setIsNavHidden(false);
