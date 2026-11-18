@@ -17,10 +17,13 @@ const STORAGE_KEY_CURRENT_ID = 'hiyori_current_trip_id_v1';
 const LEGACY_STORAGE_KEY_CURRENT_ID = 'wayfarer_current_trip_id_v1';
 const STORAGE_KEY_PRESET_SEEDED = 'hiyori_preset_seeded_v1';
 
+let localTripsRevision = 0;
+
 function normalizeAndCleanTrips(rawTrips: Trip[]): Trip[] {
+  const deletedIds = new Set(getDeletedTripIds());
   const uniqueMap = new Map<string, Trip>();
   rawTrips.forEach((t: Trip) => {
-    if (t && t.id) {
+    if (t && t.id && !deletedIds.has(t.id)) {
       const existing = uniqueMap.get(t.id);
       if (!existing || (t.updatedAt || 0) > (existing.updatedAt || 0)) {
         uniqueMap.set(t.id, t);
@@ -37,7 +40,6 @@ function normalizeAndCleanTrips(rawTrips: Trip[]): Trip[] {
   );
 
   const idx = cleaned.findIndex((t: Trip) => t.id === 'preset-hokuriku-chubu-9days');
-  const deletedIds = new Set(getDeletedTripIds());
   const alreadySeeded = localStorage.getItem(STORAGE_KEY_PRESET_SEEDED) === '1';
 
   if (idx === -1) {
@@ -82,13 +84,19 @@ export function getStoredTrips(): Trip[] {
       raw = localStorage.getItem(LEGACY_STORAGE_KEY_TRIPS);
     }
     if (!raw) {
+      if (localStorage.getItem(STORAGE_KEY_PRESET_SEEDED) === '1') {
+        return [];
+      }
       localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(PRESET_TRIPS));
       localStorage.setItem(STORAGE_KEY_CURRENT_ID, PRESET_TRIPS[0].id);
       localStorage.setItem(STORAGE_KEY_PRESET_SEEDED, '1');
       return PRESET_TRIPS;
     }
     const trips = JSON.parse(raw);
-    if (Array.isArray(trips) && trips.length > 0) {
+    if (Array.isArray(trips)) {
+      if (trips.length === 0) {
+        return localStorage.getItem(STORAGE_KEY_PRESET_SEEDED) === '1' ? [] : PRESET_TRIPS;
+      }
       const cleaned = normalizeAndCleanTrips(trips);
       try {
         localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(cleaned));
@@ -108,9 +116,13 @@ export function getStoredTrips(): Trip[] {
  * Hydrate trips and media cache from IndexedDB on startup, migrating legacy localStorage inline photos.
  */
 export async function hydrateStorageFromIndexedDB(): Promise<Trip[]> {
+  const startRevision = localTripsRevision;
   try {
     await idbWarmMediaCache();
     const idbTrips = await idbGetAllTrips();
+    if (localTripsRevision !== startRevision) {
+      return getStoredTrips();
+    }
     if (idbTrips && idbTrips.length > 0) {
       const cleaned = normalizeAndCleanTrips(idbTrips);
       // Ensure any stray inline images are offloaded to IndexedDB media store
@@ -119,13 +131,18 @@ export async function hydrateStorageFromIndexedDB(): Promise<Trip[]> {
         const { trip: lightweight } = await extractInlineImagesToMediaRefs(t);
         migrated.push(lightweight);
       }
-      await idbSaveAllTrips(migrated);
+      if (localTripsRevision !== startRevision) {
+        return getStoredTrips();
+      }
+      const deletedSet = new Set(getDeletedTripIds());
+      const finalMigrated = migrated.filter((t) => !deletedSet.has(t.id));
+      await idbSaveAllTrips(finalMigrated);
       try {
-        localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(migrated));
+        localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(finalMigrated));
       } catch {
         // Ignore if localStorage exceeds quota
       }
-      return migrated;
+      return finalMigrated;
     }
 
     // First migration from localStorage -> IndexedDB
@@ -135,13 +152,18 @@ export async function hydrateStorageFromIndexedDB(): Promise<Trip[]> {
       const { trip: lightweight } = await extractInlineImagesToMediaRefs(t);
       migrated.push(lightweight);
     }
-    await idbSaveAllTrips(migrated);
+    if (localTripsRevision !== startRevision) {
+      return getStoredTrips();
+    }
+    const deletedSet = new Set(getDeletedTripIds());
+    const finalMigrated = migrated.filter((t) => !deletedSet.has(t.id));
+    await idbSaveAllTrips(finalMigrated);
     try {
-      localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(migrated));
+      localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(finalMigrated));
     } catch {
       // Ignore
     }
-    return migrated;
+    return finalMigrated;
   } catch (err) {
     console.warn('[Storage] IndexedDB hydration fallback:', err);
     return getStoredTrips();
@@ -149,6 +171,7 @@ export async function hydrateStorageFromIndexedDB(): Promise<Trip[]> {
 }
 
 export function saveTrips(trips: Trip[]): void {
+  localTripsRevision++;
   const uniqueMap = new Map<string, Trip>();
   (trips || []).forEach((t) => {
     if (t && t.id) {
@@ -177,7 +200,44 @@ export function saveTrips(trips: Trip[]): void {
   }
 }
 
+/**
+ * Clear cloud-synced and account-owned cached trips on explicit sign-out so re-login
+ * always reconciles cleanly from Firestore without resurrecting stale or deleted trips.
+ */
+export function clearAccountTripsOnLogout(signedOutUid?: string, pendingQueuedTripIds: string[] = []): Trip[] {
+  localTripsRevision++;
+  const pendingSet = new Set(pendingQueuedTripIds);
+  const current = getStoredTrips();
+  const retained = current.filter((t) => {
+    if (pendingSet.has(t.id)) return true;
+    if (t.lastSyncedAt) return false;
+    if (t.ownerId && (!signedOutUid || t.ownerId === signedOutUid)) return false;
+    if (t.id === 'preset-hokuriku-chubu-9days' && (t.updatedAt || 0) <= 1728518400000) {
+      return false;
+    }
+    return true;
+  });
+
+  try {
+    localStorage.setItem(STORAGE_KEY_PRESET_SEEDED, '1');
+    localStorage.removeItem(STORAGE_KEY_CURRENT_ID);
+  } catch {
+    // Ignore
+  }
+
+  saveTrips(retained);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('hiyori_account_cache_cleared', {
+        detail: { retainedTrips: retained },
+      })
+    );
+  }
+  return retained;
+}
+
 export async function resetAllLocalData(): Promise<void> {
+  localTripsRevision++;
   await idbClearAll();
   localStorage.clear();
 }
@@ -193,7 +253,7 @@ export function getCurrentTripId(): string {
   } catch {
     // fallback
   }
-  return PRESET_TRIPS[0].id;
+  return localStorage.getItem(STORAGE_KEY_PRESET_SEEDED) === '1' ? '' : PRESET_TRIPS[0].id;
 }
 
 export function setCurrentTripId(id: string): void {
@@ -215,6 +275,7 @@ export function getDeletedTripIds(): string[] {
 }
 
 export function recordDeletedTripId(tripId: string): void {
+  localTripsRevision++;
   try {
     const current = getDeletedTripIds();
     if (!current.includes(tripId)) {
@@ -227,6 +288,7 @@ export function recordDeletedTripId(tripId: string): void {
 }
 
 export function clearDeletedTripId(tripId: string): void {
+  localTripsRevision++;
   try {
     const current = getDeletedTripIds().filter((id) => id !== tripId);
     localStorage.setItem(STORAGE_KEY_DELETED_IDS, JSON.stringify(current));

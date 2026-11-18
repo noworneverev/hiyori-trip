@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { getStorageUsage, getStorageUsageAsync, exportAllTripsToJSON, getDeletedTripIds } from '../../utils/storage';
+import { getStorageUsage, getStorageUsageAsync, exportAllTripsToJSON, getDeletedTripIds, getStoredTrips, saveTrips } from '../../utils/storage';
 import { auth, fetchUserTombstones, loginWithGoogleDetailed, logoutFirebase, saveTripToCloud } from '../../utils/firebase';
 import { Trip } from '../../types/itinerary';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
@@ -82,8 +82,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         return true;
       });
 
+      const syncedMap: Record<string, number> = {};
       for (const trip of validTrips) {
-        await saveTripToCloud(currentUser.uid, trip);
+        const saved = await saveTripToCloud(currentUser.uid, trip);
+        syncedMap[trip.id] = Math.max(Date.now(), saved.lastSyncedAt || trip.updatedAt || 0);
+      }
+      if (Object.keys(syncedMap).length > 0) {
+        const stored = getStoredTrips();
+        saveTrips(
+          stored.map((tr) =>
+            syncedMap[tr.id] ? { ...tr, lastSyncedAt: Math.max(tr.lastSyncedAt || 0, syncedMap[tr.id]) } : tr
+          )
+        );
       }
       setSyncDone(true);
       setTimeout(() => setSyncDone(false), 3000);

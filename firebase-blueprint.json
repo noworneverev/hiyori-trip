@@ -21,6 +21,16 @@
           "description": "The owner email address.",
           "maxLength": 320
         },
+        "ownerName": {
+          "type": "string",
+          "description": "Display name of trip owner.",
+          "maxLength": 128
+        },
+        "originalTripId": {
+          "type": "string",
+          "description": "Original trip ID for published/shared/collab snapshots.",
+          "maxLength": 128
+        },
         "title": {
           "type": "string",
           "description": "Trip name or title.",
@@ -80,6 +90,22 @@
           "type": "array",
           "description": "List of standalone flight, hotel, rail, and pass booking vouchers."
         },
+        "customExpenseCategories": {
+          "type": "array",
+          "description": "Custom expense category keys."
+        },
+        "customCategoryLabels": {
+          "type": "object",
+          "description": "Custom expense category labels."
+        },
+        "customExpenseTags": {
+          "type": "array",
+          "description": "Custom expense tags."
+        },
+        "customExchangeRates": {
+          "type": "object",
+          "description": "Custom currency exchange rates."
+        },
         "emergencyContacts": {
           "type": "array",
           "description": "List of emergency contacts."
@@ -87,6 +113,10 @@
         "memories": {
           "type": "array",
           "description": "List of travel memory metadata and media:// references."
+        },
+        "stickyNotes": {
+          "type": "array",
+          "description": "Quick sticky notes attached to the trip."
         },
         "tripMode": {
           "type": "string",
@@ -101,6 +131,11 @@
           "type": "number",
           "description": "Representative longitude for the trip destination on footprint maps."
         },
+        "googlePhotosAlbumUrl": {
+          "type": "string",
+          "description": "Linked Google Photos shared album URL.",
+          "maxLength": 1000
+        },
         "driveFolderId": {
           "type": "string",
           "description": "Google Drive folder ID where uncompressed original trip photos are stored.",
@@ -110,6 +145,10 @@
           "type": "object",
           "description": "Map of deleted sub-item IDs to deletion epoch timestamps."
         },
+        "isSoloTrip": {
+          "type": "boolean",
+          "description": "Whether this is a solo trip."
+        },
         "isSplitEnabled": {
           "type": "boolean",
           "description": "Whether group bill splitting is enabled."
@@ -117,6 +156,15 @@
         "splitMembers": {
           "type": "array",
           "description": "List of travel companion member names for bill splitting."
+        },
+        "initialCashAmount": {
+          "type": "number",
+          "description": "Initial cash amount carried for the trip."
+        },
+        "initialCashCurrency": {
+          "type": "string",
+          "description": "Currency of initial cash amount.",
+          "maxLength": 10
         },
         "isCollaborative": {
           "type": "boolean",
@@ -136,9 +184,26 @@
           "type": "array",
           "description": "Bounded list of lowercase verified emails granted editor access."
         },
+        "viewerEmails": {
+          "type": "array",
+          "description": "Bounded list of lowercase verified emails granted viewer access."
+        },
         "collaborators": {
           "type": "array",
           "description": "Explicit collaborator member objects."
+        },
+        "lastUpdatedBy": {
+          "type": "string",
+          "description": "Display name of last editor.",
+          "maxLength": 128
+        },
+        "lastSyncedAt": {
+          "type": "number",
+          "description": "Last cloud sync epoch timestamp."
+        },
+        "publishedAt": {
+          "type": "number",
+          "description": "Share snapshot publish epoch timestamp."
         },
         "createdAt": {
           "type": "number",

@@ -44,6 +44,7 @@ import {
   isMediaRef,
   registerCloudMediaResolver,
 } from './image';
+import { clearAccountTripsOnLogout } from './storage';
 
 export function sanitizeForFirestore<T>(data: T): T {
   return JSON.parse(JSON.stringify(data));
@@ -457,11 +458,30 @@ export async function connectGoogleDrive(): Promise<string | null> {
 }
 
 export async function logoutFirebase(): Promise<void> {
+  const signedOutUid = auth.currentUser?.uid;
+  let pendingTripIds: string[] = [];
+  if (signedOutUid && typeof localStorage !== 'undefined') {
+    try {
+      const rawQueue = localStorage.getItem('hiyori_offline_sync_queue_v1');
+      if (rawQueue) {
+        const parsed = JSON.parse(rawQueue);
+        if (Array.isArray(parsed)) {
+          pendingTripIds = parsed
+            .filter((item) => item?.type === 'save_trip' && item?.userId === signedOutUid && item?.trip?.id)
+            .map((item) => item.trip.id as string);
+        }
+      }
+    } catch {
+      // Ignore queue inspection error
+    }
+  }
   try {
     clearDriveAccessToken();
     await signOut(auth);
   } catch (error) {
     console.error('Firebase Sign-out Error:', error);
+  } finally {
+    clearAccountTripsOnLogout(signedOutUid, pendingTripIds);
   }
 }
 
@@ -726,20 +746,34 @@ export async function recordCloudTripTombstone(userId: string, tripId: string): 
   try {
     const existing = await fetchUserTombstones(userId);
     const now = Date.now();
+    const nextTimestamp = Math.max(now, existing[tripId] || 0);
     const nextMap: Record<string, number> = {
       ...existing,
-      [tripId]: Math.max(now, existing[tripId] || 0),
+      [tripId]: nextTimestamp,
     };
-    // Cap to most recent 100 deleted trips
-    const sorted = Object.entries(nextMap).sort((a, b) => b[1] - a[1]).slice(0, 100);
-    await setDoc(
-      doc(db, path),
-      sanitizeForFirestore({
-        ownerId: userId,
-        deletedTrips: Object.fromEntries(sorted),
-        updatedAt: now,
-      })
-    );
+
+    if (Object.keys(nextMap).length <= 100) {
+      await setDoc(
+        doc(db, path),
+        sanitizeForFirestore({
+          ownerId: userId,
+          deletedTrips: { [tripId]: nextTimestamp },
+          updatedAt: now,
+        }),
+        { merge: true }
+      );
+    } else {
+      // Cap to most recent 100 deleted trips
+      const sorted = Object.entries(nextMap).sort((a, b) => b[1] - a[1]).slice(0, 100);
+      await setDoc(
+        doc(db, path),
+        sanitizeForFirestore({
+          ownerId: userId,
+          deletedTrips: Object.fromEntries(sorted),
+          updatedAt: now,
+        })
+      );
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }

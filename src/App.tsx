@@ -12,7 +12,7 @@ import {
   hydrateStorageFromIndexedDB,
   resetAllLocalData,
 } from './utils/storage';
-import { extractInlineImagesToMediaRefs, rebindTripMediaIds, garbageCollectOrphanedMedia } from './utils/image';
+import { rebindTripMediaIds, garbageCollectOrphanedMedia } from './utils/image';
 import { idbDeleteMediaByTrip } from './utils/indexedDb';
 import { formatDateSlash, getTodayLocal, sortItineraryItemsByTime, findInsertionPosition } from './utils/date';
 import { Language, TRANSLATIONS, getStoredLanguage, setStoredLanguage } from './utils/i18n';
@@ -61,6 +61,8 @@ import {
   enqueueTripDelete,
   enqueueCollabSync,
   flushPendingSyncQueue,
+  removePendingTripSave,
+  getPendingQueueAsync,
   TripConflict,
   summarizeTripForConflict,
   hasTripContentDifference,
@@ -234,6 +236,10 @@ export default function App() {
     currentUserRef.current = currentUser;
   }, [currentUser]);
 
+  const hydrationPromiseRef = useRef<Promise<Trip[]> | null>(null);
+  const hasCloudReconciledRef = useRef<boolean>(false);
+  const inFlightCloudSavesRef = useRef<Set<string>>(new Set());
+
   // Global unmount timer cleanup & accessibility initialization
   useEffect(() => {
     initAccessibilityScale();
@@ -249,11 +255,20 @@ export default function App() {
         showToast(detail.error);
       }
     };
+    const handleAccountCacheCleared = (e: Event) => {
+      const detail = (e as CustomEvent<{ retainedTrips?: Trip[] }>).detail;
+      hasCloudReconciledRef.current = false;
+      const retained = detail?.retainedTrips || [];
+      setTrips(retained);
+      setCurrentTripIdState(retained[0]?.id || '');
+    };
     window.addEventListener('cloud_sync_warning', handleSyncWarning);
     window.addEventListener('cloud_sync_status', handleSyncStatus);
+    window.addEventListener('hiyori_account_cache_cleared', handleAccountCacheCleared);
     return () => {
       window.removeEventListener('cloud_sync_warning', handleSyncWarning);
       window.removeEventListener('cloud_sync_status', handleSyncStatus);
+      window.removeEventListener('hiyori_account_cache_cleared', handleAccountCacheCleared);
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
       if (fabLongPressTimerRef.current) clearTimeout(fabLongPressTimerRef.current);
     };
@@ -265,9 +280,15 @@ export default function App() {
     const shareId = urlParams.get('share');
     const collabId = urlParams.get('collab');
 
-    hydrateStorageFromIndexedDB().then((hydrated) => {
-      if (!isMounted) return;
-      const loadedTrips = hydrated.length > 0 ? hydrated : getStoredTrips();
+    const hydrationPromise = hydrateStorageFromIndexedDB();
+    hydrationPromiseRef.current = hydrationPromise;
+
+    hydrationPromise.then((hydrated) => {
+      if (!isMounted || hasCloudReconciledRef.current) return;
+      const deletedSet = new Set(getDeletedTripIds());
+      const loadedTrips = (hydrated.length > 0 ? hydrated : getStoredTrips()).filter(
+        (tr) => !deletedSet.has(tr.id)
+      );
       setTrips(loadedTrips);
       if (!shareId && !collabId) {
         const activeId = getCurrentTripId();
@@ -515,48 +536,22 @@ export default function App() {
         }, 150);
       }
 
-      if (!user) return;
+      if (!user) {
+        hasCloudReconciledRef.current = false;
+        return;
+      }
 
-      // 1. Flush any offline operations scoped to this user
-      flushPendingSyncQueue(user.uid)
-        .then(({ successCount }) => {
-          if (successCount > 0) {
-            showToast(lang === 'zh' ? `已同步 ${successCount} 筆離線變更` : `Synced ${successCount} offline changes`);
-          }
-        })
-        .catch(() => {});
-
-      // 2. Progressive background migration of any legacy inline Base64 trips -> media:// refs
-      (async () => {
+      // 1. Wait for startup IndexedDB hydration so local store doesn't overwrite reconciled cloud state later
+      if (hydrationPromiseRef.current) {
         try {
-          const localTrips = getStoredTrips();
-          const deletedSet = new Set(getDeletedTripIds());
-          const updatedLocal: Trip[] = [];
-          let anyMigrated = false;
-          for (const tr of localTrips) {
-            if (deletedSet.has(tr.id)) {
-              updatedLocal.push(tr);
-              continue;
-            }
-            const { trip: lightweight, extractedRecords } = await extractInlineImagesToMediaRefs(tr);
-            if (extractedRecords.length > 0) {
-              anyMigrated = true;
-              updatedLocal.push(lightweight);
-              saveTripToCloud(user.uid, lightweight).catch(() => enqueueTripSave(user.uid, lightweight));
-            } else {
-              updatedLocal.push(tr);
-            }
-          }
-          if (anyMigrated && isEffectMounted) {
-            setTrips(updatedLocal);
-            saveTrips(updatedLocal);
-          }
-        } catch (err) {
-          console.warn('Progressive media migration warning:', err);
+          await hydrationPromiseRef.current;
+        } catch {
+          // Ignore hydration fallback error
         }
-      })();
+      }
+      if (!isEffectMounted || currentUserRef.current?.uid !== user.uid) return;
 
-      // 3. Authoritative server tombstone state + live tombstone & trips listeners
+      // 2. Fetch authoritative server tombstone state FIRST so offline queue & merge honor mobile deletions
       let cloudTombstones: Record<string, number> = {};
       let tombstonesFromServerReady = false;
       let latestCloudTrips: Trip[] | null = null;
@@ -570,6 +565,17 @@ export default function App() {
         }
       } catch {
         cloudTombstones = {};
+      }
+      if (!isEffectMounted || currentUserRef.current?.uid !== user.uid) return;
+
+      // 3. Flush offline queue sequentially BEFORE initial merge (dropping any tombstoned queued saves)
+      try {
+        const { successCount } = await flushPendingSyncQueue(user.uid, cloudTombstones);
+        if (successCount > 0 && isEffectMounted) {
+          showToast(lang === 'zh' ? `已同步 ${successCount} 筆離線變更` : `Synced ${successCount} offline changes`);
+        }
+      } catch {
+        // Offline queue flush will retry on next online event
       }
       if (!isEffectMounted || currentUserRef.current?.uid !== user.uid) return;
 
@@ -612,17 +618,38 @@ export default function App() {
           }
         }
 
+        const pendingSaveIds = new Set<string>(inFlightCloudSavesRef.current);
+        pendingCloudWritesRef.current.forEach((task) => {
+          if (task.type === 'user' && task.uid === user.uid && task.trip?.id) {
+            pendingSaveIds.add(task.trip.id);
+          }
+        });
+        try {
+          const queued = await getPendingQueueAsync();
+          queued.forEach((q) => {
+            if (q.type === 'save_trip' && q.userId === user.uid && q.trip?.id) {
+              pendingSaveIds.add(q.trip.id);
+            }
+          });
+        } catch {
+          // Ignore queue read error
+        }
+
         const filteredCloud = latestCloudTrips.filter((c) => !deletedIds.has(c.id));
         const isServerAuthoritative =
           tripsFromServerReady && (tombstonesFromServerReady || hasTombstones || filteredCloud.length > 0);
-        const hasPreviouslySyncedLocal = currentLocal.some((l) => Boolean(l.lastSyncedAt));
+        const hasAccountBoundLocal = currentLocal.some(
+          (l) => Boolean(l.lastSyncedAt) || Boolean(l.ownerId && l.ownerId === user.uid && !pendingSaveIds.has(l.id))
+        );
 
-        if (filteredCloud.length > 0 || hasTombstones || (tripsFromServerReady && hasPreviouslySyncedLocal)) {
+        if (filteredCloud.length > 0 || hasTombstones || (tripsFromServerReady && hasAccountBoundLocal)) {
           const { merged, tripsToUpload, deletedLocalTripIds, conflicts } = mergeTrips(
             currentLocal,
             filteredCloud,
             cloudTombstones,
-            isServerAuthoritative
+            isServerAuthoritative,
+            user.uid,
+            pendingSaveIds
           );
 
           for (const id of deletedLocalTripIds) {
@@ -671,6 +698,9 @@ export default function App() {
               garbageCollectOrphanedMedia(normalizedMerged).catch(() => {});
             }
           }
+          if (isServerAuthoritative) {
+            hasCloudReconciledRef.current = true;
+          }
 
           if (tripsToUpload.length > 0) {
             const refreshedDeletedIds = new Set(getDeletedTripIds());
@@ -680,11 +710,14 @@ export default function App() {
                 typeof cloudTombstones[tr.id] === 'number' &&
                 cloudTombstones[tr.id] + 15 * 60 * 1000 >= (tr.updatedAt || 0);
               if (!refreshedDeletedIds.has(tr.id) && !isRemoteTombstoned) {
+                inFlightCloudSavesRef.current.add(tr.id);
                 try {
                   await saveTripToCloud(user.uid, tr);
                   syncedMap[tr.id] = Math.max(Date.now(), tr.updatedAt || 0);
                 } catch {
                   enqueueTripSave(user.uid, tr);
+                } finally {
+                  inFlightCloudSavesRef.current.delete(tr.id);
                 }
               }
             }
@@ -702,6 +735,7 @@ export default function App() {
             setCurrentTripId(fallbackId);
           }
         } else if (tripsFromServerReady) {
+          hasCloudReconciledRef.current = true;
           // True first login with authoritative empty cloud & no tombstones
           const toSync = (currentLocal || []).filter(
             (tr) => !deletedIds.has(tr.id) && typeof cloudTombstones[tr.id] !== 'number'
@@ -709,11 +743,14 @@ export default function App() {
           if (toSync.length > 0) {
             const syncedMap: Record<string, number> = {};
             for (const tr of toSync) {
+              inFlightCloudSavesRef.current.add(tr.id);
               try {
                 await saveTripToCloud(user.uid, tr);
                 syncedMap[tr.id] = Math.max(Date.now(), tr.updatedAt || 0);
               } catch {
                 enqueueTripSave(user.uid, tr);
+              } finally {
+                inFlightCloudSavesRef.current.delete(tr.id);
               }
             }
             markTripsSyncedLocally(syncedMap);
@@ -827,12 +864,16 @@ export default function App() {
         if (enqueueOnly || (typeof navigator !== 'undefined' && !navigator.onLine)) {
           enqueueTripSave(task.uid, task.trip);
         } else {
+          inFlightCloudSavesRef.current.add(task.trip.id);
           saveTripToCloud(task.uid, task.trip)
             .then(() => {
               markTripsSyncedLocally({ [task.trip.id]: Math.max(Date.now(), task.trip.updatedAt || 0) });
             })
             .catch(() => {
               enqueueTripSave(task.uid!, task.trip);
+            })
+            .finally(() => {
+              inFlightCloudSavesRef.current.delete(task.trip.id);
             });
         }
       }
@@ -891,6 +932,7 @@ export default function App() {
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           enqueueTripSave(pending.uid, pending.trip);
         } else {
+          inFlightCloudSavesRef.current.add(pending.trip.id);
           saveTripToCloud(pending.uid, pending.trip)
             .then(() => {
               markTripsSyncedLocally({ [pending.trip.id]: Math.max(Date.now(), pending.trip.updatedAt || 0) });
@@ -899,6 +941,9 @@ export default function App() {
               console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
               enqueueTripSave(pending.uid!, pending.trip);
               showToast(lang === 'zh' ? '雲端同步稍有延遲，資料已安全保留於本機' : 'Cloud save delayed, safely queued offline');
+            })
+            .finally(() => {
+              inFlightCloudSavesRef.current.delete(pending.trip.id);
             });
         }
       }
@@ -1065,6 +1110,7 @@ export default function App() {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         enqueueTripSave(user.uid, newTrip);
       } else {
+        inFlightCloudSavesRef.current.add(newTrip.id);
         saveTripToCloud(user.uid, newTrip)
           .then(() => {
             markTripsSyncedLocally({ [newTrip.id]: Math.max(Date.now(), newTrip.updatedAt || 0) });
@@ -1072,6 +1118,9 @@ export default function App() {
           .catch((err) => {
             console.warn('Cloud save failed, enqueuing for offline reconnect:', err);
             enqueueTripSave(user.uid, newTrip);
+          })
+          .finally(() => {
+            inFlightCloudSavesRef.current.delete(newTrip.id);
           });
       }
     }
@@ -1136,8 +1185,9 @@ export default function App() {
       pendingCloudWritesRef.current.delete(collabKey);
     }
 
-    // Keep local deleted ledger permanently bounded (prevents preset re-seeding & cross-device resurrection)
+    // Keep local deleted ledger permanently bounded & purge any queued save tasks
     recordDeletedTripId(tripToDeleteId);
+    removePendingTripSave(user.uid, tripToDeleteId).catch(() => {});
 
     const remaining = trips.filter((t) => t.id !== tripToDeleteId);
     setTrips(remaining);

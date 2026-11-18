@@ -68,6 +68,10 @@ service cloud.firestore {
              isValidOptionalList(data, 'bookings', 100) &&
              isValidOptionalList(data, 'emergencyContacts', 100) &&
              isValidOptionalList(data, 'memories', 500) &&
+             isValidOptionalList(data, 'stickyNotes', 200) &&
+             isValidOptionalList(data, 'customExpenseCategories', 50) &&
+             isValidOptionalList(data, 'customExpenseTags', 100) &&
+             isValidOptionalList(data, 'splitMembers', 30) &&
              isValidOptionalList(data, 'collaborators', 30) &&
              isValidOptionalList(data, 'editorEmails', 30) &&
              isValidOptionalList(data, 'viewerEmails', 30);
@@ -80,12 +84,12 @@ service cloud.firestore {
                'id', 'ownerId', 'ownerEmail', 'title', 'destination', 'startDate', 'endDate',
                'currency', 'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
                'todos', 'expenses', 'bookings', 'customExpenseCategories', 'customCategoryLabels',
-               'customExchangeRates', 'emergencyContacts', 'memories', 'deletedItemIds',
-               'isSplitEnabled', 'splitMembers', 'initialCashAmount', 'initialCashCurrency',
-               'isSoloTrip', 'tripMode', 'destinationLat', 'destinationLng',
-               'googlePhotosAlbumUrl', 'driveFolderId', 'isCollaborative', 'collabId',
-               'collaborators', 'editorEmails', 'viewerEmails', 'generalAccess', 'lastUpdatedBy',
-               'lastSyncedAt', 'createdAt', 'updatedAt'
+               'customExpenseTags', 'customExchangeRates', 'emergencyContacts', 'memories',
+               'stickyNotes', 'deletedItemIds', 'isSplitEnabled', 'splitMembers',
+               'initialCashAmount', 'initialCashCurrency', 'isSoloTrip', 'tripMode',
+               'destinationLat', 'destinationLng', 'googlePhotosAlbumUrl', 'driveFolderId',
+               'isCollaborative', 'collabId', 'collaborators', 'editorEmails', 'viewerEmails',
+               'generalAccess', 'lastUpdatedBy', 'lastSyncedAt', 'createdAt', 'updatedAt'
              ]);
     }
 
@@ -115,9 +119,10 @@ service cloud.firestore {
                'id', 'originalTripId', 'ownerId', 'title', 'destination', 'startDate', 'endDate',
                'currency', 'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
                'todos', 'expenses', 'bookings', 'customExpenseCategories', 'customCategoryLabels',
-               'customExchangeRates', 'emergencyContacts', 'memories', 'isSplitEnabled',
-               'splitMembers', 'isSoloTrip', 'tripMode', 'destinationLat', 'destinationLng',
-               'googlePhotosAlbumUrl', 'driveFolderId', 'publishedAt', 'updatedAt'
+               'customExpenseTags', 'customExchangeRates', 'emergencyContacts', 'memories',
+               'stickyNotes', 'isSplitEnabled', 'splitMembers', 'isSoloTrip', 'tripMode',
+               'destinationLat', 'destinationLng', 'googlePhotosAlbumUrl', 'driveFolderId',
+               'publishedAt', 'updatedAt'
              ]);
     }
 
@@ -128,8 +133,8 @@ service cloud.firestore {
                'ownerName', 'generalAccess', 'collaborators', 'editorEmails', 'viewerEmails',
                'title', 'destination', 'startDate', 'endDate', 'currency', 'budgetTotal',
                'coverGradient', 'notes', 'days', 'packingList', 'todos', 'expenses', 'bookings',
-               'customExpenseCategories', 'customCategoryLabels', 'customExchangeRates',
-               'emergencyContacts', 'memories', 'deletedItemIds', 'isSplitEnabled',
+               'customExpenseCategories', 'customCategoryLabels', 'customExpenseTags', 'customExchangeRates',
+               'emergencyContacts', 'memories', 'stickyNotes', 'deletedItemIds', 'isSplitEnabled',
                'splitMembers', 'initialCashAmount', 'initialCashCurrency', 'isSoloTrip',
                'tripMode', 'destinationLat', 'destinationLng',
                'googlePhotosAlbumUrl', 'driveFolderId', 'createdAt', 'updatedAt', 'lastUpdatedBy'
@@ -171,7 +176,7 @@ service cloud.firestore {
                        isValidUserTrip(incoming(), userId) &&
                        incoming().ownerId == existing().ownerId;
       allow delete: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(tripId) &&
-                       existing().ownerId == request.auth.uid;
+                       (resource == null || existing().ownerId == request.auth.uid);
 
       // Media Subcollection for Private User Trips
       match /media/{mediaId} {
@@ -243,8 +248,8 @@ service cloud.firestore {
                              'title', 'destination', 'startDate', 'endDate', 'currency',
                              'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
                              'todos', 'expenses', 'bookings', 'customExpenseCategories', 'customCategoryLabels',
-                             'customExchangeRates', 'emergencyContacts', 'memories', 'deletedItemIds',
-                             'isSplitEnabled', 'splitMembers', 'initialCashAmount',
+                             'customExpenseTags', 'customExchangeRates', 'emergencyContacts', 'memories',
+                             'stickyNotes', 'deletedItemIds', 'isSplitEnabled', 'splitMembers', 'initialCashAmount',
                              'initialCashCurrency', 'isSoloTrip', 'tripMode', 'destinationLat',
                              'destinationLng', 'googlePhotosAlbumUrl', 'driveFolderId',
                              'updatedAt', 'lastUpdatedBy'

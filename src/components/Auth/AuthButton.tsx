@@ -10,7 +10,7 @@ import {
   logoutFirebase,
   saveTripToCloud,
 } from '../../utils/firebase';
-import { getDeletedTripIds } from '../../utils/storage';
+import { getDeletedTripIds, getStoredTrips, saveTrips } from '../../utils/storage';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { useIsMobileViewport } from '../../hooks/useIsMobileViewport';
 import { Trip } from '../../types/itinerary';
@@ -136,8 +136,18 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
         return true;
       });
 
+      const syncedMap: Record<string, number> = {};
       for (const trip of validTrips) {
-        await saveTripToCloud(user.uid, trip);
+        const saved = await saveTripToCloud(user.uid, trip);
+        syncedMap[trip.id] = Math.max(Date.now(), saved.lastSyncedAt || trip.updatedAt || 0);
+      }
+      if (Object.keys(syncedMap).length > 0) {
+        const stored = getStoredTrips();
+        saveTrips(
+          stored.map((tr) =>
+            syncedMap[tr.id] ? { ...tr, lastSyncedAt: Math.max(tr.lastSyncedAt || 0, syncedMap[tr.id]) } : tr
+          )
+        );
       }
       setSyncDone(true);
       if (onCloudSyncSuccess) onCloudSyncSuccess();
