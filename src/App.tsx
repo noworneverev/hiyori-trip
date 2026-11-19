@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { Trip, ItineraryItem } from './types/itinerary';
 import { PRESET_TRIPS } from './data/presetTrips';
 import {
@@ -18,8 +17,8 @@ import { formatDateSlash, getTodayLocal, sortItineraryItemsByTime, findInsertion
 import { Language, TRANSLATIONS, getStoredLanguage, setStoredLanguage } from './utils/i18n';
 import { useDarkMode } from './hooks/useDarkMode';
 import { useScrollDirection } from './hooks/useScrollDirection';
-import { useBodyScrollLock } from './hooks/useBodyScrollLock';
 import { useIsMobileViewport } from './hooks/useIsMobileViewport';
+import { IosModalSheet, IosNavBar, IosInsetGroup } from './components/UI/IosPrimitives';
 import { TimelineTab } from './components/Tabs/TimelineTab';
 import { LiveCompanionTab } from './components/Tabs/LiveCompanionTab';
 import { ExpensesTab } from './components/Tabs/ExpensesTab';
@@ -68,7 +67,6 @@ import {
   hasTripContentDifference,
 } from './utils/syncManager';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { PWAInstallButton } from './components/PWA/PWAInstallButton';
 import { OfflineIndicator } from './components/PWA/OfflineIndicator';
 import { HiyoriLogo } from './components/UI/HiyoriLogo';
 import { initAccessibilityScale } from './utils/accessibility';
@@ -89,6 +87,7 @@ import {
   Sparkles,
   Plane,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Trash2,
   Settings,
@@ -165,7 +164,6 @@ export default function App() {
   const [isAppMenuOpen, setIsAppMenuOpen] = useState(false);
   const [isAuthMenuOpen, setIsAuthMenuOpen] = useState(false);
   const tripSwitcherRef = useRef<HTMLDivElement>(null);
-  const tripSwitcherSheetRef = useRef<HTMLDivElement>(null);
 
   const isAnyOverlayOpen =
     showTripSwitcher ||
@@ -179,8 +177,6 @@ export default function App() {
 
   // Mobile scroll-to-hide dynamic chrome (paused whenever header menus/modals are open)
   const { isNavHidden, resetNavVisibility } = useScrollDirection({ paused: isAnyOverlayOpen });
-
-  useBodyScrollLock(showTripSwitcher && isMobile);
 
   // Reset navigation visibility whenever switching tabs or opening menus/modals
   useEffect(() => {
@@ -203,11 +199,11 @@ export default function App() {
   const [pickedCoords, setPickedCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
+    if (!showTripSwitcher || isMobile) return;
     const handleClickOutside = (e: MouseEvent | TouchEvent) => {
       const target = e.target as Node;
       const inTrigger = tripSwitcherRef.current?.contains(target);
-      const inSheet = tripSwitcherSheetRef.current?.contains(target);
-      if (!inTrigger && !inSheet) {
+      if (!inTrigger) {
         setShowTripSwitcher(false);
       }
     };
@@ -216,17 +212,15 @@ export default function App() {
         setShowTripSwitcher(false);
       }
     };
-    if (showTripSwitcher) {
-      document.addEventListener('mousedown', handleClickOutside);
-      document.addEventListener('touchstart', handleClickOutside, { passive: true });
-      window.addEventListener('keydown', handleKeyDown);
-    }
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside, { passive: true });
+    window.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [showTripSwitcher]);
+  }, [showTripSwitcher, isMobile]);
 
 
   // Load from local storage on mount
@@ -1419,7 +1413,7 @@ export default function App() {
 
   if (!currentTrip) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300">
+      <div className="min-h-dvh flex items-center justify-center bg-[#FAF9F6] dark:bg-[#090D16] text-slate-700 dark:text-slate-300 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
         <p>日和手帳載入中...</p>
       </div>
     );
@@ -1429,7 +1423,7 @@ export default function App() {
   const nightCount = Math.max(dayCount - 1, 0);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#FAF9F6] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 transition-colors overflow-x-hidden">
+    <div className="min-h-dvh flex flex-col bg-[#FAF9F6] dark:bg-[#090D16] text-slate-900 dark:text-slate-100 transition-colors overflow-x-hidden">
       {/* Top Navbar (Clean 3-zone contract) */}
       <header className={`sticky top-0 z-40 bg-white/90 dark:bg-[#111827]/90 backdrop-blur-xl border-b border-[#E5E2DC] dark:border-slate-800 pt-[env(safe-area-inset-top,0px)] max-sm:transition-transform max-sm:duration-300 max-sm:ease-in-out ${
         isNavHidden ? 'max-sm:-translate-y-full' : 'max-sm:translate-y-0'
@@ -1460,158 +1454,176 @@ export default function App() {
               {(() => {
                 if (!showTripSwitcher) return null;
 
-                const switcherBody = (
-                  <>
-                    <div className="px-2.5 py-2 text-xs sm:text-[11px] font-bold text-slate-600 dark:text-slate-300 border-b border-[#E5E2DC] dark:border-slate-800 flex justify-between items-center font-mono tabular-nums shrink-0">
-                      <span>{lang === 'zh' ? '所有旅程' : 'All Trips'} ({trips.length})</span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowTripSwitcher(false);
-                            runWithAuth(() => {
-                              setShowTripModal(true);
-                              setTripModalData(null);
-                            }, lang === 'zh' ? '建立新旅程' : 'Create new trip');
-                          }}
-                          className="min-h-[36px] sm:min-h-0 px-2 py-1 text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1 font-sans text-xs font-semibold cursor-pointer"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>{t.newTrip}</span>
-                        </button>
-                        {isMobile && (
+                const tripRows = trips.map((tr) => {
+                  const rowPerm = checkUserTripPermission(tr, currentUser);
+                  const canEditRow = !tr.isCollaborative || rowPerm.canEdit;
+                  const canDeleteRow = !tr.isCollaborative || rowPerm.isOwner;
+                  const isActive = tr.id === currentTrip.id;
+
+                  return (
+                    <div
+                      key={tr.id}
+                      className={`px-3.5 py-2.5 min-h-[54px] sm:min-h-[48px] transition text-xs flex items-center justify-between gap-2 ${
+                        isActive
+                          ? 'bg-teal-50/75 dark:bg-teal-950/35 text-teal-900 dark:text-teal-100'
+                          : 'hover:bg-[#FAF9F6] dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleSelectTrip(tr.id);
+                          setShowTripSwitcher(false);
+                        }}
+                        className="flex-1 min-w-0 text-left flex items-center gap-2.5 py-1 cursor-pointer"
+                      >
+                        <span className="w-4 h-4 flex items-center justify-center shrink-0">
+                          {isActive && (
+                            <Check className="w-4 h-4 text-teal-700 dark:text-teal-400 stroke-[2.5]" />
+                          )}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className={`text-sm sm:text-xs truncate ${isActive ? 'font-bold' : 'font-semibold'}`}>
+                            {tr.title}
+                          </p>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums truncate mt-0.5">
+                            {tr.destination} · {formatDateSlash(tr.startDate)}
+                          </p>
+                        </div>
+                      </button>
+
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        {canEditRow && (
                           <button
                             type="button"
-                            onClick={() => setShowTripSwitcher(false)}
-                            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                            aria-label={lang === 'zh' ? '關閉' : 'Close'}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowTripSwitcher(false);
+                              runWithAuth(() => {
+                                setTripModalData(tr);
+                                setShowTripModal(true);
+                              }, lang === 'zh' ? '編輯旅程設定' : 'Edit trip settings');
+                            }}
+                            className="min-w-[44px] min-h-[44px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 hover:bg-white/80 dark:hover:bg-slate-700/70 transition cursor-pointer"
+                            title={lang === 'zh' ? '編輯旅程' : 'Edit trip'}
+                            aria-label={lang === 'zh' ? `編輯 ${tr.title}` : `Edit ${tr.title}`}
                           >
-                            <X className="w-5 h-5" />
+                            <Edit className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
+                          </button>
+                        )}
+
+                        {canDeleteRow && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRequestDeleteTrip(tr);
+                            }}
+                            className={`min-w-[44px] min-h-[44px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-xl transition cursor-pointer ${
+                              trips.length <= 1
+                                ? 'text-slate-300 dark:text-slate-600'
+                                : 'text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50'
+                            }`}
+                            title={lang === 'zh' ? '刪除旅程' : 'Delete trip'}
+                            aria-label={lang === 'zh' ? `刪除 ${tr.title}` : `Delete ${tr.title}`}
+                          >
+                            <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
                           </button>
                         )}
                       </div>
                     </div>
+                  );
+                });
 
-                    <div className="flex-1 max-h-[54dvh] sm:max-h-72 overflow-y-auto overscroll-contain touch-pan-y divide-y divide-[#E5E2DC]/70 dark:divide-slate-800 my-1">
-                      {trips.map((tr) => {
-                        const rowPerm = checkUserTripPermission(tr, currentUser);
-                        const canEditRow = !tr.isCollaborative || rowPerm.canEdit;
-                        const canDeleteRow = !tr.isCollaborative || rowPerm.isOwner;
-                        const isActive = tr.id === currentTrip.id;
+                if (isMobile) {
+                  return (
+                    <IosModalSheet
+                      onClose={() => setShowTripSwitcher(false)}
+                      variant="grouped"
+                      zIndexClass="z-[80]"
+                      ariaLabel={lang === 'zh' ? '切換旅程' : 'Switch trip'}
+                    >
+                      <IosNavBar
+                        title={lang === 'zh' ? '切換旅程' : 'Switch Trip'}
+                        subtitle={`${trips.length} ${lang === 'zh' ? '趟旅程' : 'trips'}`}
+                        leftLabel={t.newTrip}
+                        leftIcon={<Plus className="w-4 h-4" />}
+                        onLeftClick={() => {
+                          setShowTripSwitcher(false);
+                          runWithAuth(() => {
+                            setShowTripModal(true);
+                            setTripModalData(null);
+                          }, lang === 'zh' ? '建立新旅程' : 'Create new trip');
+                        }}
+                        rightLabel={lang === 'zh' ? '完成' : 'Done'}
+                        onRightClick={() => setShowTripSwitcher(false)}
+                      />
 
-                        return (
-                          <div
-                            key={tr.id}
-                            className={`px-2.5 py-2 min-h-[56px] sm:min-h-[48px] rounded-xl transition text-xs flex items-center justify-between gap-2 ${
-                              isActive
-                                ? 'bg-teal-50/90 dark:bg-teal-950/50 text-teal-900 dark:text-teal-100'
-                                : 'hover:bg-[#F3F1EC] dark:hover:bg-slate-800/80 text-slate-700 dark:text-slate-300'
-                            }`}
+                      <div
+                        className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 space-y-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]"
+                      >
+                        <IosInsetGroup header={lang === 'zh' ? '我的旅程' : 'My Trips'}>
+                          {tripRows}
+                        </IosInsetGroup>
+
+                        <IosInsetGroup divided={false}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowTripSwitcher(false);
+                              setShowGlobalHubModal(true);
+                            }}
+                            className="w-full min-h-[48px] px-4 py-2.5 flex items-center justify-between text-left hover:bg-[#FAF9F6] dark:hover:bg-slate-800/50 transition cursor-pointer"
                           >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                handleSelectTrip(tr.id);
-                                setShowTripSwitcher(false);
-                              }}
-                              className="flex-1 min-w-0 text-left flex items-center gap-2 py-1 cursor-pointer"
-                            >
-                              {isActive && (
-                                <Check className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
-                              )}
-                              <div className="min-w-0 flex-1">
-                                <p className={`truncate ${isActive ? 'font-bold' : 'font-semibold'}`}>
-                                  {tr.title}
-                                </p>
-                                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                                  {tr.destination} · {formatDateSlash(tr.startDate)}
-                                </p>
-                              </div>
-                            </button>
+                            <span className="flex items-center gap-2.5 text-sm font-bold text-teal-700 dark:text-teal-300">
+                              <Compass className="w-4 h-4 shrink-0" />
+                              <span>足跡時光庫</span>
+                            </span>
+                            <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                          </button>
+                        </IosInsetGroup>
+                      </div>
+                    </IosModalSheet>
+                  );
+                }
 
-                            <div className="flex items-center gap-0.5 shrink-0">
-                              {canEditRow && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setShowTripSwitcher(false);
-                                    runWithAuth(() => {
-                                      setTripModalData(tr);
-                                      setShowTripModal(true);
-                                    }, lang === 'zh' ? '編輯旅程設定' : 'Edit trip settings');
-                                  }}
-                                  className="min-w-[44px] min-h-[44px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 hover:bg-white/80 dark:hover:bg-slate-700/70 transition cursor-pointer"
-                                  title={lang === 'zh' ? '編輯旅程' : 'Edit trip'}
-                                  aria-label={lang === 'zh' ? `編輯 ${tr.title}` : `Edit ${tr.title}`}
-                                >
-                                  <Edit className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-                                </button>
-                              )}
-
-                              {canDeleteRow && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleRequestDeleteTrip(tr);
-                                  }}
-                                  className={`min-w-[44px] min-h-[44px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-xl transition cursor-pointer ${
-                                    trips.length <= 1
-                                      ? 'text-slate-300 dark:text-slate-600'
-                                      : 'text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50'
-                                  }`}
-                                  title={lang === 'zh' ? '刪除旅程' : 'Delete trip'}
-                                  aria-label={lang === 'zh' ? `刪除 ${tr.title}` : `Delete ${tr.title}`}
-                                >
-                                  <Trash2 className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+                return (
+                  <div className="absolute left-0 top-full mt-1.5 w-[348px] max-h-[80dvh] flex flex-col bg-[#FAF9F6] dark:bg-[#0B1120] rounded-2xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-2.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                    <div className="px-2 pb-2 flex justify-between items-center text-[11px] font-bold text-slate-500 dark:text-slate-400 font-mono tabular-nums shrink-0">
+                      <span>{lang === 'zh' ? '所有旅程' : 'All Trips'} ({trips.length})</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowTripSwitcher(false);
+                          runWithAuth(() => {
+                            setShowTripModal(true);
+                            setTripModalData(null);
+                          }, lang === 'zh' ? '建立新旅程' : 'Create new trip');
+                        }}
+                        className="text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1 font-sans text-xs font-semibold cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>{t.newTrip}</span>
+                      </button>
                     </div>
 
-                    {/* Quick Access to Global Travel Memory Hub */}
-                    <div className="pt-2 mt-1 border-t border-[#E5E2DC] dark:border-slate-800 shrink-0">
+                    <div className="flex-1 max-h-72 overflow-y-auto overscroll-contain rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC]/85 dark:border-slate-800 divide-y divide-[#E5E2DC]/70 dark:divide-slate-800">
+                      {tripRows}
+                    </div>
+
+                    <div className="pt-2 shrink-0">
                       <button
                         type="button"
                         onClick={() => {
                           setShowTripSwitcher(false);
                           setShowGlobalHubModal(true);
                         }}
-                        className="w-full min-h-[44px] sm:min-h-[40px] py-2 px-3 rounded-xl bg-[#FAF9F6] hover:bg-[#F3F1EC] dark:bg-slate-900 dark:hover:bg-slate-800 text-teal-700 dark:text-teal-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        className="w-full min-h-[40px] py-2 px-3 rounded-xl bg-white hover:bg-[#F3F1EC] dark:bg-[#111827] dark:hover:bg-slate-800 border border-[#E5E2DC] dark:border-slate-800 text-teal-700 dark:text-teal-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                       >
                         <Compass className="w-3.5 h-3.5 shrink-0" />
                         <span>足跡時光庫</span>
                       </button>
                     </div>
-                  </>
-                );
-
-                if (isMobile && typeof document !== 'undefined') {
-                  return createPortal(
-                    <div
-                      className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/50 backdrop-blur-[2px] touch-none overscroll-none animate-in fade-in duration-150"
-                      onClick={() => setShowTripSwitcher(false)}
-                    >
-                      <div
-                        ref={tripSwitcherSheetRef}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-full max-h-[85dvh] rounded-t-3xl bg-white dark:bg-[#111827] border-t border-[#E5E2DC] dark:border-slate-800 shadow-2xl flex flex-col px-3 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] animate-in slide-in-from-bottom duration-200"
-                      >
-                        <div className="w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto my-2 shrink-0" />
-                        {switcherBody}
-                      </div>
-                    </div>,
-                    document.body
-                  );
-                }
-
-                return (
-                  <div className="absolute left-0 top-full mt-1.5 w-[348px] max-h-[80dvh] flex flex-col bg-white dark:bg-[#111827] rounded-2xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-2 z-50 animate-in fade-in zoom-in-95 duration-100">
-                    {switcherBody}
                   </div>
                 );
               })()}
@@ -1774,7 +1786,7 @@ export default function App() {
             <div className="flex items-center gap-1.5 shrink-0 ml-auto">
               <button
                 onClick={() => setShowShareModal(true)}
-                className="min-w-[40px] min-h-[40px] rounded-xl border border-[#E5E2DC] dark:border-slate-800 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center transition cursor-pointer"
+                className="min-w-[44px] min-h-[44px] sm:min-w-[40px] sm:min-h-[40px] rounded-xl border border-[#E5E2DC] dark:border-slate-800 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center transition cursor-pointer"
                 title="分享行程"
                 aria-label="分享行程"
               >
@@ -1788,7 +1800,7 @@ export default function App() {
                       setShowTripModal(true);
                     }, lang === 'zh' ? '編輯行程資訊' : 'Edit trip details');
                   }}
-                  className="min-w-[40px] min-h-[40px] rounded-xl border border-[#E5E2DC] dark:border-slate-800 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center transition cursor-pointer"
+                  className="min-w-[44px] min-h-[44px] sm:min-w-[40px] sm:min-h-[40px] rounded-xl border border-[#E5E2DC] dark:border-slate-800 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center transition cursor-pointer"
                   title="編輯行程"
                   aria-label="編輯行程"
                 >
@@ -1797,7 +1809,7 @@ export default function App() {
               )}
               <button
                 onClick={() => setIsHeroExpanded(true)}
-                className="min-h-[40px] px-3 rounded-xl text-xs font-semibold text-teal-700 dark:text-teal-300 bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer transition"
+                className="min-h-[44px] sm:min-h-[40px] px-3 rounded-xl text-xs font-semibold text-teal-700 dark:text-teal-300 bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 flex items-center gap-1 whitespace-nowrap shrink-0 cursor-pointer transition"
                 title="展開封面"
                 aria-label="展開封面"
               >
@@ -2541,7 +2553,7 @@ export default function App() {
 
       {/* Floating Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-4 sm:top-16 left-1/2 -translate-x-1/2 z-[70] max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-2xl bg-slate-900/95 dark:bg-[#111827]/95 text-white text-xs font-bold shadow-2xl border border-slate-700/80 flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-150 backdrop-blur-md">
+        <div className="fixed top-[max(1rem,env(safe-area-inset-top,0px))] sm:top-16 left-1/2 -translate-x-1/2 z-[70] max-w-[calc(100vw-2rem)] px-4 py-2.5 rounded-2xl bg-slate-900/95 dark:bg-[#111827]/95 text-white text-xs font-bold shadow-2xl border border-slate-700/80 flex items-center gap-2 animate-in fade-in slide-in-from-top-2 duration-150 backdrop-blur-md">
           <Check className="w-3.5 h-3.5 text-teal-400 shrink-0" />
           <span className="truncate">{toastMessage}</span>
         </div>

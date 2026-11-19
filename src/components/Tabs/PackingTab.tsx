@@ -97,7 +97,7 @@ export const PackingTab: React.FC<PackingTabProps> = ({
             <button
               type="button"
               onClick={handleLoadRecommendedTodos}
-              className="min-h-[40px] px-3 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+              className="min-h-[44px] sm:min-h-[38px] px-3 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
             >
               <Sparkles className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
               <span>{isZh ? '載入常用範本' : 'Load Defaults'}</span>

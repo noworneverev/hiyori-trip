@@ -7,7 +7,16 @@ import { setGlobalUpdateSW } from './utils/pwaUpdater';
 
 // Register PWA Service Worker gracefully and notify app UI when update is ready
 const updateSW = registerSW({
-  immediate: false,
+  immediate: true,
+  onRegisteredSW(_swUrl, registration) {
+    if (!registration) return;
+    const checkOnResume = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        registration.update().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', checkOnResume);
+  },
   onNeedRefresh() {
     console.log('[PWA] New version available, notifying UI.');
     window.dispatchEvent(new CustomEvent('pwa_update_available'));

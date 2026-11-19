@@ -1,7 +1,12 @@
-import React, { useEffect } from 'react';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { X, Calendar, Filter, Receipt, RotateCcw, Check, Tag, Coins } from 'lucide-react';
+import React from 'react';
+import { Calendar, Receipt, Tag, Coins } from 'lucide-react';
 import { Language } from '../../utils/i18n';
+import {
+  IosModalSheet,
+  IosNavBar,
+  IosInsetGroup,
+  IosCheckmarkRow,
+} from '../UI/IosPrimitives';
 
 interface ExpenseFilterDrawerProps {
   isOpen: boolean;
@@ -38,263 +43,113 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
   onResetAll,
   lang,
 }) => {
-  useBodyScrollLock(isOpen);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
   if (!isOpen) return null;
 
   const isFiltered = selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all';
 
   return (
-    <div
-      className="fixed inset-0 z-60 bg-black/55 backdrop-blur-xs flex items-end sm:items-center justify-center pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-4 transition-opacity animate-in fade-in duration-200"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
+    <IosModalSheet
+      onClose={onClose}
+      maxWidthClass="sm:max-w-lg"
+      zIndexClass="z-[75]"
+      variant="grouped"
+      ariaLabel={lang === 'zh' ? '篩選記帳明細' : 'Filter Expenses'}
     >
-      <div
-        className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-t-[2rem] sm:rounded-3xl shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-full sm:max-h-[82dvh] pb-[env(safe-area-inset-bottom,0px)] sm:pb-0 animate-in slide-in-from-bottom duration-300 ease-out"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Mobile Pull Handle Bar */}
-        <div className="w-12 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-3 mb-1 shrink-0 sm:hidden" />
+      <IosNavBar
+        title={lang === 'zh' ? '篩選明細' : 'Filter Expenses'}
+        subtitle={lang === 'zh' ? `目前符合 ${filteredCount} 筆` : `${filteredCount} results`}
+        leftLabel={isFiltered ? (lang === 'zh' ? '重設' : 'Reset') : (lang === 'zh' ? '關閉' : 'Close')}
+        onLeftClick={isFiltered ? onResetAll : onClose}
+        rightLabel={lang === 'zh' ? '套用' : 'Done'}
+        onRightClick={onClose}
+      />
 
-        {/* Drawer Header */}
-        <div className="px-5 py-3.5 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between bg-[#FAF9F6] dark:bg-slate-900/60 shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 flex items-center justify-center">
-              <Filter className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
-                {lang === 'zh' ? '篩選記帳明細' : 'Filter Expenses'}
-              </h3>
-            </div>
-          </div>
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 sm:p-5 space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+        {/* Section 1: Date & Period */}
+        <IosInsetGroup header={lang === 'zh' ? '日期與付款條件' : 'Date & Payment'}>
+          <IosCheckmarkRow
+            icon={<Calendar className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+            label={lang === 'zh' ? '全部日期' : 'All Dates'}
+            selected={selectedDateFilter === 'all'}
+            onSelect={() => onSelectDateFilter('all')}
+          />
+          <IosCheckmarkRow
+            icon={<Calendar className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+            label={lang === 'zh' ? '今日花費' : 'Today'}
+            trailingMeta={
+              <span className="text-[11px] font-mono tabular-nums text-slate-400">
+                {todayStr.slice(5).replace('-', '/')}
+              </span>
+            }
+            selected={selectedDateFilter === 'today'}
+            onSelect={() => onSelectDateFilter('today')}
+          />
+          {hasPreTripExpenses && (
+            <IosCheckmarkRow
+              icon={<Calendar className="w-4 h-4 text-slate-500" />}
+              label={lang === 'zh' ? '行前準備花費' : 'Pre-trip'}
+              selected={selectedDateFilter === 'pre'}
+              onSelect={() => onSelectDateFilter('pre')}
+            />
+          )}
+          <IosCheckmarkRow
+            icon={<Coins className="w-4 h-4 text-amber-500" />}
+            label={lang === 'zh' ? '僅看現金支付' : 'Cash Only'}
+            selected={selectedDateFilter === 'cash_only'}
+            onSelect={() => onSelectDateFilter('cash_only')}
+          />
+          {tripDays.map((d) => (
+            <IosCheckmarkRow
+              key={d.id}
+              label={`Day ${d.dayNumber}`}
+              trailingMeta={
+                <span className="text-[11px] font-mono tabular-nums text-slate-400">
+                  {d.date.slice(5).replace('-', '/')}
+                </span>
+              }
+              selected={selectedDateFilter === d.date}
+              onSelect={() => onSelectDateFilter(d.date)}
+            />
+          ))}
+        </IosInsetGroup>
 
-          <div className="flex items-center gap-2">
-            {isFiltered && (
-              <button
-                type="button"
-                onClick={onResetAll}
-                className="min-h-[40px] px-3 py-1.5 text-xs font-bold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/60 rounded-lg transition flex items-center gap-1 cursor-pointer"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>{lang === 'zh' ? '重設' : 'Reset'}</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-              aria-label="關閉"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Scrollable Filter Sections */}
-        <div className="p-5 overflow-y-auto space-y-5 scrollbar-thin">
-          {/* Section 1: 日期與時段 */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
-              <Calendar className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-              <span>{lang === 'zh' ? '日期與時段' : 'Date / Period'}</span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {/* 全部日期 */}
-              <button
-                type="button"
-                onClick={() => onSelectDateFilter('all')}
-                className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
-                  selectedDateFilter === 'all'
-                    ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
-                    : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
-                }`}
-              >
-                <span>{lang === 'zh' ? '全部日期' : 'All Dates'}</span>
-                {selectedDateFilter === 'all' && <Check className="w-3.5 h-3.5 text-teal-600 shrink-0" />}
-              </button>
-
-              {/* 今日 */}
-              <button
-                type="button"
-                onClick={() => onSelectDateFilter('today')}
-                className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
-                  selectedDateFilter === 'today'
-                    ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
-                    : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
-                }`}
-              >
-                <div className="min-w-0">
-                  <span className="block truncate">{lang === 'zh' ? '今日' : 'Today'}</span>
-                  <span className="text-[10px] text-slate-400 font-mono block truncate">{todayStr.slice(5).replace('-', '/')}</span>
-                </div>
-                {selectedDateFilter === 'today' && <Check className="w-3.5 h-3.5 text-teal-600 shrink-0" />}
-              </button>
-
-              {/* 行前準備 (if exists) */}
-              {hasPreTripExpenses && (
-                <button
-                  type="button"
-                  onClick={() => onSelectDateFilter('pre')}
-                  className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
-                    selectedDateFilter === 'pre'
-                      ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
-                      : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
-                  }`}
-                >
-                  <span>{lang === 'zh' ? '行前準備' : 'Pre-trip'}</span>
-                  {selectedDateFilter === 'pre' && <Check className="w-3.5 h-3.5 text-teal-600 shrink-0" />}
-                </button>
-              )}
-
-              {/* 各行程天數 */}
-              {tripDays.map((d) => (
-                <button
-                  key={d.id}
-                  type="button"
-                  onClick={() => onSelectDateFilter(d.date)}
-                  className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
-                    selectedDateFilter === d.date
-                      ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
-                      : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <span className="block truncate">Day {d.dayNumber}</span>
-                    <span className="text-[10px] text-slate-400 font-mono block truncate">{d.date.slice(5).replace('-', '/')}</span>
-                  </div>
-                  {selectedDateFilter === d.date && <Check className="w-3.5 h-3.5 text-teal-600 shrink-0" />}
-                </button>
-              ))}
-
-              {/* 僅看現金 */}
-              <button
-                type="button"
-                onClick={() => onSelectDateFilter('cash_only')}
-                className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
-                  selectedDateFilter === 'cash_only'
-                    ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
-                    : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <Coins className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                  <span className="truncate">{lang === 'zh' ? '僅看現金' : 'Cash Only'}</span>
-                </div>
-                {selectedDateFilter === 'cash_only' && <Check className="w-3.5 h-3.5 text-teal-600 shrink-0" />}
-              </button>
-            </div>
-          </div>
-
-          {/* Section 2: 支出類別 */}
-          <div className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
-              <Tag className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-              <span>{lang === 'zh' ? '支出類別' : 'Category'}</span>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {/* 全部分類 */}
-              <button
-                type="button"
-                onClick={() => onSelectCategoryFilter('all')}
-                className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
-                  selectedCategoryFilter === 'all'
-                    ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
-                    : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
-                }`}
-              >
-                <span>{lang === 'zh' ? '全部分類' : 'All Categories'}</span>
-                {selectedCategoryFilter === 'all' && <Check className="w-3.5 h-3.5 text-teal-600 shrink-0" />}
-              </button>
-
-              {/* 附發票 */}
-              <button
-                type="button"
-                onClick={() => onSelectCategoryFilter('with_receipt')}
-                className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
-                  selectedCategoryFilter === 'with_receipt'
-                    ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
-                    : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
-                }`}
-              >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <Receipt className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                  <span className="truncate">{lang === 'zh' ? '附發票憑證' : 'With Receipts'}</span>
-                </div>
-                {selectedCategoryFilter === 'with_receipt' && <Check className="w-3.5 h-3.5 text-teal-600 shrink-0" />}
-              </button>
-
-              {/* 預設分類 */}
-              {Object.entries(defaultCategories).map(([catKey, meta]) => (
-                <button
-                  key={catKey}
-                  type="button"
-                  onClick={() => onSelectCategoryFilter(catKey)}
-                  className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
-                    selectedCategoryFilter === catKey
-                      ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
-                      : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <meta.Icon className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                    <span className="truncate">{meta.label}</span>
-                  </div>
-                  {selectedCategoryFilter === catKey && <Check className="w-3.5 h-3.5 text-teal-600 shrink-0" />}
-                </button>
-              ))}
-
-              {/* 自訂分類 */}
-              {customCategories.map((catKey) => {
-                const label = customCategoryLabels[catKey] || catKey;
-                return (
-                  <button
-                    key={catKey}
-                    type="button"
-                    onClick={() => onSelectCategoryFilter(catKey)}
-                    className={`p-2.5 rounded-xl border text-left text-xs font-semibold transition flex items-center justify-between active:scale-98 ${
-                      selectedCategoryFilter === catKey
-                        ? 'border-teal-500/80 bg-teal-50/90 dark:bg-teal-950/70 text-teal-900 dark:text-teal-300 shadow-2xs font-bold ring-1 ring-teal-500/30'
-                        : 'border-slate-200 dark:border-slate-700/80 bg-white dark:bg-slate-800/90 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <Tag className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                      <span className="truncate">{label}</span>
-                    </div>
-                    {selectedCategoryFilter === catKey && <Check className="w-3.5 h-3.5 text-teal-600 shrink-0" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Bottom Action Footer */}
-        <div className="p-4 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="w-full min-h-[44px] py-3 px-4 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 active:scale-98 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
-          >
-            <Check className="w-4 h-4" />
-            <span>{lang === 'zh' ? `套用篩選 (查看 ${filteredCount} 筆)` : `Apply Filter (${filteredCount} Results)`}</span>
-          </button>
-        </div>
+        {/* Section 2: Categories */}
+        <IosInsetGroup header={lang === 'zh' ? '支出類別' : 'Category'}>
+          <IosCheckmarkRow
+            icon={<Tag className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+            label={lang === 'zh' ? '全部分類' : 'All Categories'}
+            selected={selectedCategoryFilter === 'all'}
+            onSelect={() => onSelectCategoryFilter('all')}
+          />
+          <IosCheckmarkRow
+            icon={<Receipt className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+            label={lang === 'zh' ? '僅看附發票憑證' : 'With Receipts'}
+            selected={selectedCategoryFilter === 'with_receipt'}
+            onSelect={() => onSelectCategoryFilter('with_receipt')}
+          />
+          {Object.entries(defaultCategories).map(([catKey, meta]) => (
+            <IosCheckmarkRow
+              key={catKey}
+              icon={<meta.Icon className="w-4 h-4 text-slate-500 dark:text-slate-400" />}
+              label={meta.label}
+              selected={selectedCategoryFilter === catKey}
+              onSelect={() => onSelectCategoryFilter(catKey)}
+            />
+          ))}
+          {customCategories.map((catKey) => {
+            const label = customCategoryLabels[catKey] || catKey;
+            return (
+              <IosCheckmarkRow
+                key={catKey}
+                icon={<Tag className="w-4 h-4 text-teal-600 dark:text-teal-400" />}
+                label={label}
+                selected={selectedCategoryFilter === catKey}
+                onSelect={() => onSelectCategoryFilter(catKey)}
+              />
+            );
+          })}
+        </IosInsetGroup>
       </div>
-    </div>
+    </IosModalSheet>
   );
 };

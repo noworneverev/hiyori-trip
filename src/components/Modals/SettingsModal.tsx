@@ -1,16 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { getStorageUsage, getStorageUsageAsync, exportAllTripsToJSON, getDeletedTripIds, getStoredTrips, saveTrips } from '../../utils/storage';
+import {
+  getStorageUsage,
+  getStorageUsageAsync,
+  exportAllTripsToJSON,
+  getDeletedTripIds,
+  getStoredTrips,
+  saveTrips,
+} from '../../utils/storage';
 import { auth, fetchUserTombstones, loginWithGoogleDetailed, logoutFirebase, saveTripToCloud } from '../../utils/firebase';
 import { Trip } from '../../types/itinerary';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { APP_VERSION, BUILD_DATE } from '../../constants/version';
-import { getSavedAccessibilityScale, applyAccessibilityScale, AccessibilityScale, ACCESSIBILITY_OPTIONS } from '../../utils/accessibility';
+import {
+  getSavedAccessibilityScale,
+  applyAccessibilityScale,
+  AccessibilityScale,
+  ACCESSIBILITY_OPTIONS,
+} from '../../utils/accessibility';
 import { performAppUpdate, UpdateState } from '../../utils/pwaUpdater';
 import {
-  X,
+  IosModalSheet,
+  IosNavBar,
+  IosInsetGroup,
+  IosRow,
+  IosDisclosureRow,
+  IosCheckmarkRow,
+} from '../UI/IosPrimitives';
+import {
   ShieldCheck,
   HardDrive,
   Download,
@@ -24,6 +41,7 @@ import {
   User as UserIcon,
   Eye,
   RotateCcw,
+  ChevronRight,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -41,15 +59,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSimulateConflict,
   onClose,
 }) => {
-  useBodyScrollLock(true);
   const t = TRANSLATIONS[lang];
   const [currentUser, setCurrentUser] = useState<User | null>(() => auth.currentUser);
   const [authError, setAuthError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncDone, setSyncDone] = useState(false);
   const [scale, setScale] = useState<AccessibilityScale>(getSavedAccessibilityScale);
+  const [isScaleExpanded, setIsScaleExpanded] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle' });
   const [storageInfo, setStorageInfo] = useState(getStorageUsage);
+  const [showConfirmReset, setShowConfirmReset] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -104,375 +123,269 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const [showConfirmReset, setShowConfirmReset] = useState(false);
-
   const handlePerformReset = () => {
     onResetData();
     setShowConfirmReset(false);
     onClose();
   };
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  const currentScaleLabel =
+    scale === 'senior' ? '特大 130%' : scale === 'comfortable' ? '放大 115%' : '標準 100%';
 
-  const modalContent = (
-    <div
-      className="fixed inset-0 z-[85] flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs px-0 sm:px-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-0 sm:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] touch-none overscroll-none overflow-hidden animate-in fade-in duration-150"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-lg rounded-t-3xl sm:rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 sm:my-auto animate-in slide-in-from-bottom sm:fade-in sm:zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[88dvh] sm:max-h-[90dvh]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="sm:hidden w-10 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-2.5 mb-0.5 shrink-0" />
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-3.5 sm:py-4 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/70 shrink-0">
-          <div>
-            <h3 className="font-bold text-base text-slate-900 dark:text-white">
-              {t.settings}
-            </h3>
-          </div>
+  return (
+    <IosModalSheet onClose={onClose} zIndexClass="z-[85]" variant="grouped" ariaLabel={t.settings}>
+      <IosNavBar
+        title={t.settings}
+        rightLabel={lang === 'zh' ? '完成' : 'Done'}
+        onRightClick={onClose}
+      />
 
-          <div className="flex items-center gap-1.5">
-            {/* GitHub Project Link Icon */}
-            <a
-              href="https://github.com/noworneverev/hiyori-trip"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-[#EFECE5] dark:hover:bg-slate-800 transition"
-              title="GitHub Repository"
-            >
-              <Github className="w-4 h-4" />
-            </a>
-
-            <button
-              type="button"
-              onClick={onClose}
-              className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-[#EFECE5] dark:hover:bg-slate-800 transition cursor-pointer"
-              aria-label={lang === 'zh' ? '關閉' : 'Close'}
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="p-5 overflow-y-auto overscroll-contain touch-pan-y space-y-4 text-xs flex-1">
-          {/* Cloud Sync & Account Status */}
-          <div className="p-4 rounded-2xl bg-teal-50/50 dark:bg-teal-950/25 border border-teal-200/70 dark:border-teal-900/60 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-teal-950 dark:text-teal-200 flex items-center gap-1.5 text-xs">
-                <Cloud className="w-4 h-4 text-teal-700 dark:text-teal-400" />
-                {t.syncStatus}
-              </span>
-              <span
-                className={`text-[11px] font-bold flex items-center gap-1 ${
-                  currentUser
-                    ? 'text-teal-700 dark:text-teal-300'
-                    : 'text-amber-700 dark:text-amber-300'
-                }`}
-              >
-                {currentUser ? (
-                  <>
-                    <CloudCheck className="w-3.5 h-3.5" />
-                    {t.cloudSynced}
-                  </>
-                ) : (
-                  t.guestOffline
-                )}
-              </span>
-            </div>
-
-            {currentUser ? (
-              <div className="bg-white dark:bg-slate-800 p-3 rounded-xl border border-teal-200/50 dark:border-teal-900/40 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2.5 truncate">
-                  {currentUser.photoURL ? (
+      <div className="flex-1 overflow-y-auto overscroll-contain touch-pan-y px-4 pt-4 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] space-y-5">
+        {/* Section 1: Account & Cloud Sync */}
+        <IosInsetGroup
+          header={t.syncStatus}
+          footer={!currentUser ? t.loginPrompt : undefined}
+        >
+          {currentUser ? (
+            <>
+              <IosRow
+                icon={
+                  currentUser.photoURL ? (
                     <img
                       src={currentUser.photoURL}
                       alt="Avatar"
-                      className="w-7 h-7 rounded-full object-cover border border-teal-500/30 shrink-0"
+                      className="w-9 h-9 rounded-full object-cover border border-[#E5E2DC] dark:border-slate-700"
                     />
                   ) : (
-                    <div className="w-7 h-7 rounded-full bg-teal-700 text-white flex items-center justify-center shrink-0">
-                      <UserIcon className="w-3.5 h-3.5" />
+                    <div className="w-9 h-9 rounded-full bg-teal-700 text-white flex items-center justify-center">
+                      <UserIcon className="w-4 h-4" />
                     </div>
-                  )}
-                  <div className="truncate">
-                    <p className="font-bold text-slate-800 dark:text-slate-100 truncate">
-                      {currentUser.displayName || 'Google User'}
-                    </p>
-                    <p className="text-[10px] text-slate-400 truncate font-mono">
-                      {currentUser.email}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    onClick={handleManualSync}
-                    disabled={isSyncing}
-                    className="min-h-[38px] px-3 py-1.5 rounded-lg bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-semibold text-xs flex items-center gap-1 shadow-2xs transition cursor-pointer"
-                  >
-                    <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
-                    <span>{syncDone ? (lang === 'zh' ? '已同步' : 'Synced') : t.syncNow}</span>
-                  </button>
-
-                  <button
-                    onClick={() => logoutFirebase()}
-                    className="min-w-[44px] min-h-[44px] sm:min-w-[38px] sm:min-h-[38px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
-                    title={lang === 'zh' ? '登出' : 'Sign out'}
-                  >
-                    <LogOut className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
-                  {t.loginPrompt}
-                </p>
-                <button
-                  onClick={async () => {
-                    setAuthError(null);
-                    const res = await loginWithGoogleDetailed();
-                    if (!res.user && !res.redirected && !res.cancelled && res.errorMessage) {
-                      setAuthError(res.errorMessage);
-                    }
-                  }}
-                  className="w-full min-h-[44px] py-2 px-3 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-2xs transition active:scale-98 cursor-pointer"
-                >
+                  )
+                }
+                label={currentUser.displayName || 'Google User'}
+                subtitle={<span className="font-mono">{currentUser.email}</span>}
+                trailing={
+                  <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-1">
+                    <CloudCheck className="w-3.5 h-3.5" />
+                    <span>{t.cloudSynced}</span>
+                  </span>
+                }
+              />
+              <IosRow
+                icon={<RefreshCw className={`w-4 h-4 text-teal-700 dark:text-teal-400 ${isSyncing ? 'animate-spin' : ''}`} />}
+                label={syncDone ? (lang === 'zh' ? '已同步至雲端' : 'Synced to Cloud') : t.syncNow}
+                onClick={handleManualSync}
+                disabled={isSyncing}
+                trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+              />
+              <IosRow
+                icon={<LogOut className="w-4 h-4 text-rose-600 dark:text-rose-400" />}
+                label={lang === 'zh' ? '登出 Google 帳號' : 'Sign Out'}
+                destructive
+                onClick={() => logoutFirebase()}
+              />
+            </>
+          ) : (
+            <>
+              <IosRow
+                icon={<Cloud className="w-4 h-4 text-amber-600 dark:text-amber-400" />}
+                label={lang === 'zh' ? '目前狀態' : 'Status'}
+                trailing={
+                  <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                    {t.guestOffline}
+                  </span>
+                }
+              />
+              <IosRow
+                icon={
                   <svg className="w-4 h-4" viewBox="0 0 24 24">
-                    <path
-                      fill="#4285F4"
-                      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                    />
-                    <path
-                      fill="#EA4335"
-                      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                    />
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
                   </svg>
-                  <span>{t.googleLogin}</span>
-                </button>
-                {authError && (
-                  <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400 leading-relaxed">
-                    {authError}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {onSimulateConflict && (
-              <div className="pt-2.5 border-t border-teal-200/50 dark:border-teal-900/40 flex items-center justify-between gap-2">
-                <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                  {lang === 'zh' ? '離線狀態衝突解決策略' : 'Conflict Strategy'}
-                </span>
-                <button
-                  type="button"
-                  onClick={onSimulateConflict}
-                  className="min-h-[36px] px-2.5 py-1 rounded-lg bg-teal-100 hover:bg-teal-200 dark:bg-teal-900/60 dark:hover:bg-teal-800 text-teal-800 dark:text-teal-200 text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
-                >
-                  <RefreshCw className="w-3 h-3" />
-                  <span>{lang === 'zh' ? '預覽衝突提示對話框' : 'Preview Conflict Modal'}</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Local Storage Status */}
-          <div className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800/40 border border-[#E5E2DC] dark:border-slate-800 space-y-3">
-            <h4 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs">
-              <HardDrive className="w-4 h-4 text-teal-700 dark:text-teal-400" />
-              {lang === 'zh' ? '離線快取與本地儲存' : 'Offline Cache & Local Storage'}
-            </h4>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 flex justify-between items-center">
-                <span className="text-slate-500 dark:text-slate-400">{lang === 'zh' ? '旅程總數' : 'Trips'}:</span>
-                <span className="font-bold font-mono tabular-nums text-slate-900 dark:text-white">{trips.length}</span>
-              </div>
-              <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 flex justify-between items-center">
-                <span className="text-slate-500 dark:text-slate-400">{lang === 'zh' ? '快取佔用' : 'Cache'}:</span>
-                <span className="font-bold font-mono tabular-nums text-slate-900 dark:text-white">{storageInfo.formatted}</span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => void exportAllTripsToJSON(trips)}
-                className="min-h-[44px] sm:min-h-[38px] py-2 px-3 bg-white dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600 rounded-xl font-semibold text-slate-700 dark:text-slate-300 hover:text-teal-700 text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>{lang === 'zh' ? '下載完整備份' : 'Export All JSON'}</span>
-              </button>
-
-              {showConfirmReset ? (
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={handlePerformReset}
-                    className="flex-1 min-h-[44px] sm:min-h-[38px] py-2 px-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-xs transition cursor-pointer"
-                  >
-                    確定清空
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmReset(false)}
-                    className="min-h-[44px] sm:min-h-[38px] px-2.5 py-2 border border-[#E5E2DC] dark:border-slate-700 rounded-xl text-slate-500 text-xs cursor-pointer"
-                  >
-                    取消
-                  </button>
+                }
+                label={<span className="text-teal-700 dark:text-teal-400">{t.googleLogin}</span>}
+                onClick={async () => {
+                  setAuthError(null);
+                  const res = await loginWithGoogleDetailed();
+                  if (!res.user && !res.redirected && !res.cancelled && res.errorMessage) {
+                    setAuthError(res.errorMessage);
+                  }
+                }}
+                trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+              />
+              {authError && (
+                <div className="px-4 py-2.5 text-[11px] font-medium text-rose-600 dark:text-rose-400 bg-rose-50/60 dark:bg-rose-950/20">
+                  {authError}
                 </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmReset(true)}
-                  className="min-h-[44px] sm:min-h-[38px] py-2 px-3 bg-white dark:bg-slate-800 border border-rose-200 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>{lang === 'zh' ? '重設快取資料' : 'Reset Cache'}</span>
-                </button>
               )}
-            </div>
-          </div>
+            </>
+          )}
 
-          {/* Accessibility & Typography Scale */}
-          <div className="p-4 rounded-2xl bg-teal-50/40 dark:bg-teal-950/20 border border-teal-200/70 dark:border-teal-900/50 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-slate-900 dark:text-zinc-100 flex items-center gap-1.5 text-xs">
-                <Eye className="w-4 h-4 text-teal-700 dark:text-teal-400" />
-                <span>{lang === 'zh' ? '文字大小' : 'Text Size'}</span>
-              </span>
-              <span className="text-[11px] font-bold font-mono tabular-nums text-teal-700 dark:text-teal-400">
-                {scale === 'senior' ? '特大 130%' : scale === 'comfortable' ? '放大 115%' : '標準 100%'}
-              </span>
-            </div>
+          {onSimulateConflict && (
+            <IosRow
+              icon={<RefreshCw className="w-4 h-4 text-slate-500 dark:text-slate-400" />}
+              label={lang === 'zh' ? '預覽版本衝突解決視窗' : 'Preview Conflict Modal'}
+              onClick={onSimulateConflict}
+              trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+            />
+          )}
+        </IosInsetGroup>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {/* Section 2: Display & Accessibility */}
+        <IosInsetGroup header={lang === 'zh' ? '顯示與閱讀設定' : 'Display & Accessibility'}>
+          <IosDisclosureRow
+            icon={<Eye className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+            label={lang === 'zh' ? '文字大小' : 'Text Size'}
+            value={currentScaleLabel}
+            valueAccent
+            expanded={isScaleExpanded}
+            onToggle={() => setIsScaleExpanded((v) => !v)}
+          >
+            <div className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800/80">
               {ACCESSIBILITY_OPTIONS.map((opt) => (
-                <button
+                <IosCheckmarkRow
                   key={opt.id}
-                  type="button"
-                  onClick={() => {
+                  inset
+                  label={opt.label}
+                  subtitle={opt.description}
+                  trailingMeta={
+                    <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
+                      {opt.badge}
+                    </span>
+                  }
+                  selected={scale === opt.id}
+                  onSelect={() => {
                     setScale(opt.id);
                     applyAccessibilityScale(opt.id);
                   }}
-                  className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-1.5 ${
-                    scale === opt.id
-                      ? 'border-teal-600 bg-white dark:bg-slate-800 ring-2 ring-teal-500/30 shadow-xs'
-                      : 'border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 hover:bg-[#F3F1EC] dark:hover:bg-slate-800'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-xs text-slate-900 dark:text-white flex items-center gap-1">
-                      {opt.label}
-                    </span>
-                    <span className="text-[10px] font-mono tabular-nums font-bold text-teal-700 dark:text-teal-400">
-                      {opt.badge}
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-tight">
-                    {opt.description}
-                  </p>
-                </button>
+                />
               ))}
             </div>
-          </div>
+          </IosDisclosureRow>
+        </IosInsetGroup>
 
-          {/* System Version & Update Engine */}
-          <div className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800/40 border border-[#E5E2DC] dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-slate-900 dark:text-white text-xs">
-                  {lang === 'zh' ? '系統版本資訊' : 'App Version'}
-                </span>
-                <span aria-hidden="true" className="text-slate-400">·</span>
-                <span className="text-slate-600 dark:text-slate-300 font-mono tabular-nums text-[11px] font-bold">
-                  {APP_VERSION}
-                </span>
+        {/* Section 3: Offline Cache & Local Storage */}
+        <IosInsetGroup header={lang === 'zh' ? '離線快取與本地儲存' : 'Offline Cache & Storage'}>
+          <IosRow
+            icon={<HardDrive className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+            label={lang === 'zh' ? '已儲存旅程' : 'Saved Trips'}
+            trailing={
+              <span className="text-xs font-mono tabular-nums font-semibold text-slate-600 dark:text-slate-300">
+                {trips.length}
+              </span>
+            }
+          />
+          <IosRow
+            icon={<HardDrive className="w-4 h-4 text-slate-400" />}
+            label={lang === 'zh' ? '本地快取佔用' : 'Cache Usage'}
+            trailing={
+              <span className="text-xs font-mono tabular-nums font-semibold text-slate-600 dark:text-slate-300">
+                {storageInfo.formatted}
+              </span>
+            }
+          />
+          <IosRow
+            icon={<Download className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+            label={lang === 'zh' ? '下載完整備份 (JSON)' : 'Export All JSON'}
+            onClick={() => void exportAllTripsToJSON(trips)}
+            trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+          />
+
+          {showConfirmReset ? (
+            <div className="px-4 py-3 bg-rose-50/70 dark:bg-rose-950/30 flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-rose-700 dark:text-rose-300">
+                確定清除本機所有快取資料？
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmReset(false)}
+                  className="min-h-[38px] px-3 rounded-xl bg-white dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePerformReset}
+                  className="min-h-[38px] px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
+                >
+                  確定清除
+                </button>
               </div>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono tabular-nums">
-                {lang === 'zh' ? `構建日期：${BUILD_DATE} · PWA 離線快取支援` : `Build Date: ${BUILD_DATE} · PWA Cache`}
-              </p>
             </div>
+          ) : (
+            <IosRow
+              icon={<Trash2 className="w-4 h-4 text-rose-600 dark:text-rose-400" />}
+              label={lang === 'zh' ? '重設本機快取資料' : 'Reset Local Cache'}
+              destructive
+              onClick={() => setShowConfirmReset(true)}
+            />
+          )}
+        </IosInsetGroup>
 
-            <button
-              type="button"
-              disabled={updateState.status === 'checking' || updateState.status === 'updating'}
-              onClick={async () => {
-                await performAppUpdate((s) => setUpdateState(s));
-              }}
-              className="min-h-[44px] sm:min-h-[38px] px-3.5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs disabled:opacity-60 cursor-pointer self-start sm:self-auto"
-            >
-              <RotateCcw className={`w-3.5 h-3.5 ${updateState.status === 'checking' || updateState.status === 'updating' ? 'animate-spin' : ''}`} />
-              <span>
-                {updateState.status === 'checking'
-                  ? (lang === 'zh' ? '檢查中...' : 'Checking...')
-                  : updateState.status === 'updating'
-                  ? (lang === 'zh' ? '載入新版...' : 'Loading...')
-                  : (lang === 'zh' ? '檢查更新 / 重新整理' : 'Check for Updates')}
+        {/* Section 4: System & About */}
+        <IosInsetGroup
+          header={lang === 'zh' ? '關於日和手帳' : 'About Hiyori'}
+          footer={
+            lang === 'zh'
+              ? '在雲端預覽環境自動使用安全代理執行智慧解析；離線或靜態部署環境自動無縫切換為本機規則解析，無須輸入 API Key。'
+              : 'Uses secure server proxy when available and falls back automatically to zero-key local parsing offline.'
+          }
+        >
+          <IosRow
+            icon={<ShieldCheck className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+            label={lang === 'zh' ? '版本資訊' : 'Version'}
+            trailing={
+              <span className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
+                {APP_VERSION} · {BUILD_DATE}
               </span>
-            </button>
-          </div>
-
-          {/* Smart Parser Mode (Read-only Status) */}
-          <div className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800/40 border border-[#E5E2DC] dark:border-slate-800 space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-xs">
-                <ShieldCheck className="w-4 h-4 text-teal-700 dark:text-teal-400" />
-                {lang === 'zh' ? '智慧行程解析模式' : 'Smart Itinerary Parser'}
-              </span>
-              <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400">
-                {lang === 'zh' ? '雙環境自動切換' : 'Dual-Env Auto'}
-              </span>
-            </div>
-            <p className="text-slate-500 dark:text-slate-400 text-[11px] leading-relaxed">
-              {lang === 'zh'
-                ? '在 AI Studio 預覽環境會自動透過伺服器安全代理執行智慧解析；於靜態網頁或離線環境則自動無縫降級為純本機規則解析，無需輸入任何 API Key。'
-                : 'Uses the secure server proxy in AI Studio preview and falls back automatically to zero-key local rule parsing on static hosts or offline.'}
-            </p>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] sm:pb-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex items-center justify-between shrink-0">
+            }
+          />
+          <IosRow
+            icon={
+              <RotateCcw
+                className={`w-4 h-4 text-teal-700 dark:text-teal-400 ${
+                  updateState.status === 'checking' || updateState.status === 'updating' ? 'animate-spin' : ''
+                }`}
+              />
+            }
+            label={
+              updateState.status === 'checking'
+                ? lang === 'zh'
+                  ? '正在檢查更新...'
+                  : 'Checking...'
+                : updateState.status === 'updating'
+                ? lang === 'zh'
+                  ? '載入最新版本...'
+                  : 'Updating...'
+                : lang === 'zh'
+                ? '檢查更新 / 重新整理'
+                : 'Check for Updates'
+            }
+            onClick={async () => {
+              await performAppUpdate((s) => setUpdateState(s));
+            }}
+            disabled={updateState.status === 'checking' || updateState.status === 'updating'}
+            trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+          />
           <a
             href="https://github.com/noworneverev/hiyori-trip"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center gap-1.5 text-xs transition"
+            className="w-full min-h-[48px] px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-[#FAF9F6] dark:hover:bg-slate-800/45 transition text-left"
           >
-            <Github className="w-4 h-4" />
-            <span className="font-semibold">GitHub Source Code</span>
-            <ExternalLink className="w-3 h-3" />
+            <div className="flex items-center gap-3 min-w-0">
+              <Github className="w-4 h-4 text-slate-600 dark:text-slate-300 shrink-0" />
+              <span className="text-sm sm:text-xs font-semibold text-slate-900 dark:text-slate-100">
+                GitHub 原始碼專案頁
+              </span>
+            </div>
+            <ExternalLink className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           </a>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-[44px] sm:min-h-[38px] px-4 py-1.5 rounded-xl bg-[#EFECE5] dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold text-xs transition cursor-pointer"
-          >
-            {lang === 'zh' ? '關閉' : 'Close'}
-          </button>
-        </div>
+        </IosInsetGroup>
       </div>
-    </div>
+    </IosModalSheet>
   );
-
-  if (typeof document !== 'undefined') {
-    return createPortal(modalContent, document.body);
-  }
-  return modalContent;
 };

@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import React, { useState } from 'react';
 import { Trip } from '../../types/itinerary';
 import {
   parseTextItinerary,
@@ -13,7 +12,12 @@ import { universalParseItinerary } from '../../utils/aiClient';
 import { extractInlineImagesToMediaRefs, rebindTripMediaIds } from '../../utils/image';
 import { TRIP_TEMPLATES } from '../../data/presetTrips';
 import {
-  X,
+  IosModalSheet,
+  IosNavBar,
+  IosInsetGroup,
+  IosRow,
+} from '../UI/IosPrimitives';
+import {
   Upload,
   Download,
   FileText,
@@ -24,11 +28,11 @@ import {
   Bot,
   Zap,
   MapPin,
-  Clock,
   Loader2,
   Printer,
   Calendar,
   Table,
+  ChevronRight,
 } from 'lucide-react';
 
 interface ImportExportModalProps {
@@ -46,7 +50,6 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   onOpenExportPDF,
   onClose,
 }) => {
-  useBodyScrollLock(true);
   const [activeTab, setActiveTab] = useState<'import' | 'export' | 'presets'>('import');
 
   // File Upload & Paste States
@@ -84,7 +87,6 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     }
   };
 
-  // Handle local file read
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -133,7 +135,6 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
           setParseSource('local_fallback');
           setParsedPreviewTrip(trip);
         } else {
-          // Plain text / Markdown
           setPastedText(content);
           if (!tripTitleInput) {
             setTripTitleInput(file.name.replace(/\.[^/.]+$/, ''));
@@ -147,7 +148,6 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     reader.readAsText(file);
   };
 
-  // Universal Smart Parse (uses server proxy when available, seamless local rule fallback offline or on static hosts)
   const handleAiParse = async () => {
     if (!pastedText.trim()) return;
     setErrorMessage(null);
@@ -185,7 +185,6 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     }
   };
 
-  // Local Offline Rule Parser (Zero external call, 100% offline)
   const handleLocalRuleParse = () => {
     if (!pastedText.trim()) return;
     setErrorMessage(null);
@@ -226,161 +225,165 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     onClose();
   };
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  const switchTab = (tab: 'import' | 'presets' | 'export') => {
+    setActiveTab(tab);
+    setParsedPreviewTrip(null);
+    setParseSource(null);
+    setErrorMessage(null);
+  };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs px-3 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] overflow-hidden"
-      onClick={onClose}
+    <IosModalSheet
+      onClose={onClose}
+      maxWidthClass="sm:max-w-2xl"
+      variant="grouped"
+      fullHeightOnMobile
+      ariaLabel="匯入與匯出中心"
     >
-      <div
-        className="w-full max-w-2xl rounded-2xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-full sm:max-h-[92dvh]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-teal-700 text-white flex items-center justify-center font-bold">
-              <Upload className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="font-bold text-base text-slate-900 dark:text-white">行程檔案解析與匯出中心</h3>
-            </div>
+      <IosNavBar
+        title="匯入與匯出"
+        leftLabel="關閉"
+        onLeftClick={onClose}
+        rightLabel={activeTab === 'import' && parsedPreviewTrip ? '套用匯入' : '完成'}
+        onRightClick={activeTab === 'import' && parsedPreviewTrip ? handleConfirmImport : onClose}
+      />
+
+      {/* iOS Segmented Control */}
+      <div className="px-4 py-2.5 border-b border-[#E5E2DC]/80 dark:border-slate-800 bg-[#FAF9F6] dark:bg-[#0B1120] shrink-0">
+        <div className="grid grid-cols-3 p-1 rounded-xl bg-[#EFECE5] dark:bg-slate-800/90 gap-1">
+          <button
+            type="button"
+            onClick={() => switchTab('import')}
+            className={`min-h-[38px] sm:min-h-[34px] px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+              activeTab === 'import'
+                ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <Upload className="w-3.5 h-3.5 shrink-0" />
+            <span>上傳解析</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => switchTab('presets')}
+            className={`min-h-[38px] sm:min-h-[34px] px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+              activeTab === 'presets'
+                ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+            <span>示範範本</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => switchTab('export')}
+            className={`min-h-[38px] sm:min-h-[34px] px-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+              activeTab === 'export'
+                ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+            }`}
+          >
+            <Download className="w-3.5 h-3.5 shrink-0" />
+            <span>備份匯出</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Scrollable Body */}
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 sm:p-5 space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+        {errorMessage && (
+          <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+            <span className="leading-relaxed">{errorMessage}</span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:bg-[#EFECE5] dark:hover:bg-slate-800 hover:text-slate-700 dark:hover:text-slate-200 transition cursor-pointer"
-            aria-label="關閉"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+        )}
 
-        {/* Tab Switching */}
-        <div className="flex border-b border-[#E5E2DC] dark:border-slate-800 px-5 pt-1 bg-[#FAF9F6] dark:bg-slate-900/40 text-xs font-semibold gap-4 overflow-x-auto no-scrollbar">
-          <button
-            type="button"
-            onClick={() => { setActiveTab('import'); setParsedPreviewTrip(null); setParseSource(null); }}
-            className={`min-h-[44px] pb-2 pt-2 border-b-2 flex items-center gap-1.5 transition whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'import' ? 'border-teal-700 text-teal-700 dark:text-teal-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <Upload className="w-4 h-4" />
-            <span>上傳與智慧解析</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => { setActiveTab('presets'); setParsedPreviewTrip(null); setParseSource(null); }}
-            className={`min-h-[44px] pb-2 pt-2 border-b-2 flex items-center gap-1.5 transition whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'presets' ? 'border-teal-700 text-teal-700 dark:text-teal-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <Sparkles className="w-4 h-4 text-amber-500" />
-            <span>載入示範經典行程</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => { setActiveTab('export'); setParsedPreviewTrip(null); setParseSource(null); }}
-            className={`min-h-[44px] pb-2 pt-2 border-b-2 flex items-center gap-1.5 transition whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'export' ? 'border-teal-700 text-teal-700 dark:text-teal-400' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-            }`}
-          >
-            <Download className="w-4 h-4" />
-            <span>離線備份與匯出</span>
-          </button>
-        </div>
-
-        {/* Body Content */}
-        <div className="p-5 overflow-y-auto space-y-4 text-xs">
-          {errorMessage && (
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
-              <span>{errorMessage}</span>
-            </div>
-          )}
-
-          {/* TAB 1: IMPORT & PARSE */}
-          {activeTab === 'import' && (
-            <>
-              {/* File Dropzone */}
-              <div className="relative border-2 border-dashed border-teal-500/40 bg-teal-50/30 dark:bg-teal-950/20 hover:bg-teal-50/60 dark:hover:bg-teal-950/40 rounded-2xl p-5 text-center transition cursor-pointer group">
+        {/* TAB 1: IMPORT & PARSE */}
+        {activeTab === 'import' && (
+          <>
+            <IosInsetGroup
+              header="從檔案匯入"
+              footer="支援 .JSON 完整還原包、.CSV 試算表或旅行社行程 .TXT / .MD。"
+            >
+              <label className="relative flex items-center gap-3.5 px-4 py-3.5 min-h-[60px] cursor-pointer hover:bg-[#FAF9F6] dark:hover:bg-slate-800/45 transition group">
                 <input
                   type="file"
                   accept=".json,.csv,.txt,.md"
                   onChange={handleFileUpload}
-                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  className="sr-only"
                 />
-                <div className="w-10 h-10 rounded-full bg-teal-100 dark:bg-teal-950/80 text-teal-700 dark:text-teal-300 flex items-center justify-center mx-auto mb-2 group-hover:scale-110 transition-transform">
+                <div className="w-10 h-10 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 flex items-center justify-center shrink-0">
                   <Upload className="w-5 h-5" />
                 </div>
-                <p className="font-bold text-slate-800 dark:text-slate-100 text-xs sm:text-sm">點擊上傳或拖放旅遊行程檔案</p>
-                <p className="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">
-                  支援 <strong>.JSON</strong>、<strong>.CSV</strong>、或旅行社旅遊通知 <strong>.TXT / .MD</strong>
-                </p>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm sm:text-xs font-bold text-slate-900 dark:text-slate-100">
+                    選擇或拖放行程檔案
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    點擊開啟檔案選擇器（.JSON / .CSV / .TXT / .MD）
+                  </div>
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+              </label>
+            </IosInsetGroup>
+
+            <IosInsetGroup
+              header="貼上行程文字智慧解析"
+              headerRight={
+                pastedText ? (
+                  <button
+                    type="button"
+                    onClick={() => setPastedText('')}
+                    className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                  >
+                    清空內容
+                  </button>
+                ) : undefined
+              }
+            >
+              <div className="px-4 py-2.5 flex items-center justify-between gap-3 min-h-[48px]">
+                <label className="text-sm sm:text-xs font-semibold text-slate-700 dark:text-slate-300 shrink-0 w-24">
+                  行程名稱
+                </label>
+                <input
+                  type="text"
+                  value={tripTitleInput}
+                  onChange={(e) => setTripTitleInput(e.target.value)}
+                  placeholder="選填（例：東京 5 日自由行）"
+                  className="min-w-0 flex-1 bg-transparent text-right text-[16px] sm:text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 outline-none"
+                />
               </div>
-
-              {/* Paste Text & Configuration */}
-              <div className="space-y-2.5 pt-1">
-                <div className="flex items-center justify-between">
-                  <label className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
-                    <FileText className="w-4 h-4 text-teal-600" />
-                    貼上行程文字或筆記
-                  </label>
-                  {pastedText && (
-                    <button
-                      type="button"
-                      onClick={() => setPastedText('')}
-                      className="text-[11px] text-slate-400 hover:text-rose-500"
-                    >
-                      清空
-                    </button>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <input
-                    type="text"
-                    value={tripTitleInput}
-                    onChange={(e) => setTripTitleInput(e.target.value)}
-                    placeholder="行程名稱（選填，例如：東京自由行 5 日）"
-                    className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-xs outline-none focus:border-teal-500"
-                  />
-                  <input
-                    type="text"
-                    value={destinationHint}
-                    onChange={(e) => setDestinationHint(e.target.value)}
-                    placeholder="目的地城市提示（選填，例如：日本京都、法國巴黎）"
-                    className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 text-xs outline-none focus:border-teal-500"
-                  />
-                </div>
-
+              <div className="px-4 py-2.5 flex items-center justify-between gap-3 min-h-[48px]">
+                <label className="text-sm sm:text-xs font-semibold text-slate-700 dark:text-slate-300 shrink-0 w-24">
+                  目的地提示
+                </label>
+                <input
+                  type="text"
+                  value={destinationHint}
+                  onChange={(e) => setDestinationHint(e.target.value)}
+                  placeholder="選填（例：日本京都、法國巴黎）"
+                  className="min-w-0 flex-1 bg-transparent text-right text-[16px] sm:text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 outline-none"
+                />
+              </div>
+              <div className="p-3.5">
                 <textarea
                   rows={5}
                   value={pastedText}
                   onChange={(e) => setPastedText(e.target.value)}
-                  placeholder="Day 1: 淺草寺、晴空塔..."
-                  className="w-full p-3 rounded-xl border border-slate-300 dark:border-slate-700 focus:border-teal-500 outline-none font-mono text-[11px] leading-relaxed bg-slate-50/50 dark:bg-slate-800/60 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
+                  placeholder="貼上每日行程文字或筆記，例如：&#10;Day 1: 淺草寺、晴空塔、隅田川散步..."
+                  className="w-full p-3 rounded-xl border border-[#E5E2DC] dark:border-slate-700 focus:border-teal-600 outline-none font-mono text-[16px] sm:text-xs leading-relaxed bg-[#FAF9F6] dark:bg-slate-900/70 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
                 />
-
-                {/* Parsing Action Buttons */}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-1">
-                  {/* AI Parse Button */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mt-3">
                   <button
                     type="button"
                     onClick={handleAiParse}
                     disabled={!pastedText.trim() || isAiLoading}
-                    className="flex-1 min-h-[44px] sm:min-h-[40px] px-4 py-2.5 bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 disabled:opacity-50 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition active:scale-98 cursor-pointer"
+                    className="flex-1 min-h-[44px] px-4 py-2.5 bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 disabled:opacity-45 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs transition active:scale-[0.99] cursor-pointer"
                   >
                     {isAiLoading ? (
                       <>
-                        <Loader2 className="w-4 h-4 animate-spin text-teal-200" />
+                        <Loader2 className="w-4 h-4 animate-spin text-teal-100" />
                         <span>{aiStatusStep || '智慧解析中...'}</span>
                       </>
                     ) : (
@@ -390,250 +393,228 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                       </>
                     )}
                   </button>
-
-                  {/* Local Offline Parser Button */}
                   <button
                     type="button"
                     onClick={handleLocalRuleParse}
                     disabled={!pastedText.trim() || isAiLoading}
-                    className="min-h-[44px] sm:min-h-[40px] px-4 py-2.5 bg-[#FAF9F6] dark:bg-slate-800 hover:bg-[#EFECE5] dark:hover:bg-slate-700 border border-[#E5E2DC] dark:border-slate-700 disabled:opacity-40 text-slate-700 dark:text-slate-200 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    className="min-h-[44px] px-4 py-2.5 bg-[#FAF9F6] dark:bg-slate-800 hover:bg-[#EFECE5] dark:hover:bg-slate-700 border border-[#E5E2DC] dark:border-slate-700 disabled:opacity-40 text-slate-700 dark:text-slate-200 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                     title="無須連網，純本地規則解析"
                   >
                     <Zap className="w-3.5 h-3.5 text-amber-500" />
-                    <span>本地離線快速解析</span>
+                    <span>本機快速解析</span>
                   </button>
                 </div>
               </div>
+            </IosInsetGroup>
 
-              {/* Parsed Preview Result */}
-              {parsedPreviewTrip && (
-                <div className="mt-4 p-4 rounded-2xl bg-teal-50/90 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800/80 text-teal-950 dark:text-teal-100 animate-in fade-in zoom-in-95 duration-200 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-teal-200/80 dark:border-teal-800/80">
-                    <div>
-                      <span className="text-teal-700 dark:text-teal-300 font-bold text-[11px]">
-                        {parseSource === 'server_ai'
-                          ? 'AI 雲端智慧解析完成'
-                          : parseSource === 'local_fallback'
-                          ? '本機離線規則解析完成'
-                          : '行程檔案解析完成'}
-                      </span>
-                      <h4 className="font-black text-sm text-teal-950 dark:text-teal-100 mt-0.5">
-                        {parsedPreviewTrip.title}
-                      </h4>
-                      <p className="text-[11px] text-teal-700 dark:text-teal-300 mt-0.5 flex items-center gap-2 flex-wrap">
-                        <span className="flex items-center gap-1">
-                          <MapPin className="w-3 h-3 text-teal-600" />
-                          <span>{parsedPreviewTrip.destination}</span>
-                        </span>
-                        <span aria-hidden="true">·</span>
-                        <span className="flex items-center gap-1 font-mono tabular-nums">
-                          <Calendar className="w-3 h-3 text-teal-600" />
-                          <span>{parsedPreviewTrip.startDate} ~ {parsedPreviewTrip.endDate}</span>
-                        </span>
-                      </p>
-                    </div>
-
-                    <div className="text-xs font-mono tabular-nums font-bold text-teal-800 dark:text-teal-200 shrink-0">
-                      共 {parsedPreviewTrip.days.length} 天 · {parsedPreviewTrip.days.reduce((acc, d) => acc + d.items.length, 0)} 個景點
-                    </div>
+            {/* Parsed Preview Result */}
+            {parsedPreviewTrip && (
+              <IosInsetGroup
+                header={
+                  parseSource === 'server_ai'
+                    ? 'AI 雲端智慧解析結果'
+                    : parseSource === 'local_fallback'
+                    ? '本機離線規則解析結果'
+                    : '檔案解析預覽'
+                }
+                headerRight={
+                  <span className="text-[11px] font-mono tabular-nums font-bold text-teal-700 dark:text-teal-400">
+                    {parsedPreviewTrip.days.length} 天 · {parsedPreviewTrip.days.reduce((acc, d) => acc + d.items.length, 0)} 景點
+                  </span>
+                }
+              >
+                <div className="px-4 py-3 space-y-1">
+                  <h4 className="font-bold text-sm text-slate-900 dark:text-white">
+                    {parsedPreviewTrip.title}
+                  </h4>
+                  <div className="flex items-center gap-2.5 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap">
+                    <span className="flex items-center gap-1">
+                      <MapPin className="w-3 h-3 text-teal-600" />
+                      <span>{parsedPreviewTrip.destination}</span>
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span className="flex items-center gap-1 font-mono tabular-nums">
+                      <Calendar className="w-3 h-3 text-teal-600" />
+                      <span>{parsedPreviewTrip.startDate} ~ {parsedPreviewTrip.endDate}</span>
+                    </span>
                   </div>
+                </div>
 
-                  {/* Day breakdown preview */}
-                  <div className="max-h-48 overflow-y-auto space-y-2 pr-1">
-                    {parsedPreviewTrip.days.map((day) => {
-                      const geoCount = day.items.filter((i) => typeof i.lat === 'number').length;
-                      return (
-                        <div key={day.id} className="bg-white/90 dark:bg-slate-800/80 p-2.5 rounded-xl border border-teal-100/90 dark:border-teal-900/60">
-                          <div className="flex items-center justify-between font-bold text-xs text-teal-950 dark:text-teal-200">
-                            <span>第 {day.dayNumber} 天 ({day.date}): {day.theme || '主要行程'}</span>
-                            <span className="text-[10px] text-teal-700 dark:text-teal-400 font-normal">
-                              {day.items.length} 景點 ({geoCount} 處含地圖座標)
-                            </span>
-                          </div>
-
-                          <div className="mt-1.5 flex flex-wrap gap-1.5">
-                            {day.items.map((it) => (
-                              <span
-                                key={it.id}
-                                className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 text-[10px] font-medium flex items-center gap-1"
-                              >
-                                <span className="font-mono text-teal-700 dark:text-teal-300 font-bold">{it.startTime}</span>
-                                <span className="truncate max-w-[120px]">{it.title}</span>
-                                {typeof it.lat === 'number' && <MapPin className="w-2.5 h-2.5 text-teal-600 inline shrink-0" />}
-                              </span>
-                            ))}
-                          </div>
+                <div className="max-h-52 overflow-y-auto divide-y divide-[#E5E2DC]/65 dark:divide-slate-800/80">
+                  {parsedPreviewTrip.days.map((day) => {
+                    const geoCount = day.items.filter((i) => typeof i.lat === 'number').length;
+                    return (
+                      <div key={day.id} className="px-4 py-2.5 space-y-1.5">
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-800 dark:text-slate-200">
+                          <span>Day {day.dayNumber} ({day.date}) {day.theme ? `· ${day.theme}` : ''}</span>
+                          <span className="text-[11px] font-mono tabular-nums font-normal text-slate-500">
+                            {day.items.length} 站 ({geoCount} 座標)
+                          </span>
                         </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Confirm import button */}
-                  <div className="pt-2 flex items-center justify-end gap-2.5 border-t border-teal-200/80 dark:border-teal-800/80">
-                    <button
-                      type="button"
-                      onClick={() => setParsedPreviewTrip(null)}
-                      className="px-3.5 py-2 border border-teal-300 dark:border-teal-700 rounded-xl text-teal-800 dark:text-teal-300 font-semibold text-xs hover:bg-teal-100/50 dark:hover:bg-teal-900/40"
-                    >
-                      重新調整
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleConfirmImport}
-                      className="px-6 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold text-xs shadow-md transition active:scale-95 flex items-center gap-1.5"
-                    >
-                      <Check className="w-4 h-4" />
-                      立即套用並切換至此行程
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-
-          {/* TAB 2: PRESET TRIPS (Templates) */}
-          {activeTab === 'presets' && (
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 gap-3">
-                {TRIP_TEMPLATES.map((preset) => (
-                  <div
-                    key={preset.id}
-                    className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-teal-500 dark:hover:border-teal-500 bg-white dark:bg-slate-800/80 hover:shadow-md transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-100 text-teal-800">
-                          {preset.days.length} 天 {preset.days.length - 1} 夜
-                        </span>
-                        <h4 className="font-bold text-slate-900 dark:text-white text-sm">{preset.title}</h4>
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                          {day.items.map((it, idx) => (
+                            <span key={it.id}>
+                              <span className="font-mono tabular-nums text-teal-700 dark:text-teal-400 font-semibold">{it.startTime}</span>{' '}
+                              {it.title}
+                              {idx < day.items.length - 1 ? ' → ' : ''}
+                            </span>
+                          ))}
+                        </div>
                       </div>
-                      <p className="text-slate-500 dark:text-slate-400 text-[11px] mt-1 flex items-center gap-1">
-                        <MapPin className="w-3 h-3 text-teal-600 shrink-0" />
-                        <span>{preset.destination} | 預算約 {preset.currency} {preset.budgetTotal.toLocaleString()}</span>
-                      </p>
-                      <p className="text-slate-600 dark:text-slate-300 text-[11px] mt-0.5 line-clamp-1">{preset.notes}</p>
-                    </div>
+                    );
+                  })}
+                </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleLoadPreset(preset)}
-                      className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-semibold rounded-xl text-xs shrink-0 shadow-xs transition active:scale-95 flex items-center justify-center gap-1.5"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      載入為新行程
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: EXPORT */}
-          {activeTab === 'export' && (
-            <div className="space-y-4">
-              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80">
-                <h4 className="font-bold text-slate-800 dark:text-slate-100 text-sm mb-1 flex items-center gap-1.5">
-                  <HardDrive className="w-4 h-4 text-teal-600" />
-                  目前行程：{currentTrip.title}
-                </h4>
-                <p className="text-slate-500 dark:text-slate-400 text-xs">
-                  共 {currentTrip.days.length} 天行程、{currentTrip.days.reduce((acc, d) => acc + d.items.length, 0)} 個景點安排、{currentTrip.expenses.length} 筆花費記錄
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-4">
-                  {onOpenExportPDF && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onClose();
-                        onOpenExportPDF();
-                      }}
-                      className="p-3 bg-teal-50/80 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800/80 hover:border-teal-500 rounded-xl text-left transition shadow-xs group cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2 font-bold text-teal-950 dark:text-teal-200 text-xs">
-                        <Printer className="w-4 h-4 text-teal-700 group-hover:scale-110 transition-transform" />
-                        匯出紙本 PDF 手冊
-                      </div>
-                      <p className="text-[11px] text-teal-800 dark:text-teal-300 mt-1">A4 排版離線手冊，含日程、交通指引與打包清單。</p>
-                    </button>
-                  )}
-
+                <div className="px-4 py-3 flex items-center justify-end gap-2 bg-[#FAF9F6]/70 dark:bg-slate-900/40">
                   <button
                     type="button"
-                    disabled={isExporting}
-                    onClick={handleExportSingleJSON}
-                    className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:border-teal-500 hover:bg-teal-50/30 dark:hover:bg-teal-950/30 rounded-xl text-left transition shadow-xs group disabled:opacity-60 cursor-pointer"
+                    onClick={() => setParsedPreviewTrip(null)}
+                    className="min-h-[40px] px-3.5 py-2 rounded-xl border border-[#E5E2DC] dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold text-xs hover:bg-white dark:hover:bg-slate-800 transition cursor-pointer"
                   >
-                    <div className="flex items-center gap-2 font-bold text-teal-900 dark:text-teal-200 text-xs">
-                      {isExporting ? (
-                        <Loader2 className="w-4 h-4 animate-spin text-teal-600" />
-                      ) : (
-                        <Download className="w-4 h-4 text-teal-600 group-hover:translate-y-0.5 transition-transform" />
-                      )}
-                      匯出單一旅程 JSON
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">完整還原包（含照片、座標與記帳），可在任何裝置匯入。</p>
+                    重新調整
                   </button>
-
                   <button
                     type="button"
-                    onClick={() => exportTripToCSV(currentTrip)}
-                    className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:border-teal-500 hover:bg-teal-50/30 dark:hover:bg-teal-950/30 rounded-xl text-left transition shadow-xs group cursor-pointer"
+                    onClick={handleConfirmImport}
+                    className="min-h-[40px] px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition cursor-pointer"
                   >
-                    <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 text-xs">
-                      <Table className="w-4 h-4 text-emerald-600 group-hover:translate-y-0.5 transition-transform" />
-                      匯出 Excel / CSV 表格
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">標準 UTF-8 BOM 格式，支援 Excel 與 Google 試算表直接開啟。</p>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => exportTripToMarkdown(currentTrip)}
-                    className="p-3 bg-white dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 hover:border-teal-500 hover:bg-teal-50/30 dark:hover:bg-teal-950/30 rounded-xl text-left transition shadow-xs group cursor-pointer"
-                  >
-                    <div className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 text-xs">
-                      <FileText className="w-4 h-4 text-slate-600 group-hover:translate-y-0.5 transition-transform" />
-                      匯出 Markdown 完整筆記
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">含日程、待辦、行李、花費與緊急聯絡，適合貼至 Notion。</p>
+                    <Check className="w-4 h-4" />
+                    <span>立即套用並切換</span>
                   </button>
                 </div>
-              </div>
+              </IosInsetGroup>
+            )}
+          </>
+        )}
 
-              {/* Full database export */}
-              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/80">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <h5 className="font-bold text-slate-800 dark:text-slate-100 text-xs">整庫完整備份 (所有旅程)</h5>
-                    <p className="text-slate-500 dark:text-slate-400 text-[11px]">包含本地儲存的全部 {allTrips.length} 個旅程與相片總資料庫。</p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={isExporting}
-                    onClick={handleExportAllJSON}
-                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-60 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shrink-0 cursor-pointer"
-                  >
-                    {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                    <span>完整備份下載</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-[44px] sm:min-h-[38px] px-5 py-2 rounded-xl bg-[#EFECE5] dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 font-semibold text-xs transition cursor-pointer"
+        {/* TAB 2: PRESET TRIPS */}
+        {activeTab === 'presets' && (
+          <IosInsetGroup
+            header="經典行程範本"
+            footer="點選任一範本即可建立獨立新副本並切換進入編輯，不會影響現有行程。"
           >
-            關閉
-          </button>
-        </div>
+            {TRIP_TEMPLATES.map((preset) => (
+              <IosRow
+                key={preset.id}
+                onClick={() => handleLoadPreset(preset)}
+                icon={
+                  <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 flex items-center justify-center">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                }
+                label={preset.title}
+                subtitle={
+                  <span>
+                    {preset.days.length} 天 {preset.days.length - 1} 夜 · {preset.destination} · 預算約 {preset.currency}{' '}
+                    <span className="font-mono tabular-nums">{preset.budgetTotal.toLocaleString()}</span>
+                  </span>
+                }
+                trailing={
+                  <span className="text-xs font-bold text-teal-700 dark:text-teal-400 flex items-center gap-1">
+                    <span>載入</span>
+                    <ChevronRight className="w-4 h-4 text-slate-400" />
+                  </span>
+                }
+              />
+            ))}
+          </IosInsetGroup>
+        )}
+
+        {/* TAB 3: EXPORT */}
+        {activeTab === 'export' && (
+          <>
+            <IosInsetGroup header="目前旅程摘要">
+              <IosRow
+                icon={
+                  <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 flex items-center justify-center">
+                    <HardDrive className="w-4 h-4" />
+                  </div>
+                }
+                label={currentTrip.title}
+                subtitle={
+                  <span className="font-mono tabular-nums">
+                    {currentTrip.days.length} 天行程 · {currentTrip.days.reduce((acc, d) => acc + d.items.length, 0)} 個景點 · {currentTrip.expenses.length} 筆支出
+                  </span>
+                }
+              />
+            </IosInsetGroup>
+
+            <IosInsetGroup header="單一旅程匯出格式">
+              {onOpenExportPDF && (
+                <IosRow
+                  onClick={() => {
+                    onClose();
+                    onOpenExportPDF();
+                  }}
+                  icon={
+                    <div className="w-8 h-8 rounded-lg bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300 flex items-center justify-center">
+                      <Printer className="w-4 h-4" />
+                    </div>
+                  }
+                  label="匯出紙本 A4 PDF 手冊"
+                  subtitle="含日程總表、交通指引與打包清單，適合列印或隨身離線查閱"
+                  trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+                />
+              )}
+
+              <IosRow
+                onClick={handleExportSingleJSON}
+                disabled={isExporting}
+                icon={
+                  <div className="w-8 h-8 rounded-lg bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 flex items-center justify-center">
+                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  </div>
+                }
+                label="匯出完整 JSON 還原包"
+                subtitle="含所有照片、座標與記帳紀錄，可於任何裝置完整還原"
+                trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+              />
+
+              <IosRow
+                onClick={() => exportTripToCSV(currentTrip)}
+                icon={
+                  <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
+                    <Table className="w-4 h-4" />
+                  </div>
+                }
+                label="匯出 Excel / CSV 表格"
+                subtitle="標準 UTF-8 BOM 格式，支援 Excel 與 Google 試算表開啟"
+                trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+              />
+
+              <IosRow
+                onClick={() => exportTripToMarkdown(currentTrip)}
+                icon={
+                  <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center">
+                    <FileText className="w-4 h-4" />
+                  </div>
+                }
+                label="匯出 Markdown 完整筆記"
+                subtitle="含日程、待辦、行李與緊急聯絡，適合貼至 Notion 或 Obsidian"
+                trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+              />
+            </IosInsetGroup>
+
+            <IosInsetGroup
+              header="整庫完整備份"
+              footer="建議定期下載整庫 JSON 備份，確保所有照片與跨旅程資料雙重保障。"
+            >
+              <IosRow
+                onClick={handleExportAllJSON}
+                disabled={isExporting}
+                icon={
+                  <div className="w-8 h-8 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 flex items-center justify-center">
+                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  </div>
+                }
+                label="下載全部旅程總資料庫 (.JSON)"
+                subtitle={`包含本地儲存的全部 ${allTrips.length} 個旅程與相片總資料庫`}
+                trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+              />
+            </IosInsetGroup>
+          </>
+        )}
       </div>
-    </div>
+    </IosModalSheet>
   );
 };

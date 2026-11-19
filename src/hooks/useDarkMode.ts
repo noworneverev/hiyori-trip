@@ -49,11 +49,6 @@ export function useDarkMode() {
     document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => {
       meta.setAttribute('content', themeColor);
     });
-
-    const statusBarMeta = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
-    if (statusBarMeta) {
-      statusBarMeta.setAttribute('content', isDark ? 'black-translucent' : 'default');
-    }
   }, [isDark]);
 
   const toggleDarkMode = () => setIsDark((prev) => !prev);

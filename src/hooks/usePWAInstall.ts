@@ -11,16 +11,23 @@ export function usePWAInstall() {
   const [isIOS, setIsIOS] = useState(false);
 
   useEffect(() => {
-    // Detect standalone mode (already installed)
-    const isStandalone =
-      window.matchMedia('(display-mode: standalone)').matches ||
+    const standaloneMedia = window.matchMedia('(display-mode: standalone)');
+    const computeStandalone = () =>
+      standaloneMedia.matches ||
       (window.navigator as unknown as { standalone?: boolean }).standalone === true;
-    setIsInstalled(isStandalone);
 
-    // Detect iOS devices
+    setIsInstalled(computeStandalone());
+
+    // Detect iOS & iPadOS 13+ (which identifies as MacIntel with touch points)
     const userAgent = window.navigator.userAgent.toLowerCase();
-    const isIOSDevice = /iphone|ipad|ipod/.test(userAgent);
+    const isIOSDevice =
+      /iphone|ipad|ipod/.test(userAgent) ||
+      (window.navigator.platform === 'MacIntel' && window.navigator.maxTouchPoints > 1);
     setIsIOS(isIOSDevice);
+
+    const handleDisplayModeChange = () => {
+      setIsInstalled(computeStandalone());
+    };
 
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
@@ -32,10 +39,12 @@ export function usePWAInstall() {
       setDeferredPrompt(null);
     };
 
+    standaloneMedia.addEventListener?.('change', handleDisplayModeChange);
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
+      standaloneMedia.removeEventListener?.('change', handleDisplayModeChange);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
     };

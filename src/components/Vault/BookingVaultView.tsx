@@ -1,9 +1,16 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Trip, BookingVoucher, BookingCategory, ItineraryItem } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { copyTextToClipboard } from '../../utils/clipboard';
 import { sanitizeExternalUrl } from '../../utils/url';
+import {
+  IosModalSheet,
+  IosNavBar,
+  IosInsetGroup,
+  IosDisclosureRow,
+  IosCheckmarkRow,
+  IosActionSheet,
+} from '../UI/IosPrimitives';
 import {
   Ticket,
   Plane,
@@ -89,7 +96,8 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingVoucherId, setEditingVoucherId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [pendingDeleteVoucher, setPendingDeleteVoucher] = useState<BookingVoucher | null>(null);
+  const [expandedFormPicker, setExpandedFormPicker] = useState<'category' | 'day' | null>(null);
   const [counterCard, setCounterCard] = useState<{
     title: string;
     category: BookingCategory;
@@ -100,17 +108,6 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     location?: string;
     notes?: string;
   } | null>(null);
-
-  useBodyScrollLock(Boolean(counterCard));
-
-  useEffect(() => {
-    if (!counterCard) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setCounterCard(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [counterCard]);
 
   // Form states
   const [formCat, setFormCat] = useState<BookingCategory>('flight');
@@ -140,6 +137,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     setFormDayNumber('');
     setFormUrl('');
     setFormNotes('');
+    setExpandedFormPicker(null);
   };
 
   const openCreateForm = () => {
@@ -256,7 +254,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
       },
       updatedAt: now,
     });
-    setDeletingId(null);
+    setPendingDeleteVoucher(null);
   };
 
   const handleCopy = async (value: string, keyId: string) => {
@@ -407,13 +405,13 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={isZh ? '搜尋代號、航班或飯店...' : 'Search code, hotel, flight...'}
-              className="w-full min-h-[40px] pl-8 pr-8 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 outline-none focus:border-teal-600"
+              className="w-full min-h-[44px] sm:min-h-[40px] pl-8 pr-8 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 outline-none focus:border-teal-600"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                className="absolute right-1 top-1/2 -translate-y-1/2 min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
                 aria-label="Clear search"
               >
                 <X className="w-3.5 h-3.5" />
@@ -421,64 +419,82 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
             )}
           </div>
         </div>
+      </div>
 
-        {/* Add / Edit Voucher Form */}
-        {showForm && (
+      {/* Add / Edit Voucher iOS Sheet */}
+      {showForm && (
+        <IosModalSheet
+          onClose={() => {
+            setShowForm(false);
+            resetForm();
+          }}
+          variant="grouped"
+          maxWidthClass="sm:max-w-lg"
+          zIndexClass="z-[75]"
+          ariaLabel={editingVoucherId ? '編輯訂位憑證' : '新增訂位憑證'}
+        >
+          <IosNavBar
+            title={
+              editingVoucherId
+                ? isZh
+                  ? '編輯訂位憑證'
+                  : 'Edit Voucher'
+                : isZh
+                ? '新增訂位憑證'
+                : 'New Voucher'
+            }
+            leftLabel={isZh ? '取消' : 'Cancel'}
+            onLeftClick={() => {
+              setShowForm(false);
+              resetForm();
+            }}
+            rightLabel={
+              editingVoucherId ? (isZh ? '儲存' : 'Save') : isZh ? '加入' : 'Add'
+            }
+            rightType="submit"
+            rightFormId="booking-voucher-form"
+            rightDisabled={!formTitle.trim() || !formCode.trim()}
+          />
+
           <form
+            id="booking-voucher-form"
             onSubmit={handleSaveVoucher}
-            className="p-4 sm:p-5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/70 border border-[#E5E2DC] dark:border-slate-700 space-y-3.5 text-xs animate-in fade-in duration-150"
+            className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]"
           >
-            <div className="flex items-center justify-between pb-2 border-b border-[#E5E2DC] dark:border-slate-800">
-              <span className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-1.5">
-                <Ticket className="w-4 h-4 text-teal-700 dark:text-teal-400" />
-                <span>
-                  {editingVoucherId
-                    ? isZh
-                      ? '編輯訂位憑證'
-                      : 'Edit Booking Voucher'
-                    : isZh
-                    ? '新增獨立訂位憑證'
-                    : 'New Booking Voucher'}
-                </span>
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  resetForm();
-                }}
-                className="min-h-[36px] px-2.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-semibold cursor-pointer"
+            <IosInsetGroup header={isZh ? '憑證類別與核心代號' : 'Voucher Details'}>
+              <IosDisclosureRow
+                label={isZh ? '憑證類別' : 'Category'}
+                value={(() => {
+                  const found = BOOKING_CATEGORIES.find((c) => c.key === formCat);
+                  return found ? (isZh ? found.labelZh : found.labelEn) : formCat;
+                })()}
+                valueAccent
+                expanded={expandedFormPicker === 'category'}
+                onToggle={() =>
+                  setExpandedFormPicker((prev) => (prev === 'category' ? null : 'category'))
+                }
               >
-                {isZh ? '取消' : 'Cancel'}
-              </button>
-            </div>
+                <div className="divide-y divide-[#E5E2DC]/60 dark:divide-slate-800/70">
+                  {BOOKING_CATEGORIES.map((c) => {
+                    const Icon = c.icon;
+                    return (
+                      <IosCheckmarkRow
+                        key={c.key}
+                        icon={<Icon className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                        label={isZh ? c.labelZh : c.labelEn}
+                        selected={formCat === c.key}
+                        onSelect={() => {
+                          setFormCat(c.key);
+                          setExpandedFormPicker(null);
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </IosDisclosureRow>
 
-            {/* Category selector */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-              {BOOKING_CATEGORIES.map((c) => {
-                const Icon = c.icon;
-                const active = formCat === c.key;
-                return (
-                  <button
-                    key={c.key}
-                    type="button"
-                    onClick={() => setFormCat(c.key)}
-                    className={`min-h-[38px] px-3 py-1.5 rounded-xl font-semibold border transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
-                      active
-                        ? 'bg-teal-700 dark:bg-teal-600 text-white border-teal-700 dark:border-teal-600'
-                        : 'bg-white dark:bg-[#111827] text-slate-600 dark:text-slate-300 border-[#E5E2DC] dark:border-slate-700'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    <span>{isZh ? c.labelZh : c.labelEn}</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              <div className="px-4 py-2.5 flex flex-col gap-1">
+                <label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                   {isZh ? '憑證標題 *' : 'Title *'}
                 </label>
                 <input
@@ -488,12 +504,12 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                   value={formTitle}
                   onChange={(e) => setFormTitle(e.target.value)}
                   placeholder={isZh ? '如：長榮 BR198 台北→東京、金澤日航飯店' : 'e.g., EVA Air BR198, Hotel Nikko'}
-                  className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white font-semibold outline-none focus:border-teal-600"
+                  className="w-full min-h-[36px] bg-transparent text-[16px] sm:text-xs font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
                 />
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              <div className="px-4 py-2.5 flex flex-col gap-1">
+                <label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                   {isZh ? '訂位代號 / 確認碼 *' : 'Booking Reference / PNR *'}
                 </label>
                 <input
@@ -503,99 +519,127 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                   value={formCode}
                   onChange={(e) => setFormCode(e.target.value)}
                   placeholder={isZh ? '如：XYZ89K / AGD-992018' : 'e.g., XYZ89K / CONF-992018'}
-                  className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white font-mono font-bold tracking-wide outline-none focus:border-teal-600"
+                  className="w-full min-h-[36px] bg-transparent text-[16px] sm:text-xs font-mono font-bold tracking-wide text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
                 />
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  {isZh ? '座位 / 航廈 / PIN 碼 (選填)' : 'Seat / Gate / PIN (Optional)'}
-                </label>
+              <div className="px-4 py-2.5 flex items-center justify-between gap-3 min-h-[48px]">
+                <span className="text-sm sm:text-xs font-semibold text-slate-700 dark:text-slate-300 shrink-0">
+                  {isZh ? '座位 / PIN 碼' : 'Seat / PIN'}
+                </span>
                 <input
                   type="text"
                   maxLength={100}
                   value={formSecondary}
                   onChange={(e) => setFormSecondary(e.target.value)}
-                  placeholder={isZh ? '如：T2 · 14A 或 入住密碼 5183*' : 'e.g., T2 · Seat 14A or PIN 5183*'}
-                  className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white font-mono outline-none focus:border-teal-600"
+                  placeholder={isZh ? '如：T2 · 14A' : 'Optional'}
+                  className="flex-1 min-w-0 bg-transparent text-right text-[16px] sm:text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
                 />
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  {isZh ? '平台 / 航空公司 / 業者 (選填)' : 'Provider / Airline (Optional)'}
-                </label>
+              <div className="px-4 py-2.5 flex items-center justify-between gap-3 min-h-[48px]">
+                <span className="text-sm sm:text-xs font-semibold text-slate-700 dark:text-slate-300 shrink-0">
+                  {isZh ? '業者 / 平台' : 'Provider'}
+                </span>
                 <input
                   type="text"
                   maxLength={100}
                   value={formProvider}
                   onChange={(e) => setFormProvider(e.target.value)}
-                  placeholder={isZh ? '如：Agoda、JR West、長榮航空' : 'e.g., Agoda, JR West, ANA'}
-                  className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white outline-none focus:border-teal-600"
+                  placeholder={isZh ? '如：Agoda、長榮航空' : 'Optional'}
+                  className="flex-1 min-w-0 bg-transparent text-right text-[16px] sm:text-xs text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
+                />
+              </div>
+            </IosInsetGroup>
+
+            <IosInsetGroup header={isZh ? '日期、時段與行程天數' : 'Dates & Trip Day'}>
+              <IosDisclosureRow
+                label={isZh ? '關聯天數' : 'Trip Day'}
+                value={
+                  formDayNumber
+                    ? `Day ${formDayNumber}`
+                    : isZh
+                    ? '全程 / 不指定'
+                    : 'Whole trip'
+                }
+                valueAccent={Boolean(formDayNumber)}
+                expanded={expandedFormPicker === 'day'}
+                onToggle={() =>
+                  setExpandedFormPicker((prev) => (prev === 'day' ? null : 'day'))
+                }
+              >
+                <div className="divide-y divide-[#E5E2DC]/60 dark:divide-slate-800/70 max-h-56 overflow-y-auto">
+                  <IosCheckmarkRow
+                    label={isZh ? '全程 / 不指定' : 'Whole trip'}
+                    selected={!formDayNumber}
+                    onSelect={() => {
+                      setFormDayNumber('');
+                      setExpandedFormPicker(null);
+                    }}
+                  />
+                  {(trip.days || []).map((d) => (
+                    <IosCheckmarkRow
+                      key={d.id}
+                      label={`Day ${d.dayNumber}`}
+                      subtitle={d.theme}
+                      trailingMeta={
+                        <span className="text-[11px] font-mono tabular-nums text-slate-400">
+                          {d.date}
+                        </span>
+                      }
+                      selected={formDayNumber === String(d.dayNumber)}
+                      onSelect={() => {
+                        setFormDayNumber(String(d.dayNumber));
+                        setExpandedFormPicker(null);
+                      }}
+                    />
+                  ))}
+                </div>
+              </IosDisclosureRow>
+
+              <div className="px-4 py-2.5 flex items-center justify-between gap-3 min-h-[48px]">
+                <span className="text-sm sm:text-xs font-semibold text-slate-700 dark:text-slate-300 shrink-0">
+                  {isZh ? '開始日期' : 'Start Date'}
+                </span>
+                <input
+                  type="date"
+                  value={formStartDate}
+                  onChange={(e) => setFormStartDate(e.target.value)}
+                  className="bg-transparent text-right text-[16px] sm:text-xs font-mono tabular-nums font-semibold text-slate-900 dark:text-white outline-none"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    {isZh ? '開始日期' : 'Start Date'}
-                  </label>
-                  <input
-                    type="date"
-                    value={formStartDate}
-                    onChange={(e) => setFormStartDate(e.target.value)}
-                    className="w-full min-h-[42px] px-2.5 py-2 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white font-mono outline-none focus:border-teal-600"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    {isZh ? '結束 / 退房日' : 'End Date'}
-                  </label>
-                  <input
-                    type="date"
-                    value={formEndDate}
-                    onChange={(e) => setFormEndDate(e.target.value)}
-                    className="w-full min-h-[42px] px-2.5 py-2 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white font-mono outline-none focus:border-teal-600"
-                  />
-                </div>
+              <div className="px-4 py-2.5 flex items-center justify-between gap-3 min-h-[48px]">
+                <span className="text-sm sm:text-xs font-semibold text-slate-700 dark:text-slate-300 shrink-0">
+                  {isZh ? '結束 / 退房日' : 'End Date'}
+                </span>
+                <input
+                  type="date"
+                  value={formEndDate}
+                  onChange={(e) => setFormEndDate(e.target.value)}
+                  className="bg-transparent text-right text-[16px] sm:text-xs font-mono tabular-nums font-semibold text-slate-900 dark:text-white outline-none"
+                />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    {isZh ? '班次 / 時段' : 'Time Label'}
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={40}
-                    value={formTimeLabel}
-                    onChange={(e) => setFormTimeLabel(e.target.value)}
-                    placeholder={isZh ? '如：10:15 起飛 / 15:00 入住' : 'e.g., 10:15 / Check-in 15:00'}
-                    className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white font-mono outline-none focus:border-teal-600"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    {isZh ? '關聯天數' : 'Trip Day'}
-                  </label>
-                  <select
-                    value={formDayNumber}
-                    onChange={(e) => setFormDayNumber(e.target.value)}
-                    className="w-full min-h-[42px] px-2.5 py-2 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white outline-none focus:border-teal-600"
-                  >
-                    <option value="">{isZh ? '全程 / 不指定' : 'Whole trip'}</option>
-                    {(trip.days || []).map((d) => (
-                      <option key={d.id} value={String(d.dayNumber)}>
-                        Day {d.dayNumber} ({d.date})
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div className="px-4 py-2.5 flex items-center justify-between gap-3 min-h-[48px]">
+                <span className="text-sm sm:text-xs font-semibold text-slate-700 dark:text-slate-300 shrink-0">
+                  {isZh ? '班次 / 時段' : 'Time Label'}
+                </span>
+                <input
+                  type="text"
+                  maxLength={40}
+                  value={formTimeLabel}
+                  onChange={(e) => setFormTimeLabel(e.target.value)}
+                  placeholder={isZh ? '如：10:15 起飛' : 'e.g., 10:15'}
+                  className="flex-1 min-w-0 bg-transparent text-right text-[16px] sm:text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
+                />
               </div>
+            </IosInsetGroup>
 
-              <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  {isZh ? '機場 / 車站 / 飯店地址' : 'Airport / Station / Address'}
+            <IosInsetGroup header={isZh ? '地點、電子連結與備註' : 'Location, URL & Notes'}>
+              <div className="px-4 py-2.5 flex flex-col gap-1">
+                <label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  {isZh ? '機場 / 車站 / 飯店地址' : 'Address / Terminal'}
                 </label>
                 <input
                   type="text"
@@ -603,12 +647,12 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                   value={formLocation}
                   onChange={(e) => setFormLocation(e.target.value)}
                   placeholder={isZh ? '方便現場一鍵複製地址給計程車或導航' : 'Address or terminal location'}
-                  className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white outline-none focus:border-teal-600"
+                  className="w-full min-h-[34px] bg-transparent text-[16px] sm:text-xs text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
                 />
               </div>
 
-              <div>
-                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              <div className="px-4 py-2.5 flex flex-col gap-1">
+                <label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                   {isZh ? '電子憑證 / 訂單連結 (選填)' : 'Booking URL (Optional)'}
                 </label>
                 <input
@@ -617,37 +661,27 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                   value={formUrl}
                   onChange={(e) => setFormUrl(e.target.value)}
                   placeholder="https://..."
-                  className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white outline-none focus:border-teal-600"
+                  className="w-full min-h-[34px] bg-transparent text-[16px] sm:text-xs text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
                 />
               </div>
-            </div>
 
-            <div>
-              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                {isZh ? '備註 (行李額度、取票方式、退改規則等)' : 'Notes (Baggage, pickup, policy)'}
-              </label>
-              <textarea
-                rows={2}
-                maxLength={500}
-                value={formNotes}
-                onChange={(e) => setFormNotes(e.target.value)}
-                placeholder={isZh ? '例：託運 23kg x2、護照需與訂位拼音一致...' : 'e.g., 23kg checked bag, passport required...'}
-                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white outline-none focus:border-teal-600 resize-none"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2 pt-1">
-              <button
-                type="submit"
-                className="min-h-[44px] px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
-              >
-                <Check className="w-4 h-4" />
-                <span>{editingVoucherId ? (isZh ? '儲存變更' : 'Save Changes') : isZh ? '加入憑證夾' : 'Save Voucher'}</span>
-              </button>
-            </div>
+              <div className="px-4 py-2.5 flex flex-col gap-1">
+                <label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  {isZh ? '備註' : 'Notes'}
+                </label>
+                <textarea
+                  rows={3}
+                  maxLength={500}
+                  value={formNotes}
+                  onChange={(e) => setFormNotes(e.target.value)}
+                  placeholder={isZh ? '行李額度、取票方式、退改規則等...' : 'Baggage, pickup, policy...'}
+                  className="w-full bg-transparent text-[16px] sm:text-xs text-slate-900 dark:text-white placeholder:text-slate-400 outline-none resize-none"
+                />
+              </div>
+            </IosInsetGroup>
           </form>
-        )}
-      </div>
+        </IosModalSheet>
+      )}
 
       {/* Empty State */}
       {filteredEntries.length === 0 ? (
@@ -697,7 +731,6 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
               const copyMainId = `code-${v.id}`;
               const copySecId = `sec-${v.id}`;
               const copyLocId = `loc-${v.id}`;
-              const isConfirmingDelete = deletingId === v.id;
               const dateRangeText = v.startDate
                 ? v.endDate && v.endDate !== v.startDate
                   ? `${v.startDate} ~ ${v.endDate}`
@@ -707,10 +740,10 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
               return (
                 <div
                   key={v.id}
-                  className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-5 shadow-2xs flex flex-col justify-between gap-3.5"
+                  className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs flex flex-col justify-between divide-y divide-[#E5E2DC]/75 dark:divide-slate-800 overflow-hidden"
                 >
-                  <div className="space-y-3">
-                    {/* Quiet unboxed metadata line */}
+                  {/* Top Header & Title */}
+                  <div className="px-4 sm:px-5 pt-4 pb-3.5 space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium flex-wrap min-w-0">
                         <span className="flex items-center gap-1 text-teal-700 dark:text-teal-400 font-semibold shrink-0">
@@ -731,7 +764,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                         )}
                       </div>
 
-                      <div className="flex items-center gap-1 shrink-0">
+                      <div className="flex items-center gap-0.5 -mr-1.5 shrink-0">
                         <button
                           type="button"
                           onClick={() =>
@@ -763,7 +796,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                             </button>
                             <button
                               type="button"
-                              onClick={() => setDeletingId(isConfirmingDelete ? null : v.id)}
+                              onClick={() => setPendingDeleteVoucher(v)}
                               title={isZh ? '刪除憑證' : 'Delete voucher'}
                               className="w-11 h-11 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"
                             >
@@ -774,151 +807,125 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Title */}
                     <h4 className="font-bold text-base text-slate-900 dark:text-white tracking-tight">
                       {v.title}
                     </h4>
-
-                    {/* Prominent Code Row with 1-Tap Copy */}
-                    <div className="flex items-center justify-between gap-2.5 p-3 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/70 border border-[#E5E2DC] dark:border-slate-800">
-                      <div className="min-w-0">
-                        <span className="text-[11px] text-slate-400 block">
-                          {isZh ? '訂位代號 / 確認碼' : 'Booking Code'}
-                        </span>
-                        <span className="font-mono tabular-nums font-bold text-base text-slate-900 dark:text-white tracking-wider break-all select-all">
-                          {v.bookingCode}
-                        </span>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleCopy(v.bookingCode, copyMainId)}
-                        className={`min-h-[44px] px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer ${
-                          copiedKey === copyMainId
-                            ? 'bg-teal-700 text-white'
-                            : 'bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:border-teal-600'
-                        }`}
-                      >
-                        {copiedKey === copyMainId ? (
-                          <>
-                            <Check className="w-3.5 h-3.5" />
-                            <span>{isZh ? '已複製' : 'Copied'}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                            <span>{isZh ? '複製' : 'Copy'}</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-
-                    {/* Secondary Code / Seat / Gate / PIN */}
-                    {v.secondaryCode && (
-                      <div className="flex items-center justify-between gap-2 text-xs px-1">
-                        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-mono tabular-nums truncate">
-                          <KeyRound className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
-                          <span className="truncate">{v.secondaryCode}</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleCopy(v.secondaryCode!, copySecId)}
-                          className="min-h-[34px] px-2.5 rounded-lg text-[11px] font-semibold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/40 shrink-0 cursor-pointer flex items-center gap-1"
-                        >
-                          {copiedKey === copySecId ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                          <span>{copiedKey === copySecId ? (isZh ? '已複製' : 'Copied') : isZh ? '複製細節' : 'Copy'}</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Date, Time & Location */}
-                    {(dateRangeText || v.timeLabel || v.location) && (
-                      <div className="space-y-1.5 text-xs text-slate-500 dark:text-slate-400">
-                        {(dateRangeText || v.timeLabel) && (
-                          <div className="flex items-center gap-1.5 font-mono tabular-nums">
-                            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span>{[dateRangeText, v.timeLabel].filter(Boolean).join(' · ')}</span>
-                          </div>
-                        )}
-                        {v.location && (
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="flex items-center gap-1.5 min-w-0">
-                              <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              <span className="truncate">{v.location}</span>
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => handleCopy(v.location!, copyLocId)}
-                              className="text-[11px] font-semibold text-slate-500 hover:text-teal-700 dark:hover:text-teal-400 shrink-0 cursor-pointer"
-                            >
-                              {copiedKey === copyLocId ? (isZh ? '已複製' : 'Copied') : isZh ? '複製地址' : 'Copy'}
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {v.notes && (
-                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed border-t border-[#E5E2DC]/70 dark:border-slate-800 pt-2.5">
-                        {v.notes}
-                      </p>
-                    )}
                   </div>
 
-                  {/* Delete confirm or Footer Actions */}
-                  {isConfirmingDelete ? (
-                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-rose-200 dark:border-rose-900/50 text-xs">
-                      <span className="font-semibold text-rose-600 dark:text-rose-400">
-                        {isZh ? '確定刪除此憑證？' : 'Delete this voucher?'}
+                  {/* Flat Hairline Code Band with 1-Tap Copy */}
+                  <div className="px-4 sm:px-5 py-3 bg-[#FAF9F6]/65 dark:bg-slate-900/40 flex items-center justify-between gap-2.5">
+                    <div className="min-w-0">
+                      <span className="text-[11px] text-slate-400 block">
+                        {isZh ? '訂位代號 / 確認碼' : 'Booking Code'}
                       </span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setDeletingId(null)}
-                          className="min-h-[36px] px-3 rounded-lg border border-[#E5E2DC] dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold cursor-pointer"
-                        >
-                          {isZh ? '取消' : 'Cancel'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteVoucher(v.id)}
-                          className="min-h-[36px] px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold cursor-pointer"
-                        >
-                          {isZh ? '確認刪除' : 'Delete'}
-                        </button>
-                      </div>
+                      <span className="font-mono tabular-nums font-bold text-base text-slate-900 dark:text-white tracking-wider break-all select-all">
+                        {v.bookingCode}
+                      </span>
                     </div>
-                  ) : (
-                    (v.url || (v.dayNumber && onJumpToDay)) && (
-                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#E5E2DC]/70 dark:border-slate-800 text-xs">
-                        {v.dayNumber && onJumpToDay ? (
+
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(v.bookingCode, copyMainId)}
+                      className={`min-h-[44px] sm:min-h-[38px] px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer ${
+                        copiedKey === copyMainId
+                          ? 'bg-teal-700 text-white'
+                          : 'bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:border-teal-600'
+                      }`}
+                    >
+                      {copiedKey === copyMainId ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>{isZh ? '已複製' : 'Copied'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                          <span>{isZh ? '複製' : 'Copy'}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Secondary Details & Metadata Hairline Section */}
+                  {(v.secondaryCode || dateRangeText || v.timeLabel || v.location || v.notes) && (
+                    <div className="px-4 sm:px-5 py-3 space-y-2 text-xs text-slate-500 dark:text-slate-400">
+                      {v.secondaryCode && (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-200 font-mono tabular-nums truncate">
+                            <KeyRound className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+                            <span className="truncate">{v.secondaryCode}</span>
+                          </span>
                           <button
                             type="button"
-                            onClick={() => onJumpToDay(v.dayNumber!)}
-                            className="font-semibold text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1 cursor-pointer"
+                            onClick={() => handleCopy(v.secondaryCode!, copySecId)}
+                            className="min-h-[36px] px-2 rounded-lg text-[11px] font-semibold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/40 shrink-0 cursor-pointer flex items-center gap-1"
                           >
-                            <span>{isZh ? `前往 Day ${v.dayNumber} 行程` : `Go to Day ${v.dayNumber}`}</span>
-                            <ArrowUpRight className="w-3.5 h-3.5" />
+                            {copiedKey === copySecId ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedKey === copySecId ? (isZh ? '已複製' : 'Copied') : isZh ? '複製細節' : 'Copy'}</span>
                           </button>
-                        ) : (
-                          <span />
-                        )}
-                        {(() => {
-                          const safeUrl = sanitizeExternalUrl(v.url);
-                          return safeUrl ? (
-                            <a
-                              href={safeUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-semibold text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1"
-                            >
-                              <span>{isZh ? '開啟電子憑證' : 'Open Link'}</span>
-                              <ExternalLink className="w-3.5 h-3.5" />
-                            </a>
-                          ) : null;
-                        })()}
-                      </div>
-                    )
+                        </div>
+                      )}
+
+                      {(dateRangeText || v.timeLabel) && (
+                        <div className="flex items-center gap-1.5 font-mono tabular-nums">
+                          <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span>{[dateRangeText, v.timeLabel].filter(Boolean).join(' · ')}</span>
+                        </div>
+                      )}
+
+                      {v.location && (
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="flex items-center gap-1.5 min-w-0">
+                            <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate">{v.location}</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(v.location!, copyLocId)}
+                            className="min-h-[36px] px-2 text-[11px] font-semibold text-slate-500 hover:text-teal-700 dark:hover:text-teal-400 shrink-0 cursor-pointer"
+                          >
+                            {copiedKey === copyLocId ? (isZh ? '已複製' : 'Copied') : isZh ? '複製地址' : 'Copy'}
+                          </button>
+                        </div>
+                      )}
+
+                      {v.notes && (
+                        <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed pt-1">
+                          {v.notes}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {(v.url || (v.dayNumber && onJumpToDay)) && (
+                    <div className="px-4 sm:px-5 py-2.5 flex items-center justify-between gap-2 text-xs">
+                      {v.dayNumber && onJumpToDay ? (
+                        <button
+                          type="button"
+                          onClick={() => onJumpToDay(v.dayNumber!)}
+                          className="min-h-[36px] font-semibold text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>{isZh ? `前往 Day ${v.dayNumber} 行程` : `Go to Day ${v.dayNumber}`}</span>
+                          <ArrowUpRight className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <span />
+                      )}
+                      {(() => {
+                        const safeUrl = sanitizeExternalUrl(v.url);
+                        return safeUrl ? (
+                          <a
+                            href={safeUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="min-h-[36px] font-semibold text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1"
+                          >
+                            <span>{isZh ? '開啟電子憑證' : 'Open Link'}</span>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        ) : null;
+                      })()}
+                    </div>
                   )}
                 </div>
               );
@@ -932,9 +939,9 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
             return (
               <div
                 key={entry.id}
-                className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-5 shadow-2xs flex flex-col justify-between gap-3.5"
+                className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs flex flex-col justify-between divide-y divide-[#E5E2DC]/75 dark:divide-slate-800 overflow-hidden"
               >
-                <div className="space-y-3">
+                <div className="px-4 sm:px-5 pt-4 pb-3.5 space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium flex-wrap min-w-0">
                       <span className="flex items-center gap-1 text-teal-700 dark:text-teal-400 font-semibold shrink-0">
@@ -966,7 +973,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                         })
                       }
                       title={isZh ? '全螢幕出示給櫃檯' : 'Show fullscreen card'}
-                      className="w-11 h-11 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-teal-700 dark:text-slate-400 dark:hover:text-teal-300 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
+                      className="w-11 h-11 sm:w-9 sm:h-9 -mr-1.5 rounded-lg flex items-center justify-center text-slate-500 hover:text-teal-700 dark:text-slate-400 dark:hover:text-teal-300 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
                     >
                       <Maximize2 className="w-4 h-4" />
                     </button>
@@ -975,54 +982,54 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                   <h4 className="font-bold text-base text-slate-900 dark:text-white tracking-tight">
                     {entry.title}
                   </h4>
-
-                  <div className="flex items-center justify-between gap-2.5 p-3 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/70 border border-[#E5E2DC] dark:border-slate-800">
-                    <div className="min-w-0">
-                      <span className="text-[11px] text-slate-400 block">
-                        {isZh ? '行程預約代號' : 'Itinerary Booking Code'}
-                      </span>
-                      <span className="font-mono tabular-nums font-bold text-base text-slate-900 dark:text-white tracking-wider break-all select-all">
-                        {entry.bookingCode}
-                      </span>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(entry.bookingCode, copyId)}
-                      className={`min-h-[44px] px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer ${
-                        copiedKey === copyId
-                          ? 'bg-teal-700 text-white'
-                          : 'bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:border-teal-600'
-                      }`}
-                    >
-                      {copiedKey === copyId ? (
-                        <>
-                          <Check className="w-3.5 h-3.5" />
-                          <span>{isZh ? '已複製' : 'Copied'}</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                          <span>{isZh ? '複製' : 'Copy'}</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  {entry.location && (
-                    <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span className="truncate">{entry.location}</span>
-                    </div>
-                  )}
                 </div>
 
+                <div className="px-4 sm:px-5 py-3 bg-[#FAF9F6]/65 dark:bg-slate-900/40 flex items-center justify-between gap-2.5">
+                  <div className="min-w-0">
+                    <span className="text-[11px] text-slate-400 block">
+                      {isZh ? '行程預約代號' : 'Itinerary Booking Code'}
+                    </span>
+                    <span className="font-mono tabular-nums font-bold text-base text-slate-900 dark:text-white tracking-wider break-all select-all">
+                      {entry.bookingCode}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(entry.bookingCode, copyId)}
+                    className={`min-h-[44px] sm:min-h-[38px] px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer ${
+                      copiedKey === copyId
+                        ? 'bg-teal-700 text-white'
+                        : 'bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:border-teal-600'
+                    }`}
+                  >
+                    {copiedKey === copyId ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>{isZh ? '已複製' : 'Copied'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                        <span>{isZh ? '複製' : 'Copy'}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {entry.location && (
+                  <div className="px-4 sm:px-5 py-2.5 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="truncate">{entry.location}</span>
+                  </div>
+                )}
+
                 {onJumpToDay && (
-                  <div className="pt-2 border-t border-[#E5E2DC]/70 dark:border-slate-800 text-xs">
+                  <div className="px-4 sm:px-5 py-2.5 text-xs">
                     <button
                       type="button"
                       onClick={() => onJumpToDay(entry.dayNumber)}
-                      className="font-semibold text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1 cursor-pointer"
+                      className="min-h-[36px] font-semibold text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1 cursor-pointer"
                     >
                       <span>{isZh ? `查看 Day ${entry.dayNumber} 時間軸` : `View Day ${entry.dayNumber}`}</span>
                       <ArrowUpRight className="w-3.5 h-3.5" />
@@ -1035,40 +1042,51 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
         </div>
       )}
 
-      {/* Fullscreen Counter Display Modal (Airport / Hotel Check-in Card) */}
-      {counterCard && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))]"
-          onClick={() => setCounterCard(null)}
-        >
-          <div
-            className="w-full max-w-lg max-h-full overflow-y-auto rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 p-6 sm:p-8 shadow-2xl space-y-5 animate-in zoom-in-95 duration-150"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-xs font-semibold text-teal-700 dark:text-teal-400">
-                  {counterCard.provider ||
-                    (isZh
-                      ? BOOKING_CATEGORIES.find((c) => c.key === counterCard.category)?.labelZh
-                      : BOOKING_CATEGORIES.find((c) => c.key === counterCard.category)?.labelEn)}
-                </div>
-                <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">
-                  {counterCard.title}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCounterCard(null)}
-                className="w-11 h-11 rounded-full bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white cursor-pointer shrink-0"
-                aria-label="Close"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Delete Voucher Confirmation iOS Action Sheet */}
+      {pendingDeleteVoucher && (
+        <IosActionSheet
+          title={isZh ? '確定刪除此訂位憑證？' : 'Delete Booking Voucher?'}
+          message={pendingDeleteVoucher.title}
+          options={[
+            {
+              label: isZh ? '刪除憑證' : 'Delete Voucher',
+              tone: 'destructive',
+              onClick: () => handleDeleteVoucher(pendingDeleteVoucher.id),
+            },
+          ]}
+          cancelLabel={isZh ? '取消' : 'Cancel'}
+          onClose={() => setPendingDeleteVoucher(null)}
+        />
+      )}
 
-            <div className="p-5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 text-center space-y-2">
-              <span className="text-xs text-slate-500 dark:text-slate-400 block">
+      {/* Fullscreen Counter Display iOS Sheet (Airport / Hotel Check-in Card) */}
+      {counterCard && (
+        <IosModalSheet
+          onClose={() => setCounterCard(null)}
+          variant="surface"
+          maxWidthClass="sm:max-w-lg"
+          zIndexClass="z-[80]"
+          ariaLabel={counterCard.title}
+        >
+          <IosNavBar
+            title={
+              counterCard.provider ||
+              (isZh
+                ? BOOKING_CATEGORIES.find((c) => c.key === counterCard.category)?.labelZh
+                : BOOKING_CATEGORIES.find((c) => c.key === counterCard.category)?.labelEn) ||
+              (isZh ? '櫃檯出示憑證' : 'Booking Card')
+            }
+            rightLabel={isZh ? '完成' : 'Done'}
+            onRightClick={() => setCounterCard(null)}
+          />
+
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-5 sm:p-6 space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+            <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight text-center">
+              {counterCard.title}
+            </h3>
+
+            <div className="py-5 px-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/80 border border-[#E5E2DC] dark:border-slate-800 text-center space-y-2">
+              <span className="text-[11px] font-bold tracking-wider text-slate-400 block">
                 {isZh ? '訂位確認編號 · BOOKING REFERENCE' : 'BOOKING REFERENCE'}
               </span>
               <div className="font-mono tabular-nums font-black text-2xl sm:text-3xl tracking-widest text-slate-900 dark:text-white break-all select-all">
@@ -1082,25 +1100,25 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
             </div>
 
             {(counterCard.dateLabel || counterCard.location || counterCard.notes) && (
-              <div className="space-y-2 text-xs sm:text-sm text-slate-600 dark:text-slate-300 border-t border-[#E5E2DC] dark:border-slate-800 pt-4">
+              <IosInsetGroup>
                 {counterCard.dateLabel && (
-                  <div className="font-mono tabular-nums flex items-center gap-2">
+                  <div className="px-4 py-3 flex items-center gap-2.5 text-xs sm:text-sm font-mono tabular-nums text-slate-700 dark:text-slate-200">
                     <Calendar className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
                     <span>{counterCard.dateLabel}</span>
                   </div>
                 )}
                 {counterCard.location && (
-                  <div className="flex items-start gap-2">
+                  <div className="px-4 py-3 flex items-start gap-2.5 text-xs sm:text-sm text-slate-700 dark:text-slate-200">
                     <MapPin className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
                     <span>{counterCard.location}</span>
                   </div>
                 )}
                 {counterCard.notes && (
-                  <p className="text-xs text-slate-500 dark:text-slate-400 pt-1 leading-relaxed">
+                  <div className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                     {counterCard.notes}
-                  </p>
+                  </div>
                 )}
-              </div>
+              </IosInsetGroup>
             )}
 
             <button
@@ -1121,7 +1139,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
               )}
             </button>
           </div>
-        </div>
+        </IosModalSheet>
       )}
     </div>
   );

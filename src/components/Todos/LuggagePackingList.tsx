@@ -1,5 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   Plus,
   Check,
@@ -18,7 +17,13 @@ import { Trip, PackingItem, PackingCategory } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { SwipeableActionRow } from '../UI/SwipeableExpenseRow';
 import { AutoGrowTitleInput } from './RemindersTodoList';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import {
+  IosModalSheet,
+  IosNavBar,
+  IosInsetGroup,
+  IosCheckmarkRow,
+  IosRow,
+} from '../UI/IosPrimitives';
 
 interface LuggagePackingListProps {
   trip: Trip;
@@ -76,19 +81,6 @@ export const LuggagePackingList: React.FC<LuggagePackingListProps> = ({
   const [detailCategory, setDetailCategory] = useState<PackingCategory>('other');
 
   const newInputRef = useRef<HTMLInputElement | null>(null);
-
-  useBodyScrollLock(Boolean(detailItem));
-
-  useEffect(() => {
-    if (!detailItem) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setDetailItem(null);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [detailItem]);
 
   const pendingPacking = useMemo(
     () => packingList.filter((p) => !p.packed),
@@ -383,7 +375,7 @@ export const LuggagePackingList: React.FC<LuggagePackingListProps> = ({
           <button
             type="button"
             onClick={() => setCategoryFilter('all')}
-            className={`min-h-[36px] px-3 py-1 rounded-xl text-xs font-medium transition shrink-0 cursor-pointer tabular-nums ${
+            className={`min-h-[44px] sm:min-h-[36px] px-3 py-1 rounded-xl text-xs font-medium transition shrink-0 cursor-pointer tabular-nums ${
               categoryFilter === 'all'
                 ? 'bg-teal-700 dark:bg-teal-600 text-white font-bold shadow-2xs'
                 : 'bg-[#FAF9F6] dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
@@ -403,7 +395,7 @@ export const LuggagePackingList: React.FC<LuggagePackingListProps> = ({
                 key={cat}
                 type="button"
                 onClick={() => setCategoryFilter(cat)}
-                className={`min-h-[36px] px-3 py-1 rounded-xl text-xs font-medium transition shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                className={`min-h-[44px] sm:min-h-[36px] px-3 py-1 rounded-xl text-xs font-medium transition shrink-0 flex items-center gap-1.5 cursor-pointer ${
                   isSelected
                     ? 'bg-teal-700 dark:bg-teal-600 text-white font-bold shadow-2xs'
                     : 'bg-[#FAF9F6] dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
@@ -525,120 +517,79 @@ export const LuggagePackingList: React.FC<LuggagePackingListProps> = ({
         )}
       </div>
 
-      {/* iPhone Reminders-style "(i)" Details & Category Sheet Modal (Portaled & Scroll-Locked) */}
-      {detailItem &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-80 flex items-end sm:items-center justify-center pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-4 bg-black/55 backdrop-blur-xs touch-none overscroll-none animate-in fade-in duration-150"
-            onClick={() => setDetailItem(null)}
-            role="dialog"
-            aria-modal="true"
-            aria-label={isZh ? '詳細資訊' : 'Details'}
-          >
-            <div
-              className="w-full sm:max-w-md rounded-t-[24px] sm:rounded-3xl bg-[#F2F2F7] dark:bg-[#1C1C1E] border-t sm:border border-[#E5E2DC] dark:border-slate-800 shadow-2xl max-h-full sm:max-h-[85dvh] pb-[env(safe-area-inset-bottom,0px)] sm:pb-0 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* iOS Navigation Bar Header */}
-              <div className="px-4 py-3 border-b border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-[#2C2C2E]/90 backdrop-blur-md flex items-center justify-between shrink-0 touch-none">
-                <button
-                  type="button"
-                  onClick={() => setDetailItem(null)}
-                  className="min-h-[44px] sm:min-h-[36px] px-2 text-base sm:text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white cursor-pointer"
-                >
-                  {isZh ? '取消' : 'Cancel'}
-                </button>
-                <h4 className="font-bold text-base text-slate-900 dark:text-white">
-                  {isZh ? '詳細資訊' : 'Details'}
-                </h4>
-                <button
-                  type="button"
-                  onClick={handleSaveDetails}
-                  className="min-h-[44px] sm:min-h-[36px] px-2 text-base sm:text-sm font-bold text-teal-700 dark:text-teal-400 hover:text-teal-800 dark:hover:text-teal-300 cursor-pointer"
-                >
-                  {isZh ? '完成' : 'Done'}
-                </button>
+      {/* iOS Reminders-style "(i)" Details & Category Sheet Modal */}
+      {detailItem && (
+        <IosModalSheet
+          onClose={() => setDetailItem(null)}
+          variant="grouped"
+          maxWidthClass="sm:max-w-md"
+          zIndexClass="z-[80]"
+          ariaLabel={isZh ? '詳細資訊' : 'Details'}
+        >
+          <IosNavBar
+            title={isZh ? '詳細資訊' : 'Details'}
+            leftLabel={isZh ? '取消' : 'Cancel'}
+            onLeftClick={() => setDetailItem(null)}
+            rightLabel={isZh ? '完成' : 'Done'}
+            onRightClick={handleSaveDetails}
+            rightTone="done"
+          />
+
+          <div className="p-4 space-y-4 overflow-y-auto overscroll-contain touch-pan-y flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+            {/* Group 1: Item Name */}
+            <IosInsetGroup divided={false}>
+              <div className="px-4 py-2.5">
+                <input
+                  type="text"
+                  value={detailName}
+                  onChange={(e) => setDetailName(e.target.value)}
+                  placeholder={isZh ? '物品名稱' : 'Item name'}
+                  className="w-full min-h-[40px] bg-transparent text-[16px] sm:text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden"
+                />
               </div>
+            </IosInsetGroup>
 
-              {/* iOS Inset Grouped Sections */}
-              <div className="p-4 space-y-4 overflow-y-auto overscroll-contain touch-pan-y flex-1">
-                {/* Group 1: Item Name */}
-                <div className="rounded-2xl bg-white dark:bg-[#2C2C2E] overflow-hidden shadow-2xs">
-                  <div className="px-4 py-2.5">
-                    <input
-                      type="text"
-                      value={detailName}
-                      onChange={(e) => setDetailName(e.target.value)}
-                      placeholder={isZh ? '物品名稱' : 'Item name'}
-                      className="w-full min-h-[38px] bg-transparent text-base sm:text-sm font-medium text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden"
-                    />
-                  </div>
-                </div>
+            {/* Group 2: Category Picker (iOS Grouped Checkmark List) */}
+            <IosInsetGroup header={isZh ? '分類' : 'Category'}>
+              {(Object.keys(PACKING_CATEGORY_MAP) as PackingCategory[]).map((cat) => {
+                const meta = PACKING_CATEGORY_MAP[cat];
+                const IconComp = meta.Icon;
+                const isSelected = detailCategory === cat;
 
-                {/* Group 2: Category Picker (iOS Grouped List) */}
-                <div>
-                  <div className="px-2 pb-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                    {isZh ? '分類' : 'Category'}
-                  </div>
-                  <div className="rounded-2xl bg-white dark:bg-[#2C2C2E] divide-y divide-slate-100 dark:divide-slate-700/60 overflow-hidden shadow-2xs">
-                    {(Object.keys(PACKING_CATEGORY_MAP) as PackingCategory[]).map((cat) => {
-                      const meta = PACKING_CATEGORY_MAP[cat];
-                      const IconComp = meta.Icon;
-                      const isSelected = detailCategory === cat;
+                return (
+                  <IosCheckmarkRow
+                    key={cat}
+                    icon={
+                      <span
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                          isSelected
+                            ? 'bg-teal-700 dark:bg-teal-500 text-white'
+                            : 'bg-[#F3F1EC] dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        <IconComp className="w-3.5 h-3.5" />
+                      </span>
+                    }
+                    label={isZh ? meta.label : meta.enLabel}
+                    selected={isSelected}
+                    onSelect={() => setDetailCategory(cat)}
+                  />
+                );
+              })}
+            </IosInsetGroup>
 
-                      return (
-                        <button
-                          key={cat}
-                          type="button"
-                          onClick={() => setDetailCategory(cat)}
-                          className="w-full min-h-[46px] px-4 py-2.5 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-800/40 transition cursor-pointer"
-                        >
-                          <div className="flex items-center gap-3">
-                            <span
-                              className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-                                isSelected
-                                  ? 'bg-teal-700 dark:bg-teal-500 text-white'
-                                  : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                              }`}
-                            >
-                              <IconComp className="w-3.5 h-3.5" />
-                            </span>
-                            <span
-                              className={`text-base sm:text-sm ${
-                                isSelected
-                                  ? 'font-semibold text-teal-700 dark:text-teal-400'
-                                  : 'font-normal text-slate-900 dark:text-white'
-                              }`}
-                            >
-                              {isZh ? meta.label : meta.enLabel}
-                            </span>
-                          </div>
-                          {isSelected && (
-                            <Check className="w-4 h-4 text-teal-700 dark:text-teal-400 stroke-[2.75]" />
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Group 3: Explicit Delete Row */}
-                <div className="rounded-2xl bg-white dark:bg-[#2C2C2E] overflow-hidden shadow-2xs">
-                  <button
-                    type="button"
-                    onClick={() => handleDeletePacking(detailItem.id)}
-                    className="w-full min-h-[48px] px-4 py-3 text-rose-600 dark:text-rose-400 hover:bg-rose-50/70 dark:hover:bg-rose-950/30 font-semibold text-base sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    <span>{isZh ? '刪除此物品' : 'Delete Item'}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
+            {/* Group 3: Explicit Delete Row */}
+            <IosInsetGroup divided={false}>
+              <IosRow
+                icon={<Trash2 className="w-4 h-4 text-rose-600 dark:text-rose-400" />}
+                label={isZh ? '刪除此物品' : 'Delete Item'}
+                destructive
+                onClick={() => handleDeletePacking(detailItem.id)}
+              />
+            </IosInsetGroup>
+          </div>
+        </IosModalSheet>
+      )}
     </div>
   );
 };

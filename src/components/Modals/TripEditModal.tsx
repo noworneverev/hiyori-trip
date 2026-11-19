@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { Trip, TripMemoryItem, DayPlan } from '../../types/itinerary';
 import { PRESET_TRIPS } from '../../data/presetTrips';
 import { generateAiTrip, universalParseItinerary } from '../../utils/aiClient';
-import { HiyoriLogo } from '../UI/HiyoriLogo';
 import { MediaImage } from '../UI/MediaImage';
 import { resolveDestinationTimezone } from '../../utils/timezone';
 import { getTodayLocal, addDaysLocal, formatMonthDaySlash } from '../../utils/date';
@@ -15,14 +13,21 @@ import { sanitizeExternalUrl } from '../../utils/url';
 import { extractMediaId, isMediaRef } from '../../utils/image';
 import { idbDeleteMedia } from '../../utils/indexedDb';
 import {
+  IosModalSheet,
+  IosNavBar,
+  IosInsetGroup,
+  IosRow,
+  IosDisclosureRow,
+  IosCheckmarkRow,
+  IosToggleRow,
+} from '../UI/IosPrimitives';
+import {
   X,
   Calendar,
   MapPin,
   Sparkles,
   Loader2,
   ClipboardPaste,
-  ChevronDown,
-  ChevronUp,
   Image as ImageIcon,
   User,
   ExternalLink,
@@ -31,6 +36,9 @@ import {
   Check,
   Navigation,
   HardDrive,
+  Coins,
+  Palette,
+  ChevronRight,
 } from 'lucide-react';
 
 interface TripEditModalProps {
@@ -57,24 +65,29 @@ const CURRENCIES = [
   { value: 'THB', label: '泰銖 (THB ฿)' },
 ];
 
+const AI_STYLES = [
+  { value: 'classic', label: '經典熱門景點' },
+  { value: 'foodie', label: '在地必吃美食' },
+  { value: 'relax', label: '悠閒放鬆漫步' },
+  { value: 'shopping', label: '潮流逛街購物' },
+];
+
 export const TripEditModal: React.FC<TripEditModalProps> = ({
   trip,
   initialMode = 'planner',
   onSave,
   onClose,
 }) => {
-  useBodyScrollLock(true);
   const isEditing = Boolean(trip);
   const today = getTodayLocal();
   const defaultEnd = addDaysLocal(today, 4);
 
-  // Stable draft ID so media:// IDs stored during creation belong cleanly to the new trip ID
   const [draftTripId] = useState(() => trip?.id || `trip-${Date.now()}`);
   const [tripMode, setTripMode] = useState<'planner' | 'memory'>(
     trip?.tripMode || (!isEditing ? initialMode : 'planner')
   );
 
-  // 1. Core Minimal Fields (Apple / Notion Single-Page)
+  // Core Fields
   const [title, setTitle] = useState(trip?.title || '');
   const [destination, setDestination] = useState(trip?.destination || '');
   const [destinationLat, setDestinationLat] = useState<number | undefined>(trip?.destinationLat);
@@ -87,6 +100,13 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
   const [currency, setCurrency] = useState(trip?.currency || 'JPY');
   const [coverGradient, setCoverGradient] = useState(trip?.coverGradient || GRADIENTS[0].class);
   const [googlePhotosAlbumUrl, setGooglePhotosAlbumUrl] = useState(trip?.googlePhotosAlbumUrl || '');
+
+  // Inline Disclosure Sections
+  const [datesExpanded, setDatesExpanded] = useState(false);
+  const [currencyExpanded, setCurrencyExpanded] = useState(false);
+  const [themeExpanded, setThemeExpanded] = useState(false);
+  const [albumExpanded, setAlbumExpanded] = useState(Boolean(trip?.googlePhotosAlbumUrl));
+  const [aiStyleExpanded, setAiStyleExpanded] = useState(false);
 
   // Memory-Mode Batch Photo + EXIF State
   const memoryFileInputRef = useRef<HTMLInputElement>(null);
@@ -112,6 +132,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
   }, []);
 
   const handleCloseAndCleanup = () => {
+    if (driveUploadProgress) return;
     if (!didSaveRef.current && batchPhotosRef.current.length > 0) {
       batchPhotosRef.current.forEach((p) => {
         if (isMediaRef(p.mediaRef)) {
@@ -123,12 +144,12 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
     onClose();
   };
 
-  // Free OpenStreetMap Nominatim Geocoding fallback for Memory Mode
+  // Free OpenStreetMap Nominatim Geocoding fallback
   const [isSearchingGeo, setIsSearchingGeo] = useState(false);
   const [geoResults, setGeoResults] = useState<Array<{ name: string; lat: number; lng: number; address: string }>>([]);
   const [geoSearchDone, setGeoSearchDone] = useState(false);
 
-  // 2. Folded Advanced Options (AI / Paste / Preset)
+  // Folded Advanced Options (AI / Paste / Preset)
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [advancedSubTab, setAdvancedSubTab] = useState<'ai' | 'paste' | 'preset'>('ai');
 
@@ -143,7 +164,6 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
   const [isParsingPaste, setIsParsingPaste] = useState(false);
   const [pasteError, setPasteError] = useState<string | null>(null);
 
-  // Calculate day count
   const calculateDays = (s: string, e: string) => {
     try {
       const d1 = new Date(s);
@@ -156,7 +176,6 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
   };
   const daysCount = isPhotoMemoryOnly ? 1 : calculateDays(startDate, endDate);
 
-  // Auto-detect currency & reset geo search hint when destination changes
   const handleDestinationChange = (val: string) => {
     setDestination(val);
     setGeoSearchDone(false);
@@ -166,7 +185,6 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
     }
   };
 
-  // Summary of EXIF-extracted GPS & date range from uploaded photos
   const exifSummary = useMemo(() => {
     const gpsPhotos = batchPhotos.filter((p) => p.hasGps && typeof p.lat === 'number' && typeof p.lng === 'number');
     const exifDatedPhotos = batchPhotos.filter((p) => p.hasExifDate);
@@ -231,7 +249,6 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
       const nextPhotos = [...batchPhotos, ...processed];
       setBatchPhotos(nextPhotos);
 
-      // Auto-populate date range from EXIF/photo dates if user hasn't manually overridden dates
       if (!hasUserEditedDates) {
         const sortedDates = nextPhotos.map((p) => p.takenDate).filter(Boolean).sort();
         if (sortedDates.length > 0) {
@@ -240,7 +257,6 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
         }
       }
 
-      // Auto-populate destination coordinates from EXIF GPS if not already picked
       if (destinationLat === undefined || destinationLng === undefined) {
         const firstGps = nextPhotos.find((p) => p.hasGps && typeof p.lat === 'number' && typeof p.lng === 'number');
         if (firstGps) {
@@ -274,16 +290,6 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
     }
   };
 
-  // Keyboard shortcut
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleCloseAndCleanup();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  // Submit standard minimal trip or memory-archive trip
   const handleMinimalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (driveUploadProgress) return;
@@ -325,11 +331,8 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
     }
 
     if (isMemoryMode) {
-      // Group uploaded photos cleanly into chronological days (preserving exact photo dates)
       const uniqueDates = Array.from(
-        new Set([
-          ...batchPhotos.map((p) => p.takenDate).filter(Boolean),
-        ])
+        new Set([...batchPhotos.map((p) => p.takenDate).filter(Boolean)])
       ).sort();
 
       const effectiveStart = uniqueDates[0] || startDate || today;
@@ -448,7 +451,6 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
       return;
     }
 
-    // Creating standard planner trip
     const dayList = [];
     const actualDays = isPhotoMemoryOnly ? 1 : daysCount;
     for (let i = 1; i <= actualDays; i++) {
@@ -493,12 +495,10 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
     onClose();
   };
 
-  // Advanced: AI Generate
-  const handleAiSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAiSubmit = async () => {
     const targetDest = destination.trim() || title.trim();
     if (!targetDest) {
-      setAiGenError('請先在上方輸入旅程標題或目的地');
+      setAiGenError('請先在上方輸入旅程名稱或目的地');
       return;
     }
 
@@ -533,9 +533,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
     }
   };
 
-  // Advanced: Paste Parse
-  const handlePasteSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handlePasteSubmit = async () => {
     if (!pastedText.trim()) return;
 
     setIsParsingPaste(true);
@@ -569,7 +567,6 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
     }
   };
 
-  // Advanced: Apply Preset
   const handleApplyPreset = (preset: Trip) => {
     const clonedTrip: Trip = {
       ...preset,
@@ -587,147 +584,159 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
     onClose();
   };
 
+  const selectedCurrencyLabel =
+    CURRENCIES.find((c) => c.value === currency)?.label || currency;
+  const selectedGradientObj =
+    GRADIENTS.find((g) => g.class === coverGradient) || GRADIENTS[0];
+  const selectedAiStyleLabel =
+    AI_STYLES.find((s) => s.value === aiStyle)?.label || AI_STYLES[0].label;
+
+  const dateSummaryText =
+    isPhotoMemoryOnly && tripMode === 'planner'
+      ? '相簿模式'
+      : `${startDate.slice(5).replace('-', '/')} ~ ${endDate.slice(5).replace('-', '/')} · ${daysCount} 天`;
+
+  const navRightLabel = driveUploadProgress
+    ? `${driveUploadProgress.done}/${driveUploadProgress.total}`
+    : isEditing
+    ? '儲存'
+    : tripMode === 'memory' && batchPhotos.length > 0
+    ? `建立 (${batchPhotos.length})`
+    : '建立';
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm px-3 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] overflow-hidden overscroll-contain touch-manipulation"
-      onClick={handleCloseAndCleanup}
-      onTouchMove={(e) => {
-        if (e.target === e.currentTarget) {
-          e.preventDefault();
-        }
-      }}
+    <IosModalSheet
+      onClose={handleCloseAndCleanup}
+      maxWidthClass="sm:max-w-lg"
+      variant="grouped"
+      disableBackdropClose={Boolean(driveUploadProgress)}
+      ariaLabel={isEditing ? '編輯旅程' : '新增旅程'}
     >
-      <div
-        className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 my-auto animate-in fade-in zoom-in-95 duration-150 overflow-hidden flex flex-col max-h-full sm:max-h-[92dvh] overscroll-contain"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E2DC]/60 dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-slate-800 text-teal-600 dark:text-teal-400 flex items-center justify-center">
-              <HiyoriLogo className="w-5 h-5 shrink-0" />
-            </div>
-            <div>
-              <h3 className="font-bold text-base text-slate-900 dark:text-white">
-                {isEditing ? '編輯旅程' : '新增旅程'}
-              </h3>
-            </div>
+      <IosNavBar
+        title={isEditing ? '編輯旅程' : '新增旅程'}
+        subtitle={isEditing ? trip?.title : tripMode === 'memory' ? '過往回憶相簿' : '規劃新行程'}
+        leftLabel="取消"
+        onLeftClick={handleCloseAndCleanup}
+        leftDisabled={Boolean(driveUploadProgress)}
+        rightLabel={navRightLabel}
+        rightType="submit"
+        rightFormId="minimal-trip-form"
+        rightDisabled={isProcessingPhotos || Boolean(driveUploadProgress)}
+        rightLoading={Boolean(driveUploadProgress)}
+      />
+
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 sm:p-5 space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+        {/* Creation Mode Switcher: Plan New Trip vs Quick Memory Archive */}
+        {!isEditing && (
+          <div className="grid grid-cols-2 p-1 rounded-xl bg-[#EFECE5] dark:bg-slate-800/90 gap-1">
+            <button
+              type="button"
+              onClick={() => setTripMode('planner')}
+              className={`min-h-[38px] sm:min-h-[34px] px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                tripMode === 'planner'
+                  ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+              <span>規劃新行程</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTripMode('memory')}
+              className={`min-h-[38px] sm:min-h-[34px] px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                tripMode === 'memory'
+                  ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Camera className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+              <span>補登過往回憶</span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={handleCloseAndCleanup}
-            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800 transition cursor-pointer"
-            aria-label="關閉"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+        )}
 
-        {/* Modal Body */}
-        <div className="p-5 sm:p-6 overflow-y-auto space-y-4">
-          {/* Creation Mode Switcher: Plan New Trip vs Quick Memory Archive */}
-          {!isEditing && (
-            <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setTripMode('planner')}
-                className={`min-h-[40px] py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                  tripMode === 'planner'
-                    ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+        <form id="minimal-trip-form" onSubmit={handleMinimalSubmit} className="space-y-5">
+          {/* Batch Photo Uploader (Memory Mode Only when creating) */}
+          {!isEditing && tripMode === 'memory' && (
+            <IosInsetGroup
+              header="旅遊相片匯入"
+              footer="自動讀取拍攝日期與 GPS 座標點亮足跡地圖，單次最多 24 張。"
+            >
+              <input
+                ref={memoryFileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(e) => e.target.files && handleBatchPhotoFiles(e.target.files)}
+                className="hidden"
+              />
+
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDraggingPhotos(true);
+                }}
+                onDragLeave={() => setIsDraggingPhotos(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDraggingPhotos(false);
+                  if (e.dataTransfer.files?.length) {
+                    handleBatchPhotoFiles(e.dataTransfer.files);
+                  }
+                }}
+                onClick={() => !isProcessingPhotos && memoryFileInputRef.current?.click()}
+                className={`p-4 text-center transition cursor-pointer ${
+                  isDraggingPhotos
+                    ? 'bg-teal-50/70 dark:bg-teal-950/40'
+                    : 'hover:bg-[#FAF9F6] dark:hover:bg-slate-800/40'
                 }`}
               >
-                <Calendar className="w-3.5 h-3.5 shrink-0" />
-                <span>規劃新行程</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setTripMode('memory')}
-                className={`min-h-[40px] py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                  tripMode === 'memory'
-                    ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Camera className="w-3.5 h-3.5 shrink-0" />
-                <span>補登過往回憶</span>
-              </button>
-            </div>
-          )}
-
-          {/* Main Minimal Form */}
-          <form id="minimal-trip-form" onSubmit={handleMinimalSubmit} className="space-y-4">
-            {/* Batch Photo Uploader (Memory Mode Only when creating) */}
-            {!isEditing && tripMode === 'memory' && (
-              <div className="space-y-3">
-                <input
-                  ref={memoryFileInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={(e) => e.target.files && handleBatchPhotoFiles(e.target.files)}
-                  className="hidden"
-                />
-
-                <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setIsDraggingPhotos(true);
-                  }}
-                  onDragLeave={() => setIsDraggingPhotos(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setIsDraggingPhotos(false);
-                    if (e.dataTransfer.files?.length) {
-                      handleBatchPhotoFiles(e.dataTransfer.files);
-                    }
-                  }}
-                  onClick={() => !isProcessingPhotos && memoryFileInputRef.current?.click()}
-                  className={`rounded-2xl border-2 border-dashed p-5 text-center transition cursor-pointer ${
-                    isDraggingPhotos
-                      ? 'border-teal-600 bg-teal-50/70 dark:bg-teal-950/40'
-                      : 'border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-900/50 hover:border-teal-600/60'
-                  }`}
-                >
-                  {isProcessingPhotos ? (
-                    <div className="flex flex-col items-center gap-1.5 py-2">
-                      <Loader2 className="w-6 h-6 text-teal-700 dark:text-teal-400 animate-spin" />
-                      <p className="text-xs font-bold text-slate-800 dark:text-slate-100 font-mono tabular-nums">
-                        正在讀取 EXIF 日期與 GPS ({photoProgress?.done || 0}/{photoProgress?.total || 0})
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center gap-1.5">
-                      <div className="w-10 h-10 rounded-2xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center">
-                        <Camera className="w-5 h-5" />
-                      </div>
-                      <p className="text-xs font-bold text-slate-900 dark:text-white">
-                        {batchPhotos.length > 0 ? '點擊或拖曳繼續加入照片' : '批次選取過去的旅遊照片'}
-                      </p>
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        自動讀取拍攝日期與 GPS 座標點亮足跡地圖 · 單次最多 24 張
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                {photoError && (
-                  <p className="text-[11px] text-amber-700 dark:text-amber-400 font-medium px-1">
-                    {photoError}
-                  </p>
-                )}
-
-                {/* Clean unboxed Google Drive Original Photo Backup status */}
-                <div className="flex items-center justify-between gap-2 px-1 py-0.5 text-[11px]">
-                  <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 min-w-0">
-                    <HardDrive className={`w-3.5 h-3.5 shrink-0 ${driveConnected ? 'text-teal-700 dark:text-teal-400' : 'text-slate-400'}`} />
-                    <span className="truncate">
-                      {driveConnected
-                        ? 'Google Drive 已連線 · 同步保留未壓縮原圖至您的雲端空間'
-                        : '僅本機／雲端 1440px 高清縮圖 · 連線 Drive 可同步保留原圖'}
-                    </span>
+                {isProcessingPhotos ? (
+                  <div className="flex flex-col items-center gap-1.5 py-2">
+                    <Loader2 className="w-6 h-6 text-teal-700 dark:text-teal-400 animate-spin" />
+                    <p className="text-xs font-bold text-slate-800 dark:text-slate-100 font-mono tabular-nums">
+                      正在讀取 EXIF 日期與 GPS ({photoProgress?.done || 0}/{photoProgress?.total || 0})
+                    </p>
                   </div>
-                  {!driveConnected && (
+                ) : (
+                  <div className="flex items-center gap-3 text-left">
+                    <div className="w-10 h-10 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center shrink-0">
+                      <Camera className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm sm:text-xs font-bold text-slate-900 dark:text-white">
+                        {batchPhotos.length > 0 ? '點擊或拖曳繼續加入照片' : '批次選取旅遊照片'}
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        已匯入 {batchPhotos.length} 張 · 支援自動萃取拍攝日與地點
+                      </p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
+                  </div>
+                )}
+              </div>
+
+              {photoError && (
+                <div className="px-4 py-2 text-[11px] text-amber-700 dark:text-amber-400 font-medium bg-amber-50/60 dark:bg-amber-950/20">
+                  {photoError}
+                </div>
+              )}
+
+              <IosRow
+                icon={
+                  <HardDrive
+                    className={`w-4 h-4 ${driveConnected ? 'text-teal-700 dark:text-teal-400' : 'text-slate-400'}`}
+                  />
+                }
+                label={driveConnected ? 'Google Drive 原圖備份已連線' : '未連線 Google Drive 原圖'}
+                subtitle={
+                  driveConnected
+                    ? '建立時將同步保留未壓縮原圖至雲端空間'
+                    : '目前使用 1440px 高清縮圖，連線後可保留原圖'
+                }
+                trailing={
+                  !driveConnected ? (
                     <button
                       type="button"
                       disabled={isConnectingDrive}
@@ -744,133 +753,133 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
                           setIsConnectingDrive(false);
                         }
                       }}
-                      className="text-teal-700 dark:text-teal-400 font-bold hover:underline shrink-0 cursor-pointer disabled:opacity-50"
+                      className="min-h-[36px] px-3 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 text-xs font-bold cursor-pointer disabled:opacity-50"
                     >
-                      {isConnectingDrive ? '授權中...' : '連線 Drive 原圖'}
+                      {isConnectingDrive ? '授權中...' : '連線'}
                     </button>
-                  )}
-                </div>
+                  ) : (
+                    <Check className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                  )
+                }
+              />
 
-                {batchPhotos.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums px-0.5">
-                      <span>
-                        已匯入 {batchPhotos.length} 張 ·{' '}
-                        {exifSummary.gpsCount > 0 ? `${exifSummary.gpsCount} 張含 GPS` : '尚無內嵌 GPS'}
-                        {exifSummary.minDate && ` · ${exifSummary.minDate.replace(/-/g, '/')}`}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          batchPhotos.forEach((p) => {
+              {batchPhotos.length > 0 && (
+                <div className="p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+                    <span>
+                      {exifSummary.gpsCount > 0 ? `${exifSummary.gpsCount} 張含 GPS` : '尚無內嵌 GPS'}
+                      {exifSummary.minDate && ` · ${exifSummary.minDate.replace(/-/g, '/')}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        batchPhotos.forEach((p) => {
+                          if (isMediaRef(p.mediaRef)) {
+                            const mid = extractMediaId(p.mediaRef);
+                            if (mid) idbDeleteMedia(mid).catch(() => {});
+                          }
+                        });
+                        setBatchPhotos([]);
+                      }}
+                      className="font-sans text-rose-600 dark:text-rose-400 font-semibold hover:underline cursor-pointer"
+                    >
+                      清空全部
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2 max-h-44 overflow-y-auto">
+                    {batchPhotos.map((p) => (
+                      <div
+                        key={p.id}
+                        className="relative aspect-square rounded-xl overflow-hidden border border-[#E5E2DC] dark:border-slate-700 bg-slate-100 dark:bg-slate-800"
+                      >
+                        <MediaImage
+                          tripId={draftTripId}
+                          src={p.mediaRef}
+                          alt={p.fileName}
+                          className="w-full h-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
                             if (isMediaRef(p.mediaRef)) {
                               const mid = extractMediaId(p.mediaRef);
                               if (mid) idbDeleteMedia(mid).catch(() => {});
                             }
-                          });
-                          setBatchPhotos([]);
-                        }}
-                        className="font-sans text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
-                      >
-                        清空
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-4 gap-2 max-h-44 overflow-y-auto pr-0.5">
-                      {batchPhotos.map((p) => (
-                        <div
-                          key={p.id}
-                          className="relative aspect-square rounded-xl overflow-hidden border border-[#E5E2DC] dark:border-slate-700 group bg-slate-100 dark:bg-slate-800"
+                            setBatchPhotos((prev) => prev.filter((item) => item.id !== p.id));
+                          }}
+                          className="absolute top-1 right-1 w-7 h-7 rounded-full bg-black/70 text-white flex items-center justify-center hover:bg-rose-600 transition cursor-pointer"
+                          aria-label="移除照片"
                         >
-                          <MediaImage
-                            tripId={draftTripId}
-                            src={p.mediaRef}
-                            alt={p.fileName}
-                            className="w-full h-full object-cover"
-                          />
-                          <button
-                            type="button"
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              if (isMediaRef(p.mediaRef)) {
-                                const mid = extractMediaId(p.mediaRef);
-                                if (mid) idbDeleteMedia(mid).catch(() => {});
-                              }
-                              setBatchPhotos((prev) => prev.filter((item) => item.id !== p.id));
-                            }}
-                            className="absolute top-1 right-1 w-8 h-8 rounded-full bg-black/70 text-white flex items-center justify-center hover:bg-rose-600 transition cursor-pointer"
-                            aria-label="移除照片"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                          <div className="absolute inset-x-0 bottom-0 px-1.5 py-0.5 bg-gradient-to-t from-black/80 to-transparent text-[9px] text-white font-mono tabular-nums flex items-center justify-between gap-1">
-                            <span className="truncate">{p.takenDate.slice(2).replace(/-/g, '/')}</span>
-                            {p.hasGps && <MapPin className="w-2.5 h-2.5 text-teal-300 shrink-0" />}
-                          </div>
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                        <div className="absolute inset-x-0 bottom-0 px-1.5 py-0.5 bg-gradient-to-t from-black/80 to-transparent text-[9px] text-white font-mono tabular-nums flex items-center justify-between gap-1">
+                          <span className="truncate">{p.takenDate.slice(2).replace(/-/g, '/')}</span>
+                          {p.hasGps && <MapPin className="w-2.5 h-2.5 text-teal-300 shrink-0" />}
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              )}
+            </IosInsetGroup>
+          )}
 
-            {/* Title (Primary Input) */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-zinc-200 mb-1.5">
-                {tripMode === 'memory' && !isEditing ? '旅程標題 (選填，留白將依城市與年份命名)' : '旅程名稱'}{' '}
-                {tripMode === 'planner' && <span className="text-teal-600 dark:text-teal-400">*</span>}
+          {/* Core Info Inset Group */}
+          <IosInsetGroup header="基本資訊">
+            {/* Title Row */}
+            <div className="px-4 py-2.5 min-h-[50px] flex items-center justify-between gap-3">
+              <label className="text-sm sm:text-xs font-semibold text-slate-800 dark:text-slate-200 shrink-0 w-24">
+                旅程名稱{tripMode === 'planner' && <span className="text-rose-500 ml-0.5">*</span>}
               </label>
               <input
                 type="text"
                 required={tripMode === 'planner'}
-                placeholder={tripMode === 'memory' ? '例如：2023 京都秋楓自由行' : '例如：2026 東京賞櫻之旅'}
+                placeholder={tripMode === 'memory' ? '2023 京都秋楓自由行（選填）' : '例如：2026 東京賞櫻之旅'}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="w-full px-3.5 py-3 rounded-2xl bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-sm font-medium focus:outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400 dark:placeholder:text-zinc-500 transition"
+                className="min-w-0 flex-1 bg-transparent text-right text-[16px] sm:text-xs font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
               />
             </div>
 
-            {/* Destination + Optional Free City Geocoding */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-slate-600 dark:text-zinc-400 flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                  <span>{tripMode === 'memory' ? '旅遊城市 / 國家（點亮足跡地圖）' : '目的地 (選填)'}</span>
+            {/* Destination Row */}
+            <div className="px-4 py-2.5 min-h-[50px] space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-sm sm:text-xs font-semibold text-slate-800 dark:text-slate-200 shrink-0 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                  <span>目的地</span>
                 </label>
-                {typeof destinationLat === 'number' && typeof destinationLng === 'number' && (
-                  <span className="text-[10px] font-mono tabular-nums text-teal-700 dark:text-teal-400 flex items-center gap-1">
-                    <Check className="w-3 h-3" />
-                    <span>
-                      {destinationLat.toFixed(2)}, {destinationLng.toFixed(2)}
-                    </span>
-                  </span>
-                )}
-              </div>
-              <div className="flex gap-1.5">
-                <input
-                  type="text"
-                  placeholder="例如：日本京都、冰島雷克雅維克、巴黎"
-                  value={destination}
-                  onChange={(e) => handleDestinationChange(e.target.value)}
-                  className="flex-1 min-w-0 px-3.5 py-2.5 rounded-2xl bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400 dark:placeholder:text-zinc-500 transition"
-                />
-                {tripMode === 'memory' && (
-                  <button
-                    type="button"
-                    disabled={isSearchingGeo || !(destination.trim() || title.trim())}
-                    onClick={handleSearchDestinationGeo}
-                    className="min-h-[40px] px-3 rounded-2xl border border-[#E5E2DC] dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:border-teal-600 text-teal-700 dark:text-teal-400 text-xs font-semibold flex items-center gap-1 shrink-0 disabled:opacity-40 transition cursor-pointer"
-                    title="使用免費 OpenStreetMap 搜尋城市座標，補全沒有 GPS 的照片定位"
-                  >
-                    {isSearchingGeo ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-                    <span>定位</span>
-                  </button>
-                )}
+                <div className="flex-1 min-w-0 flex items-center justify-end gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="京都、巴黎、冰島..."
+                    value={destination}
+                    onChange={(e) => handleDestinationChange(e.target.value)}
+                    className="min-w-0 flex-1 bg-transparent text-right text-[16px] sm:text-xs text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
+                  />
+                  {tripMode === 'memory' && (
+                    <button
+                      type="button"
+                      disabled={isSearchingGeo || !(destination.trim() || title.trim())}
+                      onClick={handleSearchDestinationGeo}
+                      className="min-h-[34px] px-2.5 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 text-xs font-bold flex items-center gap-1 shrink-0 disabled:opacity-40 cursor-pointer"
+                    >
+                      {isSearchingGeo ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+                      <span>定位</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
+              {typeof destinationLat === 'number' && typeof destinationLng === 'number' && (
+                <div className="flex justify-end text-[11px] font-mono tabular-nums text-teal-700 dark:text-teal-400">
+                  已設定座標：{destinationLat.toFixed(2)}, {destinationLng.toFixed(2)}
+                </div>
+              )}
+
               {geoSearchDone && geoResults.length > 0 && (
-                <div className="rounded-xl border border-[#E5E2DC] dark:border-zinc-700 bg-white dark:bg-zinc-900 divide-y divide-[#E5E2DC]/60 dark:divide-zinc-800 max-h-32 overflow-y-auto">
+                <div className="rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-900 divide-y divide-[#E5E2DC]/60 dark:divide-slate-800 max-h-32 overflow-y-auto">
                   {geoResults.map((g, i) => (
                     <button
                       key={i}
@@ -890,391 +899,338 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
                 </div>
               )}
               {geoSearchDone && geoResults.length === 0 && (
-                <p className="text-[11px] text-slate-400">找不到精確座標，可改用英文或主要城市名稱再試一次。</p>
+                <p className="text-[11px] text-slate-400 text-right">
+                  找不到精確座標，可改用英文或主要城市名稱再試一次。
+                </p>
               )}
             </div>
 
-            {/* Date Selection Mode */}
-            <div className="p-3.5 rounded-2xl bg-slate-50/80 dark:bg-zinc-800/80 border border-slate-200/80 dark:border-white/10 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                  <span>{tripMode === 'memory' ? '旅遊日期（可由照片 EXIF 自動帶入）' : '旅行日期'}</span>
-                </span>
-                {!isPhotoMemoryOnly && tripMode === 'planner' && (
-                  <span className="text-xs font-bold text-teal-600 dark:text-teal-400 font-mono">
-                    共 {daysCount} 天日程
-                  </span>
+            {/* Inline Expandable Travel Dates */}
+            <IosDisclosureRow
+              icon={<Calendar className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+              label={tripMode === 'memory' ? '旅遊日期' : '旅行日期'}
+              value={dateSummaryText}
+              valueAccent
+              expanded={datesExpanded}
+              onToggle={() => setDatesExpanded((v) => !v)}
+            >
+              <div className="p-3.5 space-y-3">
+                {tripMode === 'planner' && (
+                  <IosToggleRow
+                    icon={<ImageIcon className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                    label="簡化為回憶相簿模式"
+                    subtitle="建立後預設直接開啟相簿畫廊"
+                    checked={isPhotoMemoryOnly}
+                    onChange={setIsPhotoMemoryOnly}
+                  />
+                )}
+
+                {(!isPhotoMemoryOnly || tripMode === 'memory') && (
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                        開始日期
+                      </label>
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => {
+                          setHasUserEditedDates(true);
+                          setStartDate(e.target.value);
+                          if (e.target.value > endDate) setEndDate(e.target.value);
+                        }}
+                        className="w-full min-h-[42px] px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs text-slate-900 dark:text-slate-100 font-mono tabular-nums outline-none focus:border-teal-600"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                        結束日期
+                      </label>
+                      <input
+                        type="date"
+                        value={endDate}
+                        min={startDate}
+                        onChange={(e) => {
+                          setHasUserEditedDates(true);
+                          setEndDate(e.target.value);
+                        }}
+                        className="w-full min-h-[42px] px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs text-slate-900 dark:text-slate-100 font-mono tabular-nums outline-none focus:border-teal-600"
+                      />
+                    </div>
+                  </div>
                 )}
               </div>
+            </IosDisclosureRow>
+          </IosInsetGroup>
 
-              {tripMode === 'planner' && (
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={isPhotoMemoryOnly}
-                    onChange={(e) => setIsPhotoMemoryOnly(e.target.checked)}
-                    className="rounded border-slate-300 text-teal-600 focus:ring-teal-500 w-4 h-4"
-                  />
-                  <span className="text-xs text-slate-600 dark:text-zinc-300 flex items-center gap-1">
-                    <ImageIcon className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                    <span>簡化為回憶相簿模式（預設直接開畫廊）</span>
-                  </span>
-                </label>
-              )}
-
-              {(!isPhotoMemoryOnly || tripMode === 'memory') && (
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <div>
-                    <label className="block text-[11px] text-slate-400 dark:text-zinc-400 mb-1">
-                      開始日期
-                    </label>
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => {
-                        setHasUserEditedDates(true);
-                        setStartDate(e.target.value);
-                        if (e.target.value > endDate) setEndDate(e.target.value);
-                      }}
-                      className="w-full px-2.5 py-1.5 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-xs text-slate-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono tabular-nums"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] text-slate-400 dark:text-zinc-400 mb-1">
-                      結束日期
-                    </label>
-                    <input
-                      type="date"
-                      value={endDate}
-                      min={startDate}
-                      onChange={(e) => {
-                        setHasUserEditedDates(true);
-                        setEndDate(e.target.value);
-                      }}
-                      className="w-full px-2.5 py-1.5 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-xs text-slate-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-teal-500 font-mono tabular-nums"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-
+          {/* Options & Preferences Inset Group */}
+          <IosInsetGroup header="偏好與外觀">
             {tripMode === 'planner' && (
-              <>
-                {/* Solo Travel Switch (獨旅模式) */}
-                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200/80 dark:border-white/10 flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div
-                      className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${
-                        isSoloTrip
-                          ? 'bg-teal-500/15 text-teal-600 dark:text-teal-400'
-                          : 'bg-slate-200/60 dark:bg-zinc-700/60 text-slate-500 dark:text-zinc-400'
-                      }`}
-                    >
-                      <User className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                        <span>獨旅模式 (一人旅行)</span>
-                        {isSoloTrip && (
-                          <span className="text-[10px] font-semibold text-teal-700 dark:text-teal-400">
-                            · 開啟
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                        隱藏分帳與旅伴設定
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={isSoloTrip}
-                    onClick={() => setIsSoloTrip(!isSoloTrip)}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      isSoloTrip ? 'bg-teal-600' : 'bg-slate-300 dark:bg-zinc-700'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                        isSoloTrip ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
+              <IosToggleRow
+                icon={<User className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                label="獨旅模式 (一人旅行)"
+                subtitle="隱藏分帳與多人協作結算畫面"
+                checked={isSoloTrip}
+                onChange={setIsSoloTrip}
+              />
+            )}
 
-                {/* Google Photos Album Link */}
-                <div className="p-3.5 rounded-2xl bg-teal-50/50 dark:bg-teal-950/20 border border-teal-200/60 dark:border-teal-800/40 space-y-1.5">
-                  <label className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between">
-                    <span>Google 相簿整趟旅程連結 (選填)</span>
-                    {sanitizeExternalUrl(googlePhotosAlbumUrl) && (
-                      <a
-                        href={sanitizeExternalUrl(googlePhotosAlbumUrl)!}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[11px] text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-0.5"
-                      >
-                        <span>測試開啟</span>
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                  </label>
+            {/* Inline Currency Picker */}
+            <IosDisclosureRow
+              icon={<Coins className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+              label="主要消費幣別"
+              value={selectedCurrencyLabel}
+              expanded={currencyExpanded}
+              onToggle={() => setCurrencyExpanded((v) => !v)}
+            >
+              <div className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800/80">
+                {CURRENCIES.map((cur) => (
+                  <IosCheckmarkRow
+                    key={cur.value}
+                    inset
+                    label={cur.label}
+                    selected={currency === cur.value}
+                    onSelect={() => {
+                      setCurrency(cur.value);
+                      setCurrencyExpanded(false);
+                    }}
+                  />
+                ))}
+              </div>
+            </IosDisclosureRow>
+
+            {/* Inline Cover Gradient Picker */}
+            <IosDisclosureRow
+              icon={<Palette className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+              label="封面主題色調"
+              value={
+                <span className="inline-flex items-center gap-1.5">
+                  <span className={`w-3 h-3 rounded-full bg-gradient-to-r ${selectedGradientObj.class} inline-block`} />
+                  <span>{selectedGradientObj.label}</span>
+                </span>
+              }
+              expanded={themeExpanded}
+              onToggle={() => setThemeExpanded((v) => !v)}
+            >
+              <div className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800/80">
+                {GRADIENTS.map((g) => (
+                  <IosCheckmarkRow
+                    key={g.label}
+                    inset
+                    icon={
+                      <span className={`w-5 h-5 rounded-full bg-gradient-to-r ${g.class} border border-black/10 shrink-0`} />
+                    }
+                    label={g.label}
+                    selected={coverGradient === g.class}
+                    onSelect={() => {
+                      setCoverGradient(g.class);
+                      setThemeExpanded(false);
+                    }}
+                  />
+                ))}
+              </div>
+            </IosDisclosureRow>
+
+            {/* Inline Google Photos Album URL */}
+            {tripMode === 'planner' && (
+              <IosDisclosureRow
+                icon={<ExternalLink className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                label="Google 相簿共享連結"
+                value={googlePhotosAlbumUrl.trim() ? '已連結' : '選填'}
+                expanded={albumExpanded}
+                onToggle={() => setAlbumExpanded((v) => !v)}
+              >
+                <div className="p-3.5 space-y-2">
                   <input
                     type="url"
                     placeholder="https://photos.app.goo.gl/..."
                     value={googlePhotosAlbumUrl}
                     onChange={(e) => setGooglePhotosAlbumUrl(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400 dark:placeholder:text-zinc-500"
+                    className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-white text-[16px] sm:text-xs outline-none focus:border-teal-600"
                   />
+                  {sanitizeExternalUrl(googlePhotosAlbumUrl) && (
+                    <a
+                      href={sanitizeExternalUrl(googlePhotosAlbumUrl)!}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-teal-700 dark:text-teal-400 font-semibold hover:underline inline-flex items-center gap-1"
+                    >
+                      <span>測試開啟連結</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
                 </div>
-              </>
+              </IosDisclosureRow>
             )}
+          </IosInsetGroup>
+        </form>
 
-            {/* Gradient Theme Picker */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 dark:text-zinc-400 mb-2">
-                主題封面色調
-              </label>
-              <div className="flex items-center gap-2.5">
-                {GRADIENTS.map((g) => (
+        {/* Collapsible Advanced Creation Tools (Planner create mode only) */}
+        {!isEditing && tripMode === 'planner' && (
+          <IosInsetGroup header="智慧建立助手">
+            <IosDisclosureRow
+              icon={<Sparkles className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+              label="AI 規劃 · 貼上筆記 · 經典範本"
+              value={showAdvanced ? '收合' : '展開'}
+              expanded={showAdvanced}
+              onToggle={() => setShowAdvanced((v) => !v)}
+            >
+              <div className="p-3.5 space-y-3.5">
+                <div className="grid grid-cols-3 gap-1 p-1 bg-[#EFECE5] dark:bg-slate-800 rounded-xl">
                   <button
-                    key={g.label}
                     type="button"
-                    onClick={() => setCoverGradient(g.class)}
-                    title={g.label}
-                    className={`w-8 h-8 rounded-full bg-gradient-to-r ${g.class} transition-all cursor-pointer ${
-                      coverGradient === g.class
-                        ? 'ring-2 ring-offset-2 ring-teal-500 dark:ring-offset-zinc-900 scale-110'
-                        : 'opacity-70 hover:opacity-100 hover:scale-105'
+                    onClick={() => setAdvancedSubTab('ai')}
+                    className={`min-h-[34px] text-xs font-semibold rounded-lg transition cursor-pointer ${
+                      advancedSubTab === 'ai'
+                        ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 shadow-2xs font-bold'
+                        : 'text-slate-600 dark:text-slate-400'
                     }`}
-                  />
-                ))}
-              </div>
-            </div>
-          </form>
-
-          {/* Collapsible Advanced Section for AI / Paste / Presets (Planner mode only) */}
-          {!isEditing && tripMode === 'planner' && (
-            <div className="pt-2 border-t border-slate-100 dark:border-zinc-800">
-              <button
-                type="button"
-                onClick={() => setShowAdvanced(!showAdvanced)}
-                className="w-full py-2 px-3 rounded-2xl bg-slate-50/70 dark:bg-zinc-800/60 hover:bg-slate-100 dark:hover:bg-zinc-800 text-xs font-semibold text-slate-600 dark:text-zinc-300 flex items-center justify-between transition cursor-pointer"
-              >
-                <div className="flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                  <span>展開進階選項 (AI 規劃 / 貼上筆記 / 套用範本)</span>
+                  >
+                    AI 規劃
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdvancedSubTab('paste')}
+                    className={`min-h-[34px] text-xs font-semibold rounded-lg transition cursor-pointer ${
+                      advancedSubTab === 'paste'
+                        ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 shadow-2xs font-bold'
+                        : 'text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    貼上筆記
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdvancedSubTab('preset')}
+                    className={`min-h-[34px] text-xs font-semibold rounded-lg transition cursor-pointer ${
+                      advancedSubTab === 'preset'
+                        ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 shadow-2xs font-bold'
+                        : 'text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    精選範本
+                  </button>
                 </div>
-                {showAdvanced ? (
-                  <ChevronUp className="w-4 h-4 text-slate-400" />
-                ) : (
-                  <ChevronDown className="w-4 h-4 text-slate-400" />
-                )}
-              </button>
 
-              {showAdvanced && (
-                <div className="mt-3 p-4 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 space-y-3.5 animate-in fade-in duration-150">
-                  {/* Clean Segmented Switcher for Advanced Tools */}
-                  <div className="grid grid-cols-3 gap-1 p-1 bg-slate-200/80 dark:bg-zinc-800 rounded-xl">
+                {advancedSubTab === 'ai' && (
+                  <div className="space-y-3">
+                    <div className="rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 overflow-hidden divide-y divide-[#E5E2DC]/75 dark:divide-slate-800">
+                      <IosDisclosureRow
+                        label="偏好風格"
+                        value={selectedAiStyleLabel}
+                        expanded={aiStyleExpanded}
+                        onToggle={() => setAiStyleExpanded((v) => !v)}
+                      >
+                        <div className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800">
+                          {AI_STYLES.map((st) => (
+                            <IosCheckmarkRow
+                              key={st.value}
+                              label={st.label}
+                              selected={aiStyle === st.value}
+                              onSelect={() => {
+                                setAiStyle(st.value);
+                                setAiStyleExpanded(false);
+                              }}
+                            />
+                          ))}
+                        </div>
+                      </IosDisclosureRow>
+
+                      <div className="px-4 py-2.5 flex items-center justify-between gap-2 min-h-[48px]">
+                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 shrink-0">
+                          特別喜好
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="如：想去神社、特色咖啡廳"
+                          value={aiPreferences}
+                          onChange={(e) => setAiPreferences(e.target.value)}
+                          className="min-w-0 flex-1 bg-transparent text-right text-[16px] sm:text-xs text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {aiGenError && (
+                      <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">{aiGenError}</p>
+                    )}
+
                     <button
                       type="button"
-                      onClick={() => setAdvancedSubTab('ai')}
-                      className={`py-1.5 text-xs font-semibold rounded-lg transition ${
-                        advancedSubTab === 'ai'
-                          ? 'bg-white dark:bg-zinc-900 text-teal-700 dark:text-teal-300 shadow-xs'
-                          : 'text-slate-600 dark:text-zinc-400'
-                      }`}
+                      disabled={isAiGenerating}
+                      onClick={handleAiSubmit}
+                      className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition disabled:opacity-50 cursor-pointer"
                     >
-                      AI 智慧生成
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAdvancedSubTab('paste')}
-                      className={`py-1.5 text-xs font-semibold rounded-lg transition ${
-                        advancedSubTab === 'paste'
-                          ? 'bg-white dark:bg-zinc-900 text-teal-700 dark:text-teal-300 shadow-xs'
-                          : 'text-slate-600 dark:text-zinc-400'
-                      }`}
-                    >
-                      貼上筆記解析
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAdvancedSubTab('preset')}
-                      className={`py-1.5 text-xs font-semibold rounded-lg transition ${
-                        advancedSubTab === 'preset'
-                          ? 'bg-white dark:bg-zinc-900 text-teal-700 dark:text-teal-300 shadow-xs'
-                          : 'text-slate-600 dark:text-zinc-400'
-                      }`}
-                    >
-                      精選範本
+                      {isAiGenerating ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>AI 正在規劃日程...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          <span>使用 AI 產生完整行程</span>
+                        </>
+                      )}
                     </button>
                   </div>
+                )}
 
-                  {/* 1. AI Tool Form */}
-                  {advancedSubTab === 'ai' && (
-                    <div className="space-y-3 pt-1">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-500 dark:text-zinc-400 mb-1">
-                            旅行偏好風格
-                          </label>
-                          <select
-                            value={aiStyle}
-                            onChange={(e) => setAiStyle(e.target.value)}
-                            className="w-full px-2.5 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs text-slate-800 dark:text-zinc-200 focus:outline-none"
-                          >
-                            <option value="classic">經典熱門景點</option>
-                            <option value="foodie">在地必吃美食</option>
-                            <option value="relax">悠閒放鬆漫步</option>
-                            <option value="shopping">潮流逛街購物</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-500 dark:text-zinc-400 mb-1">
-                            特別備註或喜好
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="如：想去神社、咖啡廳"
-                            value={aiPreferences}
-                            onChange={(e) => setAiPreferences(e.target.value)}
-                            className="w-full px-2.5 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs text-slate-800 dark:text-zinc-200 focus:outline-none"
-                          />
-                        </div>
-                      </div>
-
-                      {aiGenError && (
-                        <p className="text-xs text-rose-500 dark:text-rose-400 font-medium">
-                          {aiGenError}
-                        </p>
+                {advancedSubTab === 'paste' && (
+                  <div className="space-y-3">
+                    <textarea
+                      rows={3}
+                      placeholder="在此貼上 LINE 訊息、部落格或文字行程..."
+                      value={pastedText}
+                      onChange={(e) => setPastedText(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-teal-600"
+                    />
+                    {pasteError && (
+                      <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">{pasteError}</p>
+                    )}
+                    <button
+                      type="button"
+                      disabled={isParsingPaste || !pastedText.trim()}
+                      onClick={handlePasteSubmit}
+                      className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition disabled:opacity-50 cursor-pointer"
+                    >
+                      {isParsingPaste ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>解析筆記中...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ClipboardPaste className="w-4 h-4" />
+                          <span>一鍵解析並建立行程</span>
+                        </>
                       )}
+                    </button>
+                  </div>
+                )}
 
-                      <button
-                        type="button"
-                        disabled={isAiGenerating}
-                        onClick={handleAiSubmit}
-                        className="w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition disabled:opacity-50 cursor-pointer shadow-xs"
-                      >
-                        {isAiGenerating ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>AI 正在規劃日程...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="w-4 h-4" />
-                            <span>使用 AI 規劃產生完整行程</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* 2. Paste Tool Form */}
-                  {advancedSubTab === 'paste' && (
-                    <div className="space-y-3 pt-1">
-                      <textarea
-                        rows={3}
-                        placeholder="在此貼上 LINE 訊息、小紅書、部落格或文字筆記..."
-                        value={pastedText}
-                        onChange={(e) => setPastedText(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs text-slate-800 dark:text-zinc-200 focus:outline-none"
-                      />
-                      {pasteError && (
-                        <p className="text-xs text-rose-500 dark:text-rose-400 font-medium">
-                          {pasteError}
-                        </p>
-                      )}
-                      <button
-                        type="button"
-                        disabled={isParsingPaste || !pastedText.trim()}
-                        onClick={handlePasteSubmit}
-                        className="w-full py-2.5 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition disabled:opacity-50 cursor-pointer shadow-xs"
-                      >
-                        {isParsingPaste ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span>解析筆記中...</span>
-                          </>
-                        ) : (
-                          <>
-                            <ClipboardPaste className="w-4 h-4" />
-                            <span>一鍵解析並建立行程</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
-
-                  {/* 3. Preset Templates */}
-                  {advancedSubTab === 'preset' && (
-                    <div className="space-y-2 pt-1 max-h-48 overflow-y-auto">
-                      {PRESET_TRIPS.map((preset) => (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => handleApplyPreset(preset)}
-                          className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:border-teal-500 text-left flex items-center justify-between transition cursor-pointer group"
-                        >
-                          <div>
-                            <div className="font-bold text-xs text-slate-900 dark:text-white group-hover:text-teal-600 dark:group-hover:text-teal-400">
-                              {preset.title}
-                            </div>
-                            <div className="text-[10px] text-slate-400 dark:text-zinc-400">
-                              {preset.destination} · {preset.days.length} 天日程
-                            </div>
-                          </div>
-                          <span className="text-[11px] font-semibold text-teal-600 dark:text-teal-400">
-                            套用
+                {advancedSubTab === 'preset' && (
+                  <div className="rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 overflow-hidden divide-y divide-[#E5E2DC]/75 dark:divide-slate-800 max-h-56 overflow-y-auto">
+                    {PRESET_TRIPS.map((preset) => (
+                      <IosRow
+                        key={preset.id}
+                        onClick={() => handleApplyPreset(preset)}
+                        label={preset.title}
+                        subtitle={`${preset.destination} · ${preset.days.length} 天日程`}
+                        trailing={
+                          <span className="text-xs font-bold text-teal-700 dark:text-teal-400 flex items-center gap-0.5">
+                            <span>套用</span>
+                            <ChevronRight className="w-4 h-4 text-slate-400" />
                           </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-3.5 border-t border-[#E5E2DC]/60 dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex items-center justify-end gap-2.5">
-          <button
-            type="button"
-            onClick={handleCloseAndCleanup}
-            className="min-h-[44px] sm:min-h-[38px] px-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-          >
-            取消
-          </button>
-          <button
-            type="submit"
-            form="minimal-trip-form"
-            disabled={isProcessingPhotos || Boolean(driveUploadProgress)}
-            className="px-6 py-2.5 rounded-2xl bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white text-xs font-bold transition active:scale-95 cursor-pointer shadow-xs flex items-center gap-1.5"
-          >
-            {driveUploadProgress ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span className="font-mono tabular-nums">
-                  正在備份原圖 ({driveUploadProgress.done}/{driveUploadProgress.total})
-                </span>
-              </>
-            ) : isEditing ? (
-              '儲存旅程資訊'
-            ) : tripMode === 'memory' ? (
-              batchPhotos.length > 0 ? (
-                `建立回憶相簿 (${batchPhotos.length} 張)`
-              ) : (
-                '建立回憶相簿'
-              )
-            ) : (
-              '立即建立旅程'
-            )}
-          </button>
-        </div>
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </IosDisclosureRow>
+          </IosInsetGroup>
+        )}
       </div>
-    </div>
+    </IosModalSheet>
   );
 };

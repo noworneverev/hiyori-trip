@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { Trip, ExpenseItem } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { getTodayLocal } from '../../utils/date';
 import { compressImageFile, resolveMediaSrc, storeImageAsMediaRef, extractMediaId, isMediaRef } from '../../utils/image';
 import { idbDeleteMedia } from '../../utils/indexedDb';
 import { MediaImage } from './MediaImage';
+import { IosModalSheet, IosNavBar } from './IosPrimitives';
 import { convertAmount, detectTripCurrency } from '../../utils/currency';
 import {
   TiantianExpenseEditor,
@@ -14,11 +14,7 @@ import {
 } from '../Expenses/TiantianExpenseEditor';
 import { resolveExpenseCategoryMeta } from '../Expenses/expenseMeta';
 import { RemindersTodoList } from '../Todos/RemindersTodoList';
-import {
-  X,
-  DollarSign,
-  CheckSquare,
-} from 'lucide-react';
+import { DollarSign, CheckSquare } from 'lucide-react';
 
 interface TravelQuickActionModalProps {
   trip: Trip;
@@ -41,7 +37,6 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   initialTab = 'expense',
   onShowToast,
 }) => {
-  useBodyScrollLock(true);
   const [activeTab, setActiveTab] = useState<'expense' | 'todos'>(initialTab);
 
   const defaultTripCurrency = trip.currency || detectTripCurrency(trip);
@@ -50,7 +45,6 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     [trip.splitMembers]
   );
 
-  // --- 1. Fast Expense Draft State (Tiantian Bookkeeping Layout) ---
   const [draft, setDraft] = useState<TiantianExpenseDraft>(() => ({
     date: getLocalTodayDate(),
     amount: '',
@@ -71,7 +65,6 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   const [saveStatusToast, setSaveStatusToast] = useState<string | null>(null);
   const [focusTrigger, setFocusTrigger] = useState(0);
 
-  // Track receipt media refs staged in current unsubmitted draft so cancel cleans up only unsaved refs
   const draftReceiptsRef = useRef<string[]>([]);
   const persistedReceiptsRef = useRef<Set<string>>(new Set());
 
@@ -209,7 +202,6 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     }
   };
 
-  // --- 2. Synced Trip Todos Count for Tab Badge ---
   const pendingTodos = (trip.todos || []).filter((t) => !t.completed);
 
   const handleDownloadLightboxImage = async () => {
@@ -229,78 +221,72 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   };
 
   useEffect(() => {
+    if (!previewImage) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (previewImage) {
-          setPreviewImage(null);
-        } else {
-          handleClose();
-        }
+        e.stopPropagation();
+        setPreviewImage(null);
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [previewImage]);
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150 overflow-hidden"
-      onClick={handleClose}
-    >
-      <div
-        className="relative w-full max-w-full sm:max-w-lg bg-white dark:bg-[#111827] rounded-t-[28px] sm:rounded-3xl shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-full sm:max-h-[88dvh] overscroll-contain touch-pan-y animate-in slide-in-from-bottom duration-200"
-        onClick={(e) => e.stopPropagation()}
+    <>
+      <IosModalSheet
+        onClose={handleClose}
+        maxWidthClass="sm:max-w-lg"
+        variant="grouped"
+        fullHeightOnMobile
+        disableBackdropClose={Boolean(previewImage)}
+        ariaLabel="旅途隨身手帖"
       >
-        {/* Mobile Drag Indicator Handle */}
-        <div className="sm:hidden pt-2.5 pb-1 bg-teal-800 dark:bg-teal-950 flex justify-center shrink-0">
-          <div className="w-10 h-1 rounded-full bg-white/30" />
+        <IosNavBar
+          title="旅途隨身手帖"
+          leftLabel="關閉"
+          onLeftClick={handleClose}
+          rightLabel={activeTab === 'todos' ? '完成' : undefined}
+          onRightClick={activeTab === 'todos' ? handleClose : undefined}
+        />
+
+        {/* iOS Segmented Control */}
+        <div className="px-4 py-2.5 border-b border-[#E5E2DC]/80 dark:border-slate-800 bg-[#FAF9F6] dark:bg-[#0B1120] shrink-0">
+          <div className="grid grid-cols-2 p-1 rounded-xl bg-[#EFECE5] dark:bg-slate-800/90 gap-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab('expense')}
+              className={`min-h-[38px] sm:min-h-[34px] px-2.5 rounded-lg font-semibold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'expense'
+                  ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+              <span>一秒記帳</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('todos')}
+              className={`min-h-[38px] sm:min-h-[34px] px-2.5 rounded-lg font-semibold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'todos'
+                  ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <CheckSquare className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+              <span>
+                行程待辦{' '}
+                {pendingTodos.length > 0 && (
+                  <span className="font-mono tabular-nums">({pendingTodos.length})</span>
+                )}
+              </span>
+            </button>
+          </div>
         </div>
 
-        {/* Top Header */}
-        <div className="px-5 py-3 bg-teal-800 dark:bg-teal-950 text-white flex items-center justify-between shrink-0">
-          <h3 className="text-base font-bold tracking-tight">
-            旅途隨身手帖
-          </h3>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition active:scale-95 cursor-pointer"
-            aria-label="關閉"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Clean Segmented Tab Switcher (一秒記帳 / 行程待辦) */}
-        <div className="p-1.5 bg-slate-100 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 shrink-0 flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setActiveTab('expense')}
-            className={`flex-1 py-2 px-2.5 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'expense'
-                ? 'bg-white dark:bg-slate-900 text-teal-800 dark:text-teal-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <DollarSign className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-            <span>一秒記帳</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('todos')}
-            className={`flex-1 py-2 px-2.5 rounded-xl font-bold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'todos'
-                ? 'bg-white dark:bg-slate-900 text-teal-800 dark:text-teal-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <CheckSquare className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-            <span>行程待辦 {pendingTodos.length > 0 && `(${pendingTodos.length})`}</span>
-          </button>
-        </div>
-
-        {/* ================= TAB 1: TIANTIAN-STYLE FAST EXPENSE ================= */}
+        {/* TAB 1: TIANTIAN-STYLE FAST EXPENSE */}
         {activeTab === 'expense' && (
           <TiantianExpenseEditor
             trip={trip}
@@ -323,9 +309,9 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
           />
         )}
 
-        {/* ================= TAB 2: iPHONE REMINDERS-STYLE TRIP TODOS ================= */}
+        {/* TAB 2: iPHONE REMINDERS-STYLE TRIP TODOS */}
         {activeTab === 'todos' && (
-          <div className="flex-1 overflow-y-auto overflow-x-hidden touch-pan-y pb-[env(safe-area-inset-bottom,0px)]">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden touch-pan-y pb-[max(1rem,env(safe-area-inset-bottom,0px))]">
             <RemindersTodoList
               trip={trip}
               lang={lang}
@@ -336,12 +322,12 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
             />
           </div>
         )}
-      </div>
+      </IosModalSheet>
 
       {/* Fullscreen Receipt Image Lightbox */}
       {previewImage && (
         <div
-          className="fixed inset-0 z-60 bg-black/90 backdrop-blur-xs flex flex-col items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150"
+          className="fixed inset-0 z-[95] bg-black/90 backdrop-blur-xs flex flex-col items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150"
           onClick={() => setPreviewImage(null)}
         >
           <div className="relative max-w-2xl max-h-full flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
@@ -357,14 +343,14 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               <button
                 type="button"
                 onClick={() => setPreviewImage(null)}
-                className="min-h-[44px] sm:min-h-[38px] px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs backdrop-blur-md transition active:scale-95 cursor-pointer"
+                className="min-h-[44px] px-4 py-2 rounded-xl bg-white/20 hover:bg-white/30 text-white font-bold text-xs backdrop-blur-md transition active:scale-95 cursor-pointer"
               >
                 關閉大圖
               </button>
               <button
                 type="button"
                 onClick={handleDownloadLightboxImage}
-                className="min-h-[44px] sm:min-h-[38px] px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs transition active:scale-95 shadow-xs cursor-pointer"
+                className="min-h-[44px] px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs transition active:scale-95 shadow-xs cursor-pointer"
               >
                 下載照片
               </button>
@@ -372,6 +358,6 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };

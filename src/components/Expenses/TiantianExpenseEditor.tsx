@@ -27,6 +27,12 @@ import {
 import { canUploadImages } from '../../utils/userPermissions';
 import { MediaImage } from '../UI/MediaImage';
 import {
+  IosNavBar,
+  IosInsetGroup,
+  IosCheckmarkRow,
+  IosToggleRow,
+} from '../UI/IosPrimitives';
+import {
   DEFAULT_EXPENSE_CATEGORIES,
   DEFAULT_EXPENSE_TAGS,
   EXPENSE_ACCOUNTS,
@@ -97,6 +103,7 @@ interface TiantianExpenseEditorProps {
   onOpenManageCategoriesModal?: () => void;
   saveStatusToast?: string | null;
   focusTrigger?: number;
+  hideFooterSaveCancel?: boolean;
 }
 
 type PickerPanel = 'none' | 'date' | 'currency' | 'category' | 'account' | 'member' | 'tags';
@@ -122,6 +129,7 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
   onOpenManageCategoriesModal,
   saveStatusToast = null,
   focusTrigger = 0,
+  hideFooterSaveCancel = false,
 }) => {
   const [activePicker, setActivePicker] = useState<PickerPanel>('none');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -324,419 +332,364 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
     onSave(false);
   };
 
-  // Picker Header helper
-  const renderPickerHeader = (title: string, rightSlot?: React.ReactNode) => (
-    <div className="px-4 py-3 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex items-center justify-between gap-2 shrink-0">
-      <button
-        type="button"
-        onClick={() => setActivePicker('none')}
-        className="min-h-[38px] px-2.5 py-1 rounded-xl hover:bg-slate-200/70 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1 transition cursor-pointer"
-      >
-        <ChevronLeft className="w-4 h-4" />
-        <span>返回</span>
-      </button>
-      <span className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">{title}</span>
-      <div className="min-w-[56px] flex justify-end">{rightSlot}</div>
-    </div>
-  );
-
-  // ================= SUB-PICKER PANEL VIEWS (天天記帳點選進入子選單) =================
+  // ================= SUB-PICKER PANEL VIEWS (iOS Push Lists inside Sheet) =================
   if (activePicker !== 'none') {
     return (
-      <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-white dark:bg-[#111827]">
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#FAF9F6] dark:bg-[#0B1120]">
         {activePicker === 'date' && (
           <>
-            {renderPickerHeader('選擇消費日期')}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1.5">
-                  自訂日期
-                </label>
-                <input
-                  type="date"
-                  value={draft.date}
-                  onChange={(e) => onChangeDraft((prev) => ({ ...prev, date: e.target.value }))}
-                  className="w-full min-h-[44px] px-3.5 py-2 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-sm font-mono tabular-nums text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-teal-600"
-                />
-              </div>
+            <IosNavBar
+              title="選擇消費日期"
+              leftLabel="返回"
+              leftIcon={<ChevronLeft className="w-4 h-4" />}
+              onLeftClick={() => setActivePicker('none')}
+              rightLabel="完成"
+              onRightClick={() => setActivePicker('none')}
+            />
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+              <IosInsetGroup header="自訂日期">
+                <div className="px-4 py-2.5 flex items-center justify-between gap-3 min-h-[48px]">
+                  <span className="text-sm sm:text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    消費日
+                  </span>
+                  <input
+                    type="date"
+                    value={draft.date}
+                    onChange={(e) => onChangeDraft((prev) => ({ ...prev, date: e.target.value }))}
+                    className="bg-transparent text-right text-[16px] sm:text-xs font-mono tabular-nums font-bold text-slate-900 dark:text-white outline-none"
+                  />
+                </div>
+              </IosInsetGroup>
 
-              <div className="space-y-2">
-                <span className="block text-xs font-semibold text-slate-500 dark:text-slate-400">
-                  快速選擇行程天數
-                </span>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onChangeDraft((prev) => ({ ...prev, date: todayStr }));
+              <IosInsetGroup header="快速選擇行程天數">
+                <IosCheckmarkRow
+                  icon={<Calendar className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                  label="今天"
+                  trailingMeta={
+                    <span className="text-[11px] font-mono tabular-nums text-slate-400">
+                      {todayStr.slice(5).replace('-', '/')}
+                    </span>
+                  }
+                  selected={draft.date === todayStr}
+                  onSelect={() => {
+                    onChangeDraft((prev) => ({ ...prev, date: todayStr }));
+                    setActivePicker('none');
+                  }}
+                />
+                {(trip.days || []).map((d) => (
+                  <IosCheckmarkRow
+                    key={d.id}
+                    label={`Day ${d.dayNumber}`}
+                    subtitle={d.theme}
+                    trailingMeta={
+                      <span className="text-[11px] font-mono tabular-nums text-slate-400">
+                        {d.date.slice(5).replace('-', '/')}
+                      </span>
+                    }
+                    selected={draft.date === d.date}
+                    onSelect={() => {
+                      onChangeDraft((prev) => ({ ...prev, date: d.date }));
                       setActivePicker('none');
                     }}
-                    className={`min-h-[44px] px-3 py-2 rounded-xl border text-left text-xs font-semibold transition cursor-pointer ${
-                      draft.date === todayStr
-                        ? 'bg-teal-700 text-white border-teal-700'
-                        : 'bg-[#FAF9F6] dark:bg-slate-800 border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-teal-500'
-                    }`}
-                  >
-                    <span className="block font-bold">今天</span>
-                    <span className="text-[10px] font-mono opacity-80">{todayStr.slice(5).replace('-', '/')}</span>
-                  </button>
-
-                  {(trip.days || []).map((d) => {
-                    const isSel = draft.date === d.date;
-                    return (
-                      <button
-                        key={d.id}
-                        type="button"
-                        onClick={() => {
-                          onChangeDraft((prev) => ({ ...prev, date: d.date }));
-                          setActivePicker('none');
-                        }}
-                        className={`min-h-[44px] px-3 py-2 rounded-xl border text-left text-xs font-semibold transition cursor-pointer ${
-                          isSel
-                            ? 'bg-teal-700 text-white border-teal-700'
-                            : 'bg-[#FAF9F6] dark:bg-slate-800 border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-teal-500'
-                        }`}
-                      >
-                        <span className="block font-bold">Day {d.dayNumber}</span>
-                        <span className="text-[10px] font-mono opacity-80">{d.date.slice(5).replace('-', '/')}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-            <div className="p-3.5 pb-[calc(0.875rem+env(safe-area-inset-bottom,0px))] sm:pb-3.5 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 shrink-0">
-              <button
-                type="button"
-                onClick={() => setActivePicker('none')}
-                className="w-full min-h-[44px] rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold cursor-pointer transition"
-              >
-                完成
-              </button>
+                  />
+                ))}
+              </IosInsetGroup>
             </div>
           </>
         )}
 
         {activePicker === 'currency' && (
           <>
-            {renderPickerHeader('選擇消費幣別')}
-            <div className="flex-1 overflow-y-auto divide-y divide-[#E5E2DC]/60 dark:divide-slate-800">
-              {SUPPORTED_CURRENCIES.map((cur) => {
-                const isSel = draft.currency === cur.code;
-                return (
-                  <button
+            <IosNavBar
+              title="選擇消費幣別"
+              leftLabel="返回"
+              leftIcon={<ChevronLeft className="w-4 h-4" />}
+              onLeftClick={() => setActivePicker('none')}
+            />
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+              <IosInsetGroup>
+                {SUPPORTED_CURRENCIES.map((cur) => (
+                  <IosCheckmarkRow
                     key={cur.code}
-                    type="button"
-                    onClick={() => {
+                    icon={<span className="text-base leading-none">{cur.flag}</span>}
+                    label={`${cur.code} · ${cur.name}`}
+                    trailingMeta={
+                      <span className="text-xs font-mono text-slate-500">{cur.symbol}</span>
+                    }
+                    selected={draft.currency === cur.code}
+                    onSelect={() => {
                       onChangeDraft((prev) => ({ ...prev, currency: cur.code }));
                       setActivePicker('none');
                     }}
-                    className={`w-full min-h-[48px] px-4 py-2.5 flex items-center justify-between text-xs transition cursor-pointer ${
-                      isSel
-                        ? 'bg-teal-50/80 dark:bg-teal-950/40 text-teal-800 dark:text-teal-200 font-bold'
-                        : 'hover:bg-[#FAF9F6] dark:hover:bg-slate-800/50 text-slate-800 dark:text-slate-200'
-                    }`}
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <span className="text-base">{cur.flag}</span>
-                      <span>{cur.code}</span>
-                      <span className="text-slate-400 font-normal">{cur.name}</span>
-                    </span>
-                    <span className="flex items-center gap-2 font-mono">
-                      <span className="text-slate-500">{cur.symbol}</span>
-                      {isSel && <Check className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-                    </span>
-                  </button>
-                );
-              })}
+                  />
+                ))}
+              </IosInsetGroup>
             </div>
           </>
         )}
 
         {activePicker === 'category' && (
           <>
-            {renderPickerHeader(
-              '選擇消費類別',
-              <div className="flex items-center gap-1.5">
-                {onOpenManageCategoriesModal && (
+            <IosNavBar
+              title="選擇消費類別"
+              leftLabel="返回"
+              leftIcon={<ChevronLeft className="w-4 h-4" />}
+              onLeftClick={() => setActivePicker('none')}
+              rightSlot={
+                <div className="flex items-center gap-1">
+                  {onOpenManageCategoriesModal && (
+                    <button
+                      type="button"
+                      onClick={onOpenManageCategoriesModal}
+                      className="min-h-[38px] px-2 py-1 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
+                    >
+                      管理
+                    </button>
+                  )}
                   <button
                     type="button"
-                    onClick={onOpenManageCategoriesModal}
-                    className="min-h-[34px] px-2 py-1 rounded-lg text-[11px] font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-800 cursor-pointer"
+                    onClick={() => setShowNewCatInput((v) => !v)}
+                    className="min-h-[38px] px-2 py-1 rounded-lg text-xs font-bold text-teal-700 dark:text-teal-400 flex items-center gap-1 cursor-pointer"
                   >
-                    管理
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setShowNewCatInput((v) => !v)}
-                  className="min-h-[34px] px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>自訂</span>
-                </button>
-              </div>
-            )}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {showNewCatInput && (
-                <div className="flex items-center gap-2 p-2 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700">
-                  <input
-                    type="text"
-                    value={newCatName}
-                    onChange={(e) => setNewCatName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddCustomCategory();
-                      }
-                    }}
-                    placeholder="輸入新類別名稱 (如：居酒屋、伴手禮)"
-                    autoFocus
-                    className="flex-1 min-h-[36px] px-2.5 bg-white dark:bg-slate-800 rounded-xl border border-[#E5E2DC] dark:border-slate-700 text-xs outline-hidden focus:ring-2 focus:ring-teal-600"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddCustomCategory}
-                    className="min-h-[36px] px-3 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold cursor-pointer"
-                  >
-                    加入
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>自訂</span>
                   </button>
                 </div>
+              }
+            />
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+              {showNewCatInput && (
+                <IosInsetGroup header="新增自訂類別">
+                  <div className="px-4 py-2.5 flex items-center gap-2 min-h-[48px]">
+                    <input
+                      type="text"
+                      value={newCatName}
+                      onChange={(e) => setNewCatName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddCustomCategory();
+                        }
+                      }}
+                      placeholder="輸入新類別（如：居酒屋、伴手禮）"
+                      autoFocus
+                      className="min-w-0 flex-1 bg-transparent text-[16px] sm:text-xs outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCustomCategory}
+                      className="min-h-[36px] px-3 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold cursor-pointer shrink-0"
+                    >
+                      加入
+                    </button>
+                  </div>
+                </IosInsetGroup>
               )}
 
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              <IosInsetGroup header="預設類別">
                 {Object.keys(DEFAULT_EXPENSE_CATEGORIES).map((catKey) => {
                   const meta = resolveExpenseCategoryMeta(catKey, trip);
-                  const isSel = draft.category === catKey;
                   return (
-                    <button
+                    <IosCheckmarkRow
                       key={catKey}
-                      type="button"
-                      onClick={() => {
+                      icon={<meta.Icon className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                      label={meta.label}
+                      selected={draft.category === catKey}
+                      onSelect={() => {
                         onChangeDraft((prev) => ({ ...prev, category: catKey }));
                         setActivePicker('none');
                       }}
-                      className={`min-h-[64px] p-2 rounded-2xl border flex flex-col items-center justify-center gap-1.5 text-xs transition cursor-pointer ${
-                        isSel
-                          ? 'bg-teal-700 text-white border-teal-700 font-bold shadow-xs'
-                          : 'bg-[#FAF9F6] dark:bg-slate-800/70 border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-teal-500'
-                      }`}
-                    >
-                      <meta.Icon className="w-4 h-4" />
-                      <span className="text-[11px] truncate max-w-full px-1">{meta.label}</span>
-                    </button>
+                    />
                   );
                 })}
+              </IosInsetGroup>
 
-                {customCategories.map((catKey) => {
-                  const isSel = draft.category === catKey;
-                  const displayName = trip.customCategoryLabels?.[catKey] || catKey;
-                  if (editingCatKey === catKey) {
+              {customCategories.length > 0 && (
+                <IosInsetGroup header={`自訂類別 (${customCategories.length})`}>
+                  {customCategories.map((catKey) => {
+                    const isSel = draft.category === catKey;
+                    const displayName = trip.customCategoryLabels?.[catKey] || catKey;
+
+                    if (editingCatKey === catKey) {
+                      return (
+                        <div key={catKey} className="px-4 py-2 min-h-[48px] flex items-center gap-2 bg-amber-50/60 dark:bg-amber-950/30">
+                          <input
+                            type="text"
+                            value={editingCatVal}
+                            onChange={(e) => setEditingCatVal(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleRenameCustomCategory(catKey);
+                              } else if (e.key === 'Escape') {
+                                setEditingCatKey(null);
+                              }
+                            }}
+                            autoFocus
+                            className="flex-1 min-w-0 bg-transparent text-[16px] sm:text-xs font-bold outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleRenameCustomCategory(catKey)}
+                            className="min-h-[34px] px-2.5 rounded-lg bg-teal-700 text-white text-xs font-bold cursor-pointer"
+                          >
+                            儲存
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingCatKey(null)}
+                            className="min-h-[34px] min-w-[34px] flex items-center justify-center text-slate-500 cursor-pointer"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      );
+                    }
+
                     return (
-                      <div
-                        key={catKey}
-                        className="col-span-3 sm:col-span-2 p-2 rounded-2xl border border-teal-500 bg-teal-50/40 dark:bg-teal-950/30 flex items-center gap-1.5"
-                      >
-                        <input
-                          type="text"
-                          value={editingCatVal}
-                          onChange={(e) => setEditingCatVal(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleRenameCustomCategory(catKey);
-                            } else if (e.key === 'Escape') {
-                              setEditingCatKey(null);
-                            }
-                          }}
-                          autoFocus
-                          className="flex-1 min-w-0 px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-xs outline-hidden"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleRenameCustomCategory(catKey)}
-                          className="p-1.5 rounded-lg bg-teal-700 text-white cursor-pointer"
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingCatKey(null)}
-                          className="p-1.5 text-slate-500 cursor-pointer"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                      <div key={catKey} className="flex items-center">
+                        <div className="flex-1 min-w-0">
+                          <IosCheckmarkRow
+                            icon={<Tag className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                            label={displayName}
+                            selected={isSel}
+                            onSelect={() => {
+                              onChangeDraft((prev) => ({ ...prev, category: catKey }));
+                              setActivePicker('none');
+                            }}
+                          />
+                        </div>
+                        <div className="flex items-center pr-2 gap-0.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCatKey(catKey);
+                              setEditingCatVal(catKey);
+                            }}
+                            className="min-w-[38px] min-h-[38px] flex items-center justify-center rounded-lg text-slate-400 hover:text-teal-700 cursor-pointer"
+                            title="改名"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCustomCategory(catKey)}
+                            className="min-w-[38px] min-h-[38px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 cursor-pointer"
+                            title="刪除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     );
-                  }
-
-                  return (
-                    <div key={catKey} className="relative group">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onChangeDraft((prev) => ({ ...prev, category: catKey }));
-                          setActivePicker('none');
-                        }}
-                        className={`w-full min-h-[64px] p-2 rounded-2xl border flex flex-col items-center justify-center gap-1.5 text-xs transition cursor-pointer ${
-                          isSel
-                            ? 'bg-teal-700 text-white border-teal-700 font-bold shadow-xs'
-                            : 'bg-[#FAF9F6] dark:bg-slate-800/70 border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-teal-500'
-                        }`}
-                      >
-                        <Tag className="w-4 h-4" />
-                        <span className="text-[11px] truncate max-w-full px-1">{displayName}</span>
-                      </button>
-                      <div className="absolute -top-1.5 -right-1 flex items-center gap-0.5 bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 rounded-lg px-0.5 shadow-xs">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingCatKey(catKey);
-                            setEditingCatVal(catKey);
-                          }}
-                          className="p-1 text-slate-400 hover:text-teal-700 cursor-pointer"
-                          title="改名"
-                        >
-                          <Edit2 className="w-2.5 h-2.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteCustomCategory(catKey);
-                          }}
-                          className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
-                          title="刪除"
-                        >
-                          <Trash2 className="w-2.5 h-2.5" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                  })}
+                </IosInsetGroup>
+              )}
             </div>
           </>
         )}
 
         {activePicker === 'account' && (
           <>
-            {renderPickerHeader('選擇帳戶（支付方式）')}
-            <div className="flex-1 overflow-y-auto divide-y divide-[#E5E2DC]/60 dark:divide-slate-800">
-              {EXPENSE_ACCOUNTS.map((acc) => {
-                const isSel = draft.paymentMethod === acc.key;
-                const AccIcon = acc.Icon || Coins;
-                return (
-                  <button
-                    key={acc.key}
-                    type="button"
-                    onClick={() => {
-                      onChangeDraft((prev) => ({ ...prev, paymentMethod: acc.key }));
-                      setActivePicker('none');
-                    }}
-                    className={`w-full min-h-[54px] px-4 py-3 flex items-center justify-between text-xs sm:text-sm transition cursor-pointer ${
-                      isSel
-                        ? 'bg-teal-50/80 dark:bg-teal-950/40 text-teal-800 dark:text-teal-200 font-bold'
-                        : 'hover:bg-[#FAF9F6] dark:hover:bg-slate-800/50 text-slate-800 dark:text-slate-200'
-                    }`}
-                  >
-                    <span className="flex items-center gap-3">
-                      <span className={`w-8 h-8 rounded-xl flex items-center justify-center ${
-                        isSel
-                          ? 'bg-teal-700 text-white'
-                          : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                      }`}>
-                        <AccIcon className="w-4 h-4" />
-                      </span>
-                      <span>{getAccountLabel(acc.key, lang)}</span>
-                    </span>
-                    {isSel && <Check className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-                  </button>
-                );
-              })}
+            <IosNavBar
+              title="選擇支付帳戶"
+              leftLabel="返回"
+              leftIcon={<ChevronLeft className="w-4 h-4" />}
+              onLeftClick={() => setActivePicker('none')}
+            />
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+              <IosInsetGroup>
+                {EXPENSE_ACCOUNTS.map((acc) => {
+                  const AccIcon = acc.Icon || Coins;
+                  return (
+                    <IosCheckmarkRow
+                      key={acc.key}
+                      icon={<AccIcon className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                      label={getAccountLabel(acc.key, lang)}
+                      selected={draft.paymentMethod === acc.key}
+                      onSelect={() => {
+                        onChangeDraft((prev) => ({ ...prev, paymentMethod: acc.key }));
+                        setActivePicker('none');
+                      }}
+                    />
+                  );
+                })}
+              </IosInsetGroup>
             </div>
           </>
         )}
 
         {activePicker === 'member' && (
           <>
-            {renderPickerHeader('成員與分帳歸屬')}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+            <IosNavBar
+              title="成員與分帳歸屬"
+              leftLabel="返回"
+              leftIcon={<ChevronLeft className="w-4 h-4" />}
+              onLeftClick={() => setActivePicker('none')}
+              rightLabel="完成"
+              onRightClick={() => setActivePicker('none')}
+            />
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
               {!isSplitMode ? (
-                <div className="p-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 space-y-3 text-center">
-                  <Users className="w-8 h-8 text-teal-700 dark:text-teal-400 mx-auto" />
-                  <div>
-                    <p className="font-bold text-slate-900 dark:text-white text-sm">目前為個人獨旅模式</p>
-                    <p className="text-slate-500 dark:text-slate-400 mt-1">
-                      若與朋友同行，可一鍵啟用多成員分帳與結算
-                    </p>
+                <IosInsetGroup>
+                  <div className="p-5 text-center space-y-3">
+                    <Users className="w-8 h-8 text-teal-700 dark:text-teal-400 mx-auto" />
+                    <div>
+                      <p className="font-bold text-slate-900 dark:text-white text-sm">目前為個人獨旅模式</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                        若與朋友同行，可一鍵啟用多成員分帳與結算
+                      </p>
+                    </div>
+                    {!trip.isSoloTrip && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onUpdateTrip({
+                            ...trip,
+                            isSplitEnabled: true,
+                            splitMembers:
+                              trip.splitMembers && trip.splitMembers.length > 0
+                                ? trip.splitMembers
+                                : ['我', '同行旅伴'],
+                            updatedAt: Date.now(),
+                          });
+                        }}
+                        className="min-h-[42px] px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold cursor-pointer transition"
+                      >
+                        啟用朋友分帳模式
+                      </button>
+                    )}
                   </div>
-                  {!trip.isSoloTrip && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onUpdateTrip({
-                          ...trip,
-                          isSplitEnabled: true,
-                          splitMembers:
-                            trip.splitMembers && trip.splitMembers.length > 0
-                              ? trip.splitMembers
-                              : ['我', '同行旅伴'],
-                          updatedAt: Date.now(),
-                        });
-                      }}
-                      className="min-h-[42px] px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold cursor-pointer transition"
-                    >
-                      啟用朋友分帳模式
-                    </button>
-                  )}
-                </div>
+                </IosInsetGroup>
               ) : (
                 <>
-                  <label className="min-h-[44px] px-3.5 py-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between cursor-pointer">
-                    <span className="font-bold text-slate-800 dark:text-slate-200">
-                      此筆為個人私費（不列入公費分帳）
-                    </span>
-                    <input
-                      type="checkbox"
+                  <IosInsetGroup>
+                    <IosToggleRow
+                      label="此筆為個人私費"
+                      subtitle="不列入公費與朋友分攤結算"
                       checked={draft.isPersonal}
-                      onChange={(e) =>
-                        onChangeDraft((prev) => ({ ...prev, isPersonal: e.target.checked }))
+                      onChange={(next) =>
+                        onChangeDraft((prev) => ({ ...prev, isPersonal: next }))
                       }
-                      className="w-4 h-4 rounded accent-teal-700 cursor-pointer"
                     />
-                  </label>
+                  </IosInsetGroup>
 
                   {!draft.isPersonal && (
-                    <div className="space-y-4">
-                      <div>
-                        <span className="block font-bold text-slate-600 dark:text-slate-400 mb-2">
-                          代墊付款人
-                        </span>
-                        <div className="flex flex-wrap gap-2">
-                          {splitMembersList.map((m) => (
-                            <button
-                              key={m}
-                              type="button"
-                              onClick={() => onChangeDraft((prev) => ({ ...prev, paidBy: m }))}
-                              className={`min-h-[38px] px-3 py-1.5 rounded-xl border font-bold transition cursor-pointer ${
-                                draft.paidBy === m
-                                  ? 'bg-teal-700 text-white border-teal-700'
-                                  : 'bg-[#FAF9F6] dark:bg-slate-800 border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200'
-                              }`}
-                            >
-                              {m}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                    <>
+                      <IosInsetGroup header="代墊付款人">
+                        {splitMembersList.map((m) => (
+                          <IosCheckmarkRow
+                            key={m}
+                            label={m}
+                            selected={draft.paidBy === m}
+                            onSelect={() => onChangeDraft((prev) => ({ ...prev, paidBy: m }))}
+                          />
+                        ))}
+                      </IosInsetGroup>
 
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-bold text-slate-600 dark:text-slate-400">
-                            參與分攤成員
-                          </span>
+                      <IosInsetGroup
+                        header="參與分攤成員"
+                        headerRight={
                           <button
                             type="button"
                             onClick={() =>
@@ -748,166 +701,138 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
                                     : splitMembersList,
                               }))
                             }
-                            className="text-teal-700 dark:text-teal-400 font-bold hover:underline cursor-pointer"
+                            className="text-teal-700 dark:text-teal-400 text-[11px] font-bold hover:underline cursor-pointer"
                           >
                             {draft.splitWith.length === splitMembersList.length ? '只選自己' : '全體均分'}
                           </button>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {splitMembersList.map((m) => {
-                            const included = draft.splitWith.includes(m);
-                            return (
-                              <button
-                                key={m}
-                                type="button"
-                                onClick={() =>
-                                  onChangeDraft((prev) => {
-                                    if (prev.splitWith.includes(m)) {
-                                      if (prev.splitWith.length <= 1) return prev;
-                                      return { ...prev, splitWith: prev.splitWith.filter((x) => x !== m) };
-                                    }
-                                    return { ...prev, splitWith: [...prev.splitWith, m] };
-                                  })
-                                }
-                                className={`min-h-[38px] px-3 py-1.5 rounded-xl border font-bold flex items-center gap-1 transition cursor-pointer ${
-                                  included
-                                    ? 'bg-teal-700 text-white border-teal-700'
-                                    : 'bg-[#FAF9F6] dark:bg-slate-800 border-[#E5E2DC] dark:border-slate-700 text-slate-400'
-                                }`}
-                              >
-                                {included && <Check className="w-3 h-3" />}
-                                <span>{m}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                        {parsedAmount > 0 && draft.splitWith.length > 0 && (
-                          <p className="mt-2 font-mono tabular-nums text-teal-700 dark:text-teal-300 font-semibold">
-                            每人應攤約 {formatCurrencyAmount(convertedPreview / draft.splitWith.length, baseCurrency)}
-                          </p>
-                        )}
-                      </div>
+                        }
+                        footer={
+                          parsedAmount > 0 && draft.splitWith.length > 0
+                            ? `每人應攤約 ${formatCurrencyAmount(convertedPreview / draft.splitWith.length, baseCurrency)}`
+                            : undefined
+                        }
+                      >
+                        {splitMembersList.map((m) => {
+                          const included = draft.splitWith.includes(m);
+                          return (
+                            <IosCheckmarkRow
+                              key={m}
+                              label={m}
+                              selected={included}
+                              onSelect={() =>
+                                onChangeDraft((prev) => {
+                                  if (prev.splitWith.includes(m)) {
+                                    if (prev.splitWith.length <= 1) return prev;
+                                    return { ...prev, splitWith: prev.splitWith.filter((x) => x !== m) };
+                                  }
+                                  return { ...prev, splitWith: [...prev.splitWith, m] };
+                                })
+                              }
+                            />
+                          );
+                        })}
+                      </IosInsetGroup>
 
-                      <div className="pt-2 border-t border-[#E5E2DC] dark:border-slate-800 flex items-center gap-2">
-                        <UserPlus className="w-4 h-4 text-slate-400 shrink-0" />
-                        <input
-                          type="text"
-                          value={newMemberName}
-                          onChange={(e) => setNewMemberName(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleAddSplitMember();
-                            }
-                          }}
-                          placeholder="快速新增旅伴名稱..."
-                          className="flex-1 min-h-[36px] px-3 py-1 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 outline-hidden focus:ring-2 focus:ring-teal-600"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleAddSplitMember}
-                          className="min-h-[36px] px-3 rounded-xl bg-slate-800 dark:bg-slate-700 text-white font-bold cursor-pointer"
-                        >
-                          加入
-                        </button>
-                      </div>
-                    </div>
+                      <IosInsetGroup header="新增同行旅伴">
+                        <div className="px-4 py-2.5 flex items-center gap-2 min-h-[48px]">
+                          <UserPlus className="w-4 h-4 text-slate-400 shrink-0" />
+                          <input
+                            type="text"
+                            value={newMemberName}
+                            onChange={(e) => setNewMemberName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleAddSplitMember();
+                              }
+                            }}
+                            placeholder="輸入旅伴名稱..."
+                            className="flex-1 min-w-0 bg-transparent text-[16px] sm:text-xs outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleAddSplitMember}
+                            disabled={!newMemberName.trim()}
+                            className="min-h-[36px] px-3 rounded-xl bg-teal-700 text-white text-xs font-bold disabled:opacity-40 cursor-pointer shrink-0"
+                          >
+                            加入
+                          </button>
+                        </div>
+                      </IosInsetGroup>
+                    </>
                   )}
                 </>
               )}
-            </div>
-            <div className="p-3.5 pb-[calc(0.875rem+env(safe-area-inset-bottom,0px))] sm:pb-3.5 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 shrink-0">
-              <button
-                type="button"
-                onClick={() => setActivePicker('none')}
-                className="w-full min-h-[44px] rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold cursor-pointer transition"
-              >
-                完成
-              </button>
             </div>
           </>
         )}
 
         {activePicker === 'tags' && (
           <>
-            {renderPickerHeader('選擇或新增標籤')}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={newTagInput}
-                  onChange={(e) => setNewTagInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleAddCustomTag();
-                    }
-                  }}
-                  placeholder="輸入自訂標籤（如：退稅、朋友託買、夜市）..."
-                  className="flex-1 min-h-[40px] px-3 py-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 outline-hidden focus:ring-2 focus:ring-teal-600"
-                />
-                <button
-                  type="button"
-                  onClick={handleAddCustomTag}
-                  disabled={!newTagInput.trim()}
-                  className="min-h-[40px] px-3.5 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-white font-bold cursor-pointer"
-                >
-                  新增
-                </button>
-              </div>
+            <IosNavBar
+              title="選擇支出標籤"
+              subtitle={draft.tags.length > 0 ? `已選 ${draft.tags.length} 個` : undefined}
+              leftLabel="返回"
+              leftIcon={<ChevronLeft className="w-4 h-4" />}
+              onLeftClick={() => setActivePicker('none')}
+              rightLabel="完成"
+              onRightClick={() => setActivePicker('none')}
+            />
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+              <IosInsetGroup header="新增自訂標籤">
+                <div className="px-4 py-2.5 flex items-center gap-2 min-h-[48px]">
+                  <input
+                    type="text"
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddCustomTag();
+                      }
+                    }}
+                    placeholder="如：退稅、朋友託買、夜市..."
+                    className="flex-1 min-w-0 bg-transparent text-[16px] sm:text-xs outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddCustomTag}
+                    disabled={!newTagInput.trim()}
+                    className="min-h-[36px] px-3 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-white text-xs font-bold cursor-pointer shrink-0"
+                  >
+                    新增
+                  </button>
+                </div>
+              </IosInsetGroup>
 
-              <div className="space-y-2">
-                <span className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                  點選可複選標籤（再次點擊可取消）
-                </span>
-                <div className="flex flex-wrap gap-2">
-                  {allAvailableTags.map((tag) => {
-                    const isSel = draft.tags.includes(tag);
-                    const isCustom = customTags.includes(tag);
-                    return (
-                      <div key={tag} className="inline-flex items-center">
+              <IosInsetGroup header="點選複選標籤">
+                {allAvailableTags.map((tag) => {
+                  const isSel = draft.tags.includes(tag);
+                  const isCustom = customTags.includes(tag);
+                  return (
+                    <div key={tag} className="flex items-center">
+                      <div className="flex-1 min-w-0">
+                        <IosCheckmarkRow
+                          icon={<Tag className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />}
+                          label={`#${tag}`}
+                          selected={isSel}
+                          onSelect={() => handleToggleTag(tag)}
+                        />
+                      </div>
+                      {isCustom && (
                         <button
                           type="button"
-                          onClick={() => handleToggleTag(tag)}
-                          className={`min-h-[38px] px-3 py-1.5 border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                            isCustom ? 'rounded-l-xl border-r-0' : 'rounded-xl'
-                          } ${
-                            isSel
-                              ? 'bg-teal-700 border-teal-700 text-white'
-                              : 'bg-[#FAF9F6] dark:bg-slate-800 border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-teal-500'
-                          }`}
+                          onClick={() => handleRemoveCustomTagFromTrip(tag)}
+                          className="min-w-[40px] min-h-[40px] mr-1 flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 cursor-pointer shrink-0"
+                          title="移除自訂標籤"
                         >
-                          {isSel && <Check className="w-3 h-3" />}
-                          <span>#{tag}</span>
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
-                        {isCustom && (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveCustomTagFromTrip(tag)}
-                            className={`min-h-[38px] px-2 border border-l-0 rounded-r-xl transition cursor-pointer ${
-                              isSel
-                                ? 'bg-teal-800 border-teal-700 text-teal-100 hover:text-white'
-                                : 'bg-[#FAF9F6] dark:bg-slate-800 border-[#E5E2DC] dark:border-slate-700 text-slate-400 hover:text-rose-500'
-                            }`}
-                            title="移除自訂標籤"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-            <div className="p-3.5 pb-[calc(0.875rem+env(safe-area-inset-bottom,0px))] sm:pb-3.5 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 shrink-0">
-              <button
-                type="button"
-                onClick={() => setActivePicker('none')}
-                className="w-full min-h-[44px] rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold cursor-pointer transition"
-              >
-                完成 ({draft.tags.length} 個標籤)
-              </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </IosInsetGroup>
             </div>
           </>
         )}
@@ -1011,7 +936,7 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
           )}
         </div>
 
-        {/* 3. 類別（點一下進入挑選，不全部展開） */}
+        {/* 3. 類別 */}
         <button
           type="button"
           onClick={() => setActivePicker('category')}
@@ -1029,7 +954,7 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
           <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
         </button>
 
-        {/* 4. 帳戶（對應支付方式，點一下進入挑選） */}
+        {/* 4. 帳戶 */}
         <button
           type="button"
           onClick={() => setActivePicker('account')}
@@ -1172,86 +1097,92 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
             onChange={(e) => onChangeDraft((prev) => ({ ...prev, description: e.target.value }))}
             placeholder={`輸入消費品項或備註（選填，預設：${catMeta.label}）`}
             aria-label="消費品項或備註"
-            className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden focus:ring-2 focus:ring-teal-600 resize-none"
+            className="w-full px-3.5 py-2.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden focus:ring-2 focus:ring-teal-600 resize-none"
           />
         </div>
       </div>
 
-      {/* 9. 底部固定操作區：儲存 / 再記一筆 */}
-      <div className="px-4 sm:px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] sm:pb-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/90 flex items-center justify-between gap-2.5 shrink-0">
-        {isEditing ? (
-          <>
-            <div>
-              {onDelete && (
-                confirmingDelete ? (
-                  <div className="flex items-center gap-1.5">
+      {/* 9. 底部操作區 */}
+      {(!hideFooterSaveCancel || (isEditing && onDelete) || !isEditing) && (
+        <div className="px-4 sm:px-5 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] sm:pb-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/90 flex items-center justify-between gap-2.5 shrink-0">
+          {isEditing ? (
+            <>
+              <div>
+                {onDelete && (
+                  confirmingDelete ? (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={onDelete}
+                        className="min-h-[44px] sm:min-h-[40px] px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
+                      >
+                        確認刪除
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingDelete(false)}
+                        className="min-h-[44px] sm:min-h-[40px] px-3 py-1.5 text-xs text-slate-500 cursor-pointer"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : (
                     <button
                       type="button"
-                      onClick={onDelete}
-                      className="min-h-[40px] px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
+                      onClick={() => setConfirmingDelete(true)}
+                      className="min-h-[44px] sm:min-h-[40px] px-3.5 py-1.5 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition"
                     >
-                      確認刪除
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>刪除此筆紀錄</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmingDelete(false)}
-                      className="min-h-[40px] px-2.5 py-1.5 text-xs text-slate-500 cursor-pointer"
-                    >
-                      取消
-                    </button>
-                  </div>
-                ) : (
+                  )
+                )}
+              </div>
+              {!hideFooterSaveCancel && (
+                <div className="flex items-center gap-2 ml-auto">
                   <button
                     type="button"
-                    onClick={() => setConfirmingDelete(true)}
-                    className="min-h-[40px] px-3 py-1.5 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-semibold flex items-center gap-1 cursor-pointer transition"
+                    onClick={onCancel}
+                    className="min-h-[42px] px-4 py-2 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer transition"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>刪除</span>
+                    取消
                   </button>
-                )
+                  <button
+                    type="submit"
+                    disabled={!canEdit || parsedAmount <= 0}
+                    className="min-h-[42px] px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>儲存變更</span>
+                  </button>
+                </div>
               )}
-            </div>
-            <div className="flex items-center gap-2 ml-auto">
+            </>
+          ) : (
+            <div className="w-full flex items-center gap-2.5">
               <button
                 type="button"
-                onClick={onCancel}
-                className="min-h-[42px] px-4 py-2 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer transition"
-              >
-                取消
-              </button>
-              <button
-                type="submit"
                 disabled={!canEdit || parsedAmount <= 0}
-                className="min-h-[42px] px-5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition"
+                onClick={() => onSave(true)}
+                className="flex-1 min-h-[44px] px-4 py-2.5 rounded-xl border border-teal-700 dark:border-teal-500 text-teal-800 dark:text-teal-300 bg-white dark:bg-slate-900 hover:bg-teal-50 dark:hover:bg-teal-950/40 disabled:opacity-40 text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-98"
               >
-                <Check className="w-4 h-4" />
-                <span>儲存變更</span>
+                <Plus className="w-4 h-4" />
+                <span>儲存並再記一筆</span>
               </button>
+              {!hideFooterSaveCancel && (
+                <button
+                  type="submit"
+                  disabled={!canEdit || parsedAmount <= 0}
+                  className="flex-1 min-h-[44px] px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 disabled:opacity-40 text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition active:scale-98"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>儲存</span>
+                </button>
+              )}
             </div>
-          </>
-        ) : (
-          <div className="w-full flex items-center gap-2.5">
-            <button
-              type="button"
-              disabled={!canEdit || parsedAmount <= 0}
-              onClick={() => onSave(true)}
-              className="flex-1 min-h-[44px] px-4 py-2.5 rounded-xl border border-teal-700 dark:border-teal-500 text-teal-800 dark:text-teal-300 bg-white dark:bg-slate-900 hover:bg-teal-50 dark:hover:bg-teal-950/40 disabled:opacity-40 text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-98"
-            >
-              <Plus className="w-4 h-4" />
-              <span>再記一筆</span>
-            </button>
-            <button
-              type="submit"
-              disabled={!canEdit || parsedAmount <= 0}
-              className="flex-1 min-h-[44px] px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 disabled:opacity-40 text-white text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition active:scale-98"
-            >
-              <Check className="w-4 h-4" />
-              <span>儲存</span>
-            </button>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </form>
   );
 };

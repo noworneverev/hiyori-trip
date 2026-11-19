@@ -1,6 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { X, Plus, Pencil, Trash2, Check, Tag } from 'lucide-react';
+import React, { useState } from 'react';
+import {
+  IosModalSheet,
+  IosNavBar,
+  IosInsetGroup,
+} from '../UI/IosPrimitives';
+import { Plus, Pencil, Trash2, Check, X, Tag } from 'lucide-react';
 
 interface CategoryManageModalProps {
   customCategories: string[];
@@ -19,25 +23,10 @@ export const CategoryManageModal: React.FC<CategoryManageModalProps> = ({
   onDeleteCategory,
   onClose,
 }) => {
-  useBodyScrollLock(true);
   const [newCatName, setNewCatName] = useState('');
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [deleteConfirmKey, setDeleteConfirmKey] = useState<string | null>(null);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (editingKey) {
-          setEditingKey(null);
-        } else {
-          onClose();
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [editingKey, onClose]);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,212 +53,171 @@ export const CategoryManageModal: React.FC<CategoryManageModalProps> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-60 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-4 transition-all duration-300"
-      onClick={onClose}
+    <IosModalSheet
+      onClose={onClose}
+      maxWidthClass="sm:max-w-lg"
+      zIndexClass="z-[80]"
+      variant="grouped"
+      ariaLabel="管理自訂記帳類別"
     >
-      <div
-        className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-t-[2rem] sm:rounded-3xl shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-full sm:max-h-[85dvh] pb-[env(safe-area-inset-bottom,0px)] sm:pb-0 animate-in slide-in-from-bottom duration-300 ease-out"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Mobile Pull Bar Handle */}
-        <div className="w-12 h-1.5 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-3 mb-1 shrink-0 sm:hidden" />
+      <IosNavBar
+        title="自訂記帳類別"
+        leftLabel="關閉"
+        onLeftClick={onClose}
+        rightLabel="完成"
+        onRightClick={onClose}
+      />
 
-        {/* Header */}
-        <div className="px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between bg-[#FAF9F6] dark:bg-slate-900/60">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-2xl bg-teal-50 dark:bg-teal-950/80 text-teal-700 dark:text-teal-300 flex items-center justify-center shrink-0">
-              <Tag className="w-4 h-4" />
-            </div>
-            <div className="min-w-0">
-              <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white truncate">
-                管理自訂記帳類別
-              </h3>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
-            aria-label="關閉"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Drawer Body */}
-        <div className="p-5 space-y-4 overflow-y-auto flex-1 overscroll-contain">
-          {/* Add New Category Input */}
-          <form onSubmit={handleCreate} className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
-              新增自訂類別：
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={newCatName}
-                onChange={(e) => setNewCatName(e.target.value)}
-                placeholder="例如：伴手禮、居酒屋、藥妝、扭蛋..."
-                className="min-w-0 flex-1 min-h-[44px] px-3.5 py-2.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-900/80 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-teal-600 focus:bg-white dark:focus:bg-slate-900 focus:outline-hidden transition"
-              />
-              <button
-                type="submit"
-                disabled={!newCatName.trim()}
-                className="min-h-[44px] px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 disabled:opacity-40 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs transition active:scale-95 shrink-0 cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>新增</span>
-              </button>
-            </div>
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 sm:p-5 space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+        {/* Add New Category Group */}
+        <IosInsetGroup header="新增自訂類別">
+          <form onSubmit={handleCreate} className="px-4 py-2.5 flex items-center gap-2.5 min-h-[52px]">
+            <input
+              type="text"
+              value={newCatName}
+              onChange={(e) => setNewCatName(e.target.value)}
+              placeholder="例如：伴手禮、居酒屋、藥妝、扭蛋..."
+              className="min-w-0 flex-1 bg-transparent text-[16px] sm:text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 outline-none"
+            />
+            <button
+              type="submit"
+              disabled={!newCatName.trim()}
+              className="min-h-[40px] px-3.5 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 disabled:opacity-40 text-white font-bold text-xs flex items-center gap-1 shrink-0 transition cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>新增</span>
+            </button>
           </form>
+        </IosInsetGroup>
 
-          {/* List of Existing Custom Categories */}
-          <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-500 dark:text-slate-400">
-              <span>現有自訂類別 ({customCategories.length})</span>
+        {/* Existing Custom Categories List */}
+        <IosInsetGroup
+          header={`現有自訂類別 (${customCategories.length})`}
+          footer="重新命名會同步更新此行程中所有對應的消費紀錄。"
+        >
+          {customCategories.length === 0 ? (
+            <div className="py-10 px-4 text-center text-xs text-slate-400 space-y-1.5">
+              <Tag className="w-6 h-6 mx-auto text-slate-300 dark:text-slate-600" />
+              <p>目前尚無自訂類別</p>
             </div>
+          ) : (
+            customCategories.map((key) => {
+              const displayName = customCategoryLabels[key] || key;
+              const isEditingThis = editingKey === key;
+              const isDeletingThis = deleteConfirmKey === key;
 
-            {customCategories.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-400 space-y-1">
-                <Tag className="w-7 h-7 mx-auto text-slate-300 dark:text-slate-600 mb-1" />
-                <p>目前尚無自訂類別</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {customCategories.map((key) => {
-                  const displayName = customCategoryLabels[key] || key;
-                  const isEditingThis = editingKey === key;
-                  const isDeletingThis = deleteConfirmKey === key;
-
-                  if (isEditingThis) {
-                    return (
-                      <div
-                        key={key}
-                        className="p-2.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 flex items-center gap-2 animate-in fade-in duration-100"
-                      >
-                        <input
-                          type="text"
-                          value={editingName}
-                          onChange={(e) => setEditingName(e.target.value)}
-                          className="min-w-0 flex-1 px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-600 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-slate-100 outline-hidden"
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleSaveEdit(key);
-                            } else if (e.key === 'Escape') {
-                              e.stopPropagation();
-                              setEditingKey(null);
-                            }
-                          }}
-                        />
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleSaveEdit(key)}
-                            className="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition active:scale-95 flex items-center gap-1"
-                            title="儲存修改"
-                          >
-                            <Check className="w-3.5 h-3.5" />
-                            <span>儲存</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditingKey(null)}
-                            className="px-2.5 py-1.5 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/40 text-slate-600 dark:text-slate-300 text-xs font-medium transition active:scale-95 flex items-center gap-1"
-                            title="取消"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                            <span>取消</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  if (isDeletingThis) {
-                    return (
-                      <div
-                        key={key}
-                        className="p-2.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 flex flex-col xs:flex-row items-start xs:items-center justify-between gap-2 text-xs animate-in fade-in duration-100"
-                      >
-                        <span className="text-rose-800 dark:text-rose-200 font-medium truncate max-w-full">
-                          確定刪除「{displayName}」？
-                        </span>
-                        <div className="flex items-center gap-1.5 shrink-0 self-end xs:self-auto">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              onDeleteCategory(key);
-                              setDeleteConfirmKey(null);
-                            }}
-                            className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] transition active:scale-95"
-                          >
-                            確認刪除
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDeleteConfirmKey(null)}
-                            className="px-2.5 py-1.5 rounded-lg hover:bg-rose-100 dark:hover:bg-rose-900/40 text-slate-600 dark:text-slate-300 font-medium text-[11px] transition active:scale-95"
-                          >
-                            取消
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div
-                      key={key}
-                      className="p-3 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between gap-2 transition hover:border-slate-300 dark:hover:border-slate-700"
+              if (isEditingThis) {
+                return (
+                  <div
+                    key={key}
+                    className="px-4 py-2.5 min-h-[52px] bg-amber-50/70 dark:bg-amber-950/30 flex items-center gap-2"
+                  >
+                    <input
+                      type="text"
+                      value={editingName}
+                      onChange={(e) => setEditingName(e.target.value)}
+                      autoFocus
+                      className="min-w-0 flex-1 bg-transparent text-[16px] sm:text-xs font-bold text-slate-900 dark:text-slate-100 outline-none"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSaveEdit(key);
+                        } else if (e.key === 'Escape') {
+                          e.stopPropagation();
+                          setEditingKey(null);
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveEdit(key)}
+                      className="min-h-[38px] px-3 rounded-lg bg-teal-700 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <Tag className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
-                        <span className="font-bold text-xs text-slate-800 dark:text-slate-200 truncate">
-                          {displayName}
-                        </span>
-                      </div>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>儲存</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingKey(null)}
+                      className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg text-slate-500 hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
+                      aria-label="取消編輯"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                );
+              }
 
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleStartEdit(key)}
-                          className="min-h-[40px] sm:min-h-[32px] px-2.5 py-1.5 rounded-xl text-slate-600 dark:text-slate-300 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-xs font-semibold flex items-center gap-1 transition active:scale-95 border border-[#E5E2DC] dark:border-slate-700 cursor-pointer"
-                          title="修改名稱"
-                        >
-                          <Pencil className="w-3 h-3" />
-                          <span>修改</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteConfirmKey(key)}
-                          className="min-h-[40px] sm:min-h-[32px] px-2.5 py-1.5 rounded-xl text-slate-600 dark:text-slate-300 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-semibold flex items-center gap-1 transition active:scale-95 border border-[#E5E2DC] dark:border-slate-700 cursor-pointer"
-                          title="刪除類別"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          <span>刪除</span>
-                        </button>
-                      </div>
+              if (isDeletingThis) {
+                return (
+                  <div
+                    key={key}
+                    className="px-4 py-2.5 min-h-[52px] bg-rose-50/80 dark:bg-rose-950/35 flex items-center justify-between gap-2 text-xs"
+                  >
+                    <span className="text-rose-800 dark:text-rose-200 font-semibold truncate">
+                      確定刪除「{displayName}」？
+                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onDeleteCategory(key);
+                          setDeleteConfirmKey(null);
+                        }}
+                        className="min-h-[38px] px-3 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs cursor-pointer"
+                      >
+                        刪除
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirmKey(null)}
+                        className="min-h-[38px] px-2.5 rounded-lg text-slate-600 dark:text-slate-300 font-semibold text-xs hover:bg-black/5 dark:hover:bg-white/10 cursor-pointer"
+                      >
+                        取消
+                      </button>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
+                  </div>
+                );
+              }
 
-        {/* Drawer Footer with Mobile Safe Area */}
-        <div className="px-5 py-3.5 pb-6 sm:pb-3.5 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex items-center justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-[44px] px-5 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 hover:opacity-90 font-bold text-xs transition active:scale-95 shadow-xs cursor-pointer"
-          >
-            完成
-          </button>
-        </div>
+              return (
+                <div
+                  key={key}
+                  className="px-4 py-2 min-h-[48px] flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <Tag className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
+                    <span className="text-sm sm:text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
+                      {displayName}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleStartEdit(key)}
+                      className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-500 hover:text-teal-700 dark:hover:text-teal-400 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition cursor-pointer"
+                      title="重新命名"
+                      aria-label={`重新命名 ${displayName}`}
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirmKey(key)}
+                      className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                      title="刪除類別"
+                      aria-label={`刪除 ${displayName}`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </IosInsetGroup>
       </div>
-    </div>
+    </IosModalSheet>
   );
 };

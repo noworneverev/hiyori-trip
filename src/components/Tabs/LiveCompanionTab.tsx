@@ -387,20 +387,20 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                     value={focusThemeInput}
                     onChange={(e) => setFocusThemeInput(e.target.value)}
                     placeholder={lang === 'zh' ? '今日主題（例如：京都古寺巡禮）' : 'Day focus title...'}
-                    className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-teal-600"
+                    className="w-full min-h-[44px] sm:min-h-[38px] px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-teal-600"
                   />
                   <textarea
                     rows={2}
                     value={focusNotesInput}
                     onChange={(e) => setFocusNotesInput(e.target.value)}
                     placeholder={lang === 'zh' ? '今日提醒事項（例如：記得帶 ICOCA、提前預約車票）' : 'Day notes...'}
-                    className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-teal-600 resize-none"
+                    className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-teal-600 resize-none"
                   />
                   <div className="flex justify-end gap-2">
                     <button
                       type="button"
                       onClick={handleSaveDayFocus}
-                      className="min-h-[40px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
+                      className="min-h-[44px] sm:min-h-[38px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
                     >
                       <Check className="w-3.5 h-3.5" />
                       <span>{lang === 'zh' ? '儲存焦點' : 'Save'}</span>
@@ -499,10 +499,10 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                     type="button"
                     onClick={loadGpsWeather}
                     disabled={isWeatherLoading}
-                    className="min-h-[36px] px-2.5 py-1 rounded-lg border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-semibold flex items-center gap-1 transition active:scale-95 cursor-pointer"
+                    className="min-h-[44px] sm:min-h-[36px] px-3 py-1 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-[#FAF9F6] dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs sm:text-[11px] font-semibold flex items-center gap-1 transition active:scale-95 cursor-pointer"
                     title={t.useGpsLocation}
                   >
-                    <LocateFixed className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                    <LocateFixed className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                     <span className="hidden xs:inline">切換</span>
                     <span>GPS</span>
                   </button>
@@ -511,10 +511,10 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                     type="button"
                     onClick={loadDestinationWeather}
                     disabled={isWeatherLoading}
-                    className="min-h-[36px] px-2.5 py-1 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50/70 dark:bg-teal-950/50 hover:bg-teal-100/60 text-teal-800 dark:text-teal-200 text-[11px] font-semibold flex items-center gap-1 transition active:scale-95 cursor-pointer"
+                    className="min-h-[44px] sm:min-h-[36px] px-3 py-1 rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50/70 dark:bg-teal-950/50 hover:bg-teal-100/60 text-teal-800 dark:text-teal-200 text-xs sm:text-[11px] font-semibold flex items-center gap-1 transition active:scale-95 cursor-pointer"
                     title={t.useDestination}
                   >
-                    <MapPin className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                    <MapPin className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                     <span className="hidden xs:inline">切換</span>
                     <span>景點</span>
                   </button>
@@ -524,7 +524,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                   type="button"
                   onClick={weatherMode === 'destination' ? loadDestinationWeather : loadGpsWeather}
                   disabled={isWeatherLoading}
-                  className="w-9 h-9 flex items-center justify-center rounded-lg border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition cursor-pointer"
+                  className="w-11 h-11 sm:w-9 sm:h-9 flex items-center justify-center rounded-xl border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition cursor-pointer"
                   title="重新整理氣象"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isWeatherLoading ? 'animate-spin' : ''}`} />
@@ -540,40 +540,40 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                     <span>{t.fetchingWeather}</span>
                   </div>
                 ) : weatherError ? (
-                  <div className="p-2.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs flex items-center justify-between">
+                  <div className="py-2 text-slate-700 dark:text-slate-300 text-xs flex items-center justify-between gap-2">
                     <span>{weatherError}</span>
                     <button
                       type="button"
                       onClick={loadDestinationWeather}
-                      className="px-2.5 py-1 rounded-md bg-teal-700 dark:bg-teal-600 text-white font-semibold text-[11px] cursor-pointer"
+                      className="min-h-[44px] sm:min-h-[34px] px-3 py-1 rounded-xl bg-teal-700 dark:bg-teal-600 text-white font-semibold text-xs cursor-pointer shrink-0"
                     >
                       重試
                     </button>
                   </div>
                 ) : weather ? (
                   <>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                      <div className="p-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC]/80 dark:border-slate-800 divide-y sm:divide-y-0 sm:divide-x divide-[#E5E2DC]/70 dark:divide-slate-800 text-xs overflow-hidden">
+                      <div className="px-3 py-2 max-sm:border-r max-sm:border-[#E5E2DC]/70 max-sm:dark:border-slate-800">
                         <span className="text-slate-400 text-[10px] block">體感溫度</span>
                         <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">{weather.apparentTemperature}°C</span>
                       </div>
-                      <div className="p-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800">
+                      <div className="px-3 py-2">
                         <span className="text-slate-400 text-[10px] block">本日最高/最低</span>
                         <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">{weather.maxTemp}° / {weather.minTemp}°</span>
                       </div>
-                      <div className="p-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800">
+                      <div className="px-3 py-2 max-sm:border-r max-sm:border-[#E5E2DC]/70 max-sm:dark:border-slate-800">
                         <span className="text-slate-400 text-[10px] block">濕度</span>
                         <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">{weather.humidity}%</span>
                       </div>
-                      <div className="p-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800">
+                      <div className="px-3 py-2">
                         <span className="text-slate-400 text-[10px] block">風速</span>
                         <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">{weather.windSpeed} km/h</span>
                       </div>
                     </div>
 
                     {weatherAdvice && (
-                      <div className="p-2.5 rounded-xl bg-teal-50/70 dark:bg-teal-950/40 border border-teal-200/60 dark:border-teal-900/60 text-xs text-teal-900 dark:text-teal-200 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 truncate">
+                      <div className="pt-2 border-t border-[#E5E2DC]/70 dark:border-slate-800 text-xs text-teal-800 dark:text-teal-200 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <Info className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
                           <span className="truncate">{weatherAdvice}</span>
                         </div>
@@ -629,7 +629,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
           )}
 
           {nextItem.notes && (
-            <div className="mt-3 p-3 rounded-2xl bg-white/10 text-white text-xs border border-white/15 space-y-1">
+            <div className="mt-3 pt-3 border-t border-white/15 text-white text-xs space-y-1">
               <div className="flex items-center gap-1.5 text-teal-300 font-bold text-[11px]">
                 <FileText className="w-3.5 h-3.5" />
                 <span>{lang === 'zh' ? '說明' : 'Notes'}</span>
@@ -641,7 +641,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
           )}
 
           {nextItem.transportNote && (
-            <div className="mt-2.5 p-2.5 rounded-xl bg-white/10 text-slate-100 text-xs flex items-start gap-2 border border-white/10">
+            <div className="mt-3 pt-3 border-t border-white/15 text-slate-100 text-xs flex items-start gap-2">
               <Bus className="w-4 h-4 text-teal-400 shrink-0 mt-0.5" />
               <div>
                 <span className="font-bold text-[11px] text-teal-300 block">{lang === 'zh' ? '交通' : 'Transit'}</span>
@@ -747,8 +747,8 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
 
         if (dayBookings.length === 0) return null;
         return (
-          <div className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 shadow-2xs space-y-2.5">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-900 dark:text-white">
+          <div className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs overflow-hidden">
+            <div className="px-4 py-3 border-b border-[#E5E2DC]/80 dark:border-slate-800 flex items-center justify-between text-xs font-bold text-slate-900 dark:text-white">
               <span className="flex items-center gap-1.5">
                 <Ticket className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                 <span>{lang === 'zh' ? '今日訂位代號速查' : "Today's Booking Codes"}</span>
@@ -757,11 +757,11 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                 {dayBookings.length}
               </span>
             </div>
-            <div className="space-y-1.5">
+            <div className="divide-y divide-[#E5E2DC]/75 dark:divide-slate-800">
               {dayBookings.slice(0, 5).map((entry) => (
                 <div
                   key={entry.id}
-                  className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800 text-xs"
+                  className="flex items-center justify-between gap-2.5 px-4 py-2.5 text-xs"
                 >
                   <div className="min-w-0">
                     <div className="font-semibold text-slate-800 dark:text-slate-100 truncate">
@@ -775,20 +775,20 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                   <button
                     type="button"
                     onClick={() => handleCopyBookingCode(entry.code, entry.id)}
-                    className={`min-h-[36px] px-2.5 rounded-lg text-[11px] font-bold flex items-center gap-1 shrink-0 transition cursor-pointer ${
+                    className={`min-h-[44px] sm:min-h-[34px] px-3 rounded-xl text-xs sm:text-[11px] font-bold flex items-center gap-1 shrink-0 transition cursor-pointer ${
                       copiedBookingKey === entry.id
                         ? 'bg-teal-700 text-white'
-                        : 'bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-teal-600'
+                        : 'bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-teal-600'
                     }`}
                   >
                     {copiedBookingKey === entry.id ? (
                       <>
-                        <Check className="w-3 h-3" />
+                        <Check className="w-3.5 h-3.5" />
                         <span>{lang === 'zh' ? '已複製' : 'Copied'}</span>
                       </>
                     ) : (
                       <>
-                        <Copy className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                        <Copy className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                         <span>{lang === 'zh' ? '複製' : 'Copy'}</span>
                       </>
                     )}
@@ -932,33 +932,33 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
 
                 {/* Expanded Spot Details (Notes, Transport Note, Cost) */}
                 {isExpanded && (item.notes || item.transportNote || item.cost || (item.memoryPhotos && item.memoryPhotos.length > 0)) && (
-                  <div className="mt-3 pt-3 border-t border-[#E5E2DC] dark:border-slate-800 space-y-2 text-xs">
+                  <div className="mt-3 pt-2.5 border-t border-[#E5E2DC] dark:border-slate-800 divide-y divide-[#E5E2DC]/65 dark:divide-slate-800/80 text-xs">
                     {item.notes && (
-                      <div className="p-2.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800">
+                      <div className="py-2 first:pt-0">
                         <div className="flex items-center gap-1 text-[11px] font-bold text-teal-700 dark:text-teal-400 mb-1">
                           <FileText className="w-3.5 h-3.5" />
                           <span>{lang === 'zh' ? '備註' : 'Notes'}</span>
                         </div>
-                        <p className="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap text-[11px]">
+                        <p className="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap text-xs">
                           {item.notes}
                         </p>
                       </div>
                     )}
 
                     {item.transportNote && (
-                      <div className="p-2.5 rounded-xl bg-teal-50/50 dark:bg-teal-950/30 border border-teal-200/50 dark:border-teal-900/50 text-teal-900 dark:text-teal-200 text-[11px] flex items-start gap-2">
+                      <div className="py-2 first:pt-0 text-teal-900 dark:text-teal-200 text-xs flex items-start gap-2">
                         <Bus className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
                         <div>
-                          <strong className="block text-teal-800 dark:text-teal-300 font-semibold mb-0.5">
-                            {lang === 'zh' ? '交通' : 'Transit'}
-                          </strong>
+                          <span className="font-semibold text-teal-800 dark:text-teal-300 mr-1.5">
+                            {lang === 'zh' ? '交通' : 'Transit'} ·
+                          </span>
                           <span>{item.transportNote}</span>
                         </div>
                       </div>
                     )}
 
                     {typeof item.cost === 'number' && item.cost > 0 && (
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                      <div className="py-2 first:pt-0 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
                         <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                         <span>{lang === 'zh' ? '預估費用' : 'Cost'} · <strong className="text-slate-800 dark:text-slate-200 font-mono tabular-nums">{formatCurrencyAmount(item.cost, trip.currency || tripCurrency)}</strong></span>
                       </div>

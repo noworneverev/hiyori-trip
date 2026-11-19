@@ -1,12 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import html2canvas from 'html2canvas';
 import { Trip } from '../../types/itinerary';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { copyTextToClipboard } from '../../utils/clipboard';
 import { formatCurrencyAmount } from '../../utils/currency';
 import { resolveMediaSrc } from '../../utils/image';
 import { computeTripExpenseInCurrency, GalleryPhotoItem } from './travelHubTypes';
-import { Check, Copy, Download, Loader2, Share2, X } from 'lucide-react';
+import {
+  IosModalSheet,
+  IosNavBar,
+  IosInsetGroup,
+  IosDisclosureRow,
+  IosCheckmarkRow,
+  IosRow,
+} from '../UI/IosPrimitives';
+import { Check, Copy, Download, Share2, Palette, Calendar } from 'lucide-react';
 
 interface ShareCardStudioModalProps {
   isOpen: boolean;
@@ -81,26 +88,14 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedText, setCopiedText] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
-
-  useBodyScrollLock(isOpen);
+  const [themeExpanded, setThemeExpanded] = useState(false);
+  const [yearExpanded, setYearExpanded] = useState(false);
 
   const posterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setSelectedYear(initialYear || 'all');
   }, [initialYear, isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen, onClose]);
 
   const summary = useMemo(() => {
     const matchedTrips = trips.filter((tr) => {
@@ -149,7 +144,6 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
     };
   }, [trips, photos, selectedYear, displayCurrency]);
 
-  // Pre-resolve media:// images to Data URLs so html2canvas renders crisp images reliably
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
@@ -261,36 +255,28 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-70 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm px-3 sm:p-5 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] overflow-hidden"
-      onClick={onClose}
+    <IosModalSheet
+      onClose={onClose}
+      maxWidthClass="sm:max-w-4xl"
+      zIndexClass="z-[80]"
+      variant="grouped"
+      fullHeightOnMobile
+      ariaLabel="足跡年鑑圖卡工作室"
     >
-      <div
-        className="w-full max-w-4xl max-h-full overflow-y-auto bg-white dark:bg-[#111827] rounded-3xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl my-auto text-slate-900 dark:text-slate-100"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between">
-          <div>
-            <h3 className="font-bold text-base text-slate-900 dark:text-white">
-              足跡年鑑圖卡工作室
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              輸出 2.5x 高解析 PNG 分享圖卡
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-w-[44px] min-h-[44px] sm:min-w-[40px] sm:min-h-[40px] rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-[#EFECE5] dark:hover:bg-slate-800 flex items-center justify-center cursor-pointer"
-            aria-label="關閉"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+      <IosNavBar
+        title="足跡年鑑圖卡"
+        subtitle="2.5x 高解析 PNG"
+        leftLabel="關閉"
+        onLeftClick={onClose}
+        rightLabel="下載 PNG"
+        onRightClick={handleDownloadPng}
+        rightLoading={isGenerating}
+      />
 
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 p-5 sm:p-6">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 sm:p-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
           {/* Left: Dark-Mode-Isolated Magazine Poster Canvas */}
-          <div className="md:col-span-7 flex items-center justify-center bg-slate-100 dark:bg-slate-950/70 rounded-2xl p-4 sm:p-6 overflow-x-auto">
+          <div className="md:col-span-7 flex items-center justify-center bg-[#EFECE5] dark:bg-slate-950/70 rounded-2xl p-4 sm:p-6 overflow-x-auto border border-[#E5E2DC] dark:border-slate-800">
             <div
               ref={posterRef}
               style={{
@@ -362,7 +348,7 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
                 「{motto || '把世界走成自己的故事'}」
               </div>
 
-              {/* 2x2 Photo Collage (when resolved photos exist) */}
+              {/* 2x2 Photo Collage */}
               {resolvedPhotoUrls.length > 0 && (
                 <div
                   style={{
@@ -486,134 +472,130 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
             </div>
           </div>
 
-          {/* Right: Customization & Export Controls */}
-          <div className="md:col-span-5 flex flex-col justify-between space-y-5">
-            <div className="space-y-4">
-              {/* Theme Picker */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  海報版型配色
-                </label>
-                <div className="grid grid-cols-3 gap-2">
+          {/* Right: iOS Inset Grouped Controls */}
+          <div className="md:col-span-5 space-y-5">
+            <IosInsetGroup header="圖卡外觀與內容">
+              <IosDisclosureRow
+                icon={<Palette className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                label="海報配色"
+                value={
+                  <span className="inline-flex items-center gap-1.5">
+                    <span
+                      className="w-3 h-3 rounded-full border border-black/15 inline-block"
+                      style={{ backgroundColor: theme.bg }}
+                    />
+                    <span>{theme.label}</span>
+                  </span>
+                }
+                expanded={themeExpanded}
+                onToggle={() => setThemeExpanded((v) => !v)}
+              >
+                <div className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800">
                   {(Object.keys(POSTER_THEMES) as PosterThemeKey[]).map((key) => {
                     const item = POSTER_THEMES[key];
                     return (
-                      <button
+                      <IosCheckmarkRow
                         key={key}
-                        type="button"
-                        onClick={() => setThemeKey(key)}
-                        className={`min-h-[42px] px-2.5 py-2 rounded-xl border text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                          themeKey === key
-                            ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-200'
-                            : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'
-                        }`}
-                      >
-                        <span
-                          className="w-3 h-3 rounded-full border border-black/15 shrink-0"
-                          style={{ backgroundColor: item.bg }}
-                        />
-                        <span>{item.label}</span>
-                      </button>
+                        inset
+                        icon={
+                          <span
+                            className="w-4 h-4 rounded-full border border-black/15 shrink-0"
+                            style={{ backgroundColor: item.bg }}
+                          />
+                        }
+                        label={item.label}
+                        selected={themeKey === key}
+                        onSelect={() => {
+                          setThemeKey(key);
+                          setThemeExpanded(false);
+                        }}
+                      />
                     );
                   })}
                 </div>
-              </div>
+              </IosDisclosureRow>
 
-              {/* Year Scope */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  統計年份範圍
-                </label>
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedYear('all')}
-                    className={`min-h-[36px] px-3 py-1 rounded-xl text-xs font-semibold cursor-pointer ${
-                      selectedYear === 'all'
-                        ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                    }`}
-                  >
-                    歷年全部
-                  </button>
+              <IosDisclosureRow
+                icon={<Calendar className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                label="統計年份"
+                value={selectedYear === 'all' ? '歷年全部' : selectedYear}
+                expanded={yearExpanded}
+                onToggle={() => setYearExpanded((v) => !v)}
+              >
+                <div className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800">
+                  <IosCheckmarkRow
+                    inset
+                    label="歷年全部"
+                    selected={selectedYear === 'all'}
+                    onSelect={() => {
+                      setSelectedYear('all');
+                      setYearExpanded(false);
+                    }}
+                  />
                   {availableYears.map((yr) => (
-                    <button
+                    <IosCheckmarkRow
                       key={yr}
-                      type="button"
-                      onClick={() => setSelectedYear(yr)}
-                      className={`min-h-[36px] px-3 py-1 rounded-xl text-xs font-semibold font-mono cursor-pointer ${
-                        selectedYear === yr
-                          ? 'bg-teal-600 text-white'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-                      }`}
-                    >
-                      {yr}
-                    </button>
+                      inset
+                      label={yr}
+                      selected={selectedYear === yr}
+                      onSelect={() => {
+                        setSelectedYear(yr);
+                        setYearExpanded(false);
+                      }}
+                    />
                   ))}
                 </div>
-              </div>
+              </IosDisclosureRow>
 
-              {/* Custom Motto */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  海報短句（選填）
+              <div className="px-4 py-2.5 min-h-[48px] flex items-center justify-between gap-2">
+                <label className="text-sm sm:text-xs font-semibold text-slate-800 dark:text-slate-200 shrink-0">
+                  海報短句
                 </label>
                 <input
                   type="text"
                   maxLength={36}
                   value={motto}
                   onChange={(e) => setMotto(e.target.value)}
-                  placeholder="寫一句屬於這趟旅途的註解..."
-                  className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs outline-none focus:border-teal-500"
+                  placeholder="寫一句旅途註解..."
+                  className="min-w-0 flex-1 bg-transparent text-right text-[16px] sm:text-xs text-slate-900 dark:text-white outline-none"
                 />
               </div>
+            </IosInsetGroup>
 
-              {exportStatus && (
-                <p className="text-xs font-semibold text-teal-600 dark:text-teal-400">
-                  {exportStatus}
-                </p>
-              )}
-            </div>
+            {exportStatus && (
+              <p className="px-2 text-xs font-semibold text-teal-700 dark:text-teal-400">
+                {exportStatus}
+              </p>
+            )}
 
-            {/* Export CTA Stack */}
-            <div className="space-y-2.5 pt-4 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                disabled={isGenerating}
+            <IosInsetGroup header="輸出與分享">
+              <IosRow
                 onClick={handleDownloadPng}
-                className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer"
-              >
-                {isGenerating ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
-                )}
-                <span>下載高解析 PNG 圖卡</span>
-              </button>
-
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  disabled={isGenerating}
-                  onClick={handleNativeShare}
-                  className="min-h-[42px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-teal-500 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
-                >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>系統分享圖卡</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCopyText}
-                  className="min-h-[42px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-teal-500 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
-                >
-                  {copiedText ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedText ? '已複製文字' : '複製文字摘要'}</span>
-                </button>
-              </div>
-            </div>
+                disabled={isGenerating}
+                icon={<Download className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                label="下載高解析 PNG 圖卡"
+              />
+              <IosRow
+                onClick={handleNativeShare}
+                disabled={isGenerating}
+                icon={<Share2 className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                label="使用系統分享圖卡"
+              />
+              <IosRow
+                onClick={handleCopyText}
+                icon={
+                  copiedText ? (
+                    <Check className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <Copy className="w-4 h-4 text-slate-500" />
+                  )
+                }
+                label={copiedText ? '已複製文字摘要' : '複製文字足跡摘要'}
+              />
+            </IosInsetGroup>
           </div>
         </div>
       </div>
-    </div>
+    </IosModalSheet>
   );
 };

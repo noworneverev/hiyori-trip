@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import {
   Plus,
   Check,
@@ -14,7 +13,13 @@ import { Trip, TodoItem } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { getTodayLocal } from '../../utils/date';
 import { SwipeableActionRow } from '../UI/SwipeableExpenseRow';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import {
+  IosModalSheet,
+  IosNavBar,
+  IosInsetGroup,
+  IosToggleRow,
+  IosRow,
+} from '../UI/IosPrimitives';
 
 interface RemindersTodoListProps {
   trip: Trip;
@@ -157,19 +162,6 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
 
   const newInputRef = useRef<HTMLInputElement | null>(null);
   const isZh = lang === 'zh' || lang === 'zh-CN';
-
-  useBodyScrollLock(Boolean(detailTodo));
-
-  useEffect(() => {
-    if (!detailTodo) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setDetailTodo(null);
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [detailTodo]);
 
   const handleToggleTodo = (id: string) => {
     if (!canEdit) return;
@@ -511,174 +503,127 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
         </div>
       )}
 
-      {/* iPhone Reminders-style "(i)" Details Sheet Modal (Portaled & Scroll-Locked) */}
-      {detailTodo &&
-        typeof document !== 'undefined' &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-80 flex items-end sm:items-center justify-center pt-[max(0.75rem,env(safe-area-inset-top,0px))] sm:p-4 bg-black/55 backdrop-blur-xs touch-none overscroll-none animate-in fade-in duration-150"
-            onClick={() => setDetailTodo(null)}
-            role="dialog"
-            aria-modal="true"
-            aria-label={isZh ? '詳細資訊' : 'Details'}
-          >
-            <div
-              className="w-full sm:max-w-md rounded-t-[24px] sm:rounded-3xl bg-[#F2F2F7] dark:bg-[#1C1C1E] border-t sm:border border-[#E5E2DC] dark:border-slate-800 shadow-2xl max-h-full sm:max-h-[85dvh] pb-[env(safe-area-inset-bottom,0px)] sm:pb-0 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* iOS Navigation Bar Header */}
-              <div className="px-4 py-3 border-b border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-[#2C2C2E]/90 backdrop-blur-md flex items-center justify-between shrink-0 touch-none">
-                <button
-                  type="button"
-                  onClick={() => setDetailTodo(null)}
-                  className="min-h-[44px] sm:min-h-[36px] px-2 text-base sm:text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white cursor-pointer"
-                >
-                  {isZh ? '取消' : 'Cancel'}
-                </button>
-                <h4 className="font-bold text-base text-slate-900 dark:text-white">
-                  {isZh ? '詳細資訊' : 'Details'}
-                </h4>
-                <button
-                  type="button"
-                  onClick={handleSaveDetails}
-                  className="min-h-[44px] sm:min-h-[36px] px-2 text-base sm:text-sm font-bold text-teal-700 dark:text-teal-400 hover:text-teal-800 dark:hover:text-teal-300 cursor-pointer"
-                >
-                  {isZh ? '完成' : 'Done'}
-                </button>
-              </div>
+      {/* iOS Reminders-style "(i)" Details Sheet Modal */}
+      {detailTodo && (
+        <IosModalSheet
+          onClose={() => setDetailTodo(null)}
+          variant="grouped"
+          maxWidthClass="sm:max-w-md"
+          zIndexClass="z-[80]"
+          ariaLabel={isZh ? '詳細資訊' : 'Details'}
+        >
+          <IosNavBar
+            title={isZh ? '詳細資訊' : 'Details'}
+            leftLabel={isZh ? '取消' : 'Cancel'}
+            onLeftClick={() => setDetailTodo(null)}
+            rightLabel={isZh ? '完成' : 'Done'}
+            onRightClick={handleSaveDetails}
+            rightTone="done"
+          />
 
-              {/* iOS Inset Grouped Sections */}
-              <div className="p-4 space-y-4 overflow-y-auto overscroll-contain touch-pan-y flex-1">
-              {/* Group 1: Title & Notes */}
-              <div className="rounded-2xl bg-white dark:bg-[#2C2C2E] divide-y divide-slate-100 dark:divide-slate-700/60 overflow-hidden shadow-2xs">
-                <div className="px-4 py-2.5">
-                  <input
-                    type="text"
-                    value={detailTitle}
-                    onChange={(e) => setDetailTitle(e.target.value)}
-                    placeholder={isZh ? '標題' : 'Title'}
-                    className="w-full min-h-[38px] bg-transparent text-base sm:text-sm font-medium text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden"
-                  />
-                </div>
-                <div className="px-4 py-2.5">
-                  <textarea
-                    rows={3}
-                    value={detailNotes}
-                    onChange={(e) => setDetailNotes(e.target.value)}
-                    placeholder={isZh ? '備註' : 'Notes'}
-                    className="w-full bg-transparent text-base sm:text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:outline-hidden resize-none"
-                  />
-                </div>
+          <div className="p-4 space-y-4 overflow-y-auto overscroll-contain touch-pan-y flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+            {/* Group 1: Title & Notes */}
+            <IosInsetGroup>
+              <div className="px-4 py-2.5">
+                <input
+                  type="text"
+                  value={detailTitle}
+                  onChange={(e) => setDetailTitle(e.target.value)}
+                  placeholder={isZh ? '標題' : 'Title'}
+                  className="w-full min-h-[40px] bg-transparent text-[16px] sm:text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-hidden"
+                />
               </div>
+              <div className="px-4 py-2.5">
+                <textarea
+                  rows={3}
+                  value={detailNotes}
+                  onChange={(e) => setDetailNotes(e.target.value)}
+                  placeholder={isZh ? '備註' : 'Notes'}
+                  className="w-full bg-transparent text-[16px] sm:text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 focus:outline-hidden resize-none"
+                />
+              </div>
+            </IosInsetGroup>
 
-              {/* Group 2: Date Toggle + Date Picker */}
-              <div className="rounded-2xl bg-white dark:bg-[#2C2C2E] divide-y divide-slate-100 dark:divide-slate-700/60 overflow-hidden shadow-2xs">
-                <div className="px-4 py-3 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-rose-500 text-white flex items-center justify-center shrink-0">
-                      <Calendar className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-base sm:text-sm font-medium text-slate-900 dark:text-white">
-                        {isZh ? '日期' : 'Date'}
-                      </div>
-                      {detailHasDate && detailDueDate && (
-                        <div className="text-xs font-mono tabular-nums text-teal-700 dark:text-teal-400">
-                          {detailDueDate}
-                        </div>
-                      )}
-                    </div>
+            {/* Group 2: Date Toggle + Date Picker */}
+            <IosInsetGroup>
+              <IosToggleRow
+                icon={
+                  <div className="w-7 h-7 rounded-lg bg-rose-500 text-white flex items-center justify-center shrink-0">
+                    <Calendar className="w-4 h-4" />
                   </div>
+                }
+                label={isZh ? '日期' : 'Date'}
+                subtitle={detailHasDate && detailDueDate ? detailDueDate : undefined}
+                checked={detailHasDate}
+                onChange={(next) => {
+                  setDetailHasDate(next);
+                  if (next && !detailDueDate) {
+                    setDetailDueDate(todayStr);
+                  }
+                }}
+              />
 
-                  {/* iOS Switch */}
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={detailHasDate}
-                    onClick={() => {
-                      const next = !detailHasDate;
-                      setDetailHasDate(next);
-                      if (next && !detailDueDate) {
-                        setDetailDueDate(todayStr);
-                      }
-                    }}
-                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${
-                      detailHasDate ? 'bg-teal-600 dark:bg-teal-500' : 'bg-slate-200 dark:bg-slate-600'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-sm transition duration-200 ${
-                        detailHasDate ? 'translate-x-5' : 'translate-x-0'
+              {detailHasDate && (
+                <div className="px-4 py-3 space-y-2.5 bg-[#FAF9F6]/65 dark:bg-slate-900/40 animate-in fade-in duration-150">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDetailDueDate(todayStr)}
+                      className={`min-h-[44px] sm:min-h-[36px] px-3.5 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                        detailDueDate === todayStr
+                          ? 'bg-teal-700 text-white border-teal-700'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-[#E5E2DC] dark:border-slate-700'
                       }`}
-                    />
-                  </button>
-                </div>
-
-                {detailHasDate && (
-                  <div className="px-4 py-3 space-y-2.5 animate-in fade-in duration-150">
-                    <div className="flex items-center gap-2">
+                    >
+                      今天
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDetailDueDate(getTomorrowStr())}
+                      className={`min-h-[44px] sm:min-h-[36px] px-3.5 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                        detailDueDate === getTomorrowStr()
+                          ? 'bg-teal-700 text-white border-teal-700'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-[#E5E2DC] dark:border-slate-700'
+                      }`}
+                    >
+                      明天
+                    </button>
+                    {detailDueDate && (
                       <button
                         type="button"
-                        onClick={() => setDetailDueDate(todayStr)}
-                        className={`min-h-[36px] px-3 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
-                          detailDueDate === todayStr
-                            ? 'bg-teal-700 text-white border-teal-700'
-                            : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
-                        }`}
+                        onClick={() => {
+                          setDetailHasDate(false);
+                          setDetailDueDate('');
+                        }}
+                        className="min-h-[44px] sm:min-h-[36px] px-3 ml-auto text-xs text-slate-500 hover:text-rose-500 flex items-center gap-1 cursor-pointer"
                       >
-                        今天
+                        <X className="w-3.5 h-3.5" />
+                        <span>清除</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setDetailDueDate(getTomorrowStr())}
-                        className={`min-h-[36px] px-3 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
-                          detailDueDate === getTomorrowStr()
-                            ? 'bg-teal-700 text-white border-teal-700'
-                            : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
-                        }`}
-                      >
-                        明天
-                      </button>
-                      {detailDueDate && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDetailHasDate(false);
-                            setDetailDueDate('');
-                          }}
-                          className="min-h-[36px] px-2.5 ml-auto text-xs text-slate-400 hover:text-rose-500 flex items-center gap-1 cursor-pointer"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                          <span>清除</span>
-                        </button>
-                      )}
-                    </div>
-                    <input
-                      type="date"
-                      value={detailDueDate}
-                      onChange={(e) => setDetailDueDate(e.target.value)}
-                      className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-[#F2F2F7] dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-base sm:text-sm font-mono tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-teal-600"
-                    />
+                    )}
                   </div>
-                )}
-              </div>
-
-                {/* Group 3: Explicit Delete Row */}
-                <div className="rounded-2xl bg-white dark:bg-[#2C2C2E] overflow-hidden shadow-2xs">
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteTodo(detailTodo.id)}
-                    className="w-full min-h-[48px] px-4 py-3 text-rose-600 dark:text-rose-400 hover:bg-rose-50/70 dark:hover:bg-rose-950/30 font-semibold text-base sm:text-sm flex items-center justify-center gap-2 transition cursor-pointer"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    <span>{isZh ? '刪除提醒事項' : 'Delete Reminder'}</span>
-                  </button>
+                  <input
+                    type="date"
+                    value={detailDueDate}
+                    onChange={(e) => setDetailDueDate(e.target.value)}
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-sm font-mono tabular-nums text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-teal-600"
+                  />
                 </div>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
+              )}
+            </IosInsetGroup>
+
+            {/* Group 3: Explicit Delete Row */}
+            <IosInsetGroup divided={false}>
+              <IosRow
+                icon={<Trash2 className="w-4 h-4 text-rose-600 dark:text-rose-400" />}
+                label={isZh ? '刪除提醒事項' : 'Delete Reminder'}
+                destructive
+                onClick={() => handleDeleteTodo(detailTodo.id)}
+              />
+            </IosInsetGroup>
+          </div>
+        </IosModalSheet>
+      )}
     </div>
   );
 };

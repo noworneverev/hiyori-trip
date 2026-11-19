@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import React, { useState } from 'react';
 import { Trip } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { formatDateSlash } from '../../utils/date';
@@ -8,8 +7,13 @@ import { getPublicShareBaseUrl } from '../../utils/url';
 import { copyTextToClipboard } from '../../utils/clipboard';
 import { User } from 'firebase/auth';
 import {
-  X,
-  Share2,
+  IosModalSheet,
+  IosNavBar,
+  IosInsetGroup,
+  IosRow,
+  IosDisclosureRow,
+} from '../UI/IosPrimitives';
+import {
   Copy,
   Check,
   Send,
@@ -17,10 +21,9 @@ import {
   Globe,
   Loader2,
   MapPin,
-  Sparkles,
-  Users,
   FileText,
   Radio,
+  ChevronRight,
 } from 'lucide-react';
 
 interface ShareTripModalProps {
@@ -41,7 +44,6 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
   lang,
   onClose,
 }) => {
-  useBodyScrollLock(true);
   const [isPublishing, setIsPublishing] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(() => {
@@ -131,8 +133,8 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
           text: `嗨！這是我們預計前往 ${trip.destination} 的旅遊行程規劃，點開即可即時查看每日景點、待辦與備忘：`,
           url: shareUrl,
         });
-      } catch (e) {
-        // User cancelled share
+      } catch {
+        // User cancelled
       }
     } else {
       handleCopyLink();
@@ -141,170 +143,132 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
 
   const totalSpots = trip.days.reduce((acc, d) => acc + d.items.length, 0);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm px-3 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] overflow-hidden"
-      onClick={onClose}
+    <IosModalSheet
+      onClose={onClose}
+      zIndexClass="z-[70]"
+      variant="grouped"
+      ariaLabel={lang === 'zh' ? '行程分享' : 'Share Trip'}
     >
-      <div
-        className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-zinc-100 my-auto animate-in fade-in zoom-in-95 duration-150 overflow-hidden flex flex-col max-h-full sm:max-h-[90dvh]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-teal-100 dark:bg-teal-950 text-teal-700 dark:text-teal-300 flex items-center justify-center">
-              <Share2 className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="font-bold text-base text-slate-900 dark:text-white">
-                {lang === 'zh' ? '行程分享' : 'Share Trip'}
-              </h3>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-[#EFECE5] dark:hover:bg-slate-800 transition cursor-pointer"
-            aria-label="關閉"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+      <IosNavBar
+        title={lang === 'zh' ? '行程分享' : 'Share Trip'}
+        rightLabel={lang === 'zh' ? '完成' : 'Done'}
+        onRightClick={onClose}
+      />
 
-        {/* Content */}
-        <div className="p-5 sm:p-6 space-y-4 overflow-y-auto">
-          {/* Trip Summary Card */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-800/70 border border-slate-200/90 dark:border-white/10 space-y-2">
-            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-zinc-400">
-              <span className="flex items-center gap-1 font-semibold text-teal-700 dark:text-teal-300">
-                <MapPin className="w-3.5 h-3.5" />
-                {trip.destination}
+      <div className="flex-1 overflow-y-auto overscroll-contain touch-pan-y px-4 pt-4 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] space-y-5">
+        {/* Trip Summary Inset Group */}
+        <IosInsetGroup header="分享旅程概覽">
+          <div className="px-4 py-3.5 space-y-1.5">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span className="flex items-center gap-1 font-semibold text-teal-700 dark:text-teal-400">
+                <MapPin className="w-3.5 h-3.5 shrink-0" />
+                <span>{trip.destination}</span>
               </span>
-              <span className="font-mono text-slate-500 dark:text-zinc-400">
+              <span className="font-mono tabular-nums">
                 {formatDateSlash(trip.startDate)} ~ {formatDateSlash(trip.endDate)}
               </span>
             </div>
-
-            <h4 className="font-black text-lg text-slate-900 dark:text-white">
+            <h4 className="font-bold text-base text-slate-900 dark:text-white tracking-tight">
               {trip.title}
             </h4>
-
-            <div className="flex items-center gap-3 text-xs text-slate-600 dark:text-zinc-400 font-mono pt-1">
-              <span>{trip.days.length} 天日程</span>
-              <span>•</span>
-              <span>{totalSpots} 個景點安排</span>
-              <span>•</span>
-              <span>預算約 {trip.currency} {trip.budgetTotal.toLocaleString()}</span>
-            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+              {trip.days.length} 天日程 · {totalSpots} 個景點 · 預算約 {trip.currency}{' '}
+              {trip.budgetTotal.toLocaleString()}
+            </p>
           </div>
+        </IosInsetGroup>
 
-          {!shareUrl ? (
-            /* Publish Prompt Step */
-            <div className="py-3 text-center space-y-3">
-              <p className="text-xs text-slate-600 dark:text-zinc-300 flex items-center justify-center gap-1.5">
-                <Radio className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" />
-                <span>訪客取得連結後即可即時瀏覽，無需登入</span>
-              </p>
+        {shareError && (
+          <div className="px-4 py-3 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-300 text-xs font-semibold">
+            {shareError}
+          </div>
+        )}
 
-              {shareError && (
-                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-semibold text-left">
-                  {shareError}
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={handleGenerateLiveShare}
-                disabled={isPublishing}
-                className="w-full py-3 px-5 rounded-2xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
-              >
-                {isPublishing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>建立連結中...</span>
-                  </>
+        {!shareUrl ? (
+          <IosInsetGroup
+            header="即時雲端連結"
+            footer="建立後，親友取得連結即可即時瀏覽最新日程，無需登入帳號。"
+          >
+            <IosRow
+              icon={
+                isPublishing ? (
+                  <Loader2 className="w-4 h-4 text-teal-700 dark:text-teal-400 animate-spin" />
                 ) : (
-                  <>
-                    <Globe className="w-4 h-4" />
-                    <span>{currentUser ? '建立分享連結' : '登入並建立分享連結'}</span>
-                  </>
-                )}
-              </button>
-            </div>
-          ) : (
-            /* URL Ready & Share Tools */
-            <div className="space-y-4 animate-in fade-in zoom-in-95 duration-200">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 dark:text-zinc-300 flex items-center justify-between">
-                  <span>即時雲端分享連結：</span>
-                  <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
-                    <Sparkles className="w-3 h-3" />
-                    即時同步已啟用
-                  </span>
-                </label>
-
-                {/* URL Input with Copy button */}
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={shareUrl}
-                    className="flex-1 px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 text-xs font-mono outline-hidden select-all"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleCopyLink}
-                    className="px-3.5 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-xs transition active:scale-95 shrink-0 flex items-center gap-1.5 cursor-pointer"
-                  >
-                    {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copied ? '已複製！' : '複製連結'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Action Buttons Row */}
-              <div className="grid grid-cols-3 gap-2 pt-1">
+                  <Globe className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                )
+              }
+              label={
+                <span className="text-teal-700 dark:text-teal-400">
+                  {isPublishing
+                    ? '正在建立分享連結...'
+                    : currentUser
+                    ? '建立即時雲端分享連結'
+                    : '登入 Google 並建立分享連結'}
+                </span>
+              }
+              onClick={handleGenerateLiveShare}
+              disabled={isPublishing}
+              trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+            />
+          </IosInsetGroup>
+        ) : (
+          <>
+            <IosInsetGroup
+              header="即時雲端分享連結"
+              headerRight={
+                <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-1">
+                  <Radio className="w-3 h-3" />
+                  <span>同步中</span>
+                </span>
+              }
+            >
+              <div className="px-4 py-3 flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={shareUrl}
+                  className="flex-1 min-w-0 bg-transparent text-xs font-mono text-slate-700 dark:text-slate-200 outline-none select-all truncate"
+                />
                 <button
                   type="button"
-                  onClick={handleNativeShare}
-                  className="py-2.5 px-2 rounded-xl border border-slate-200 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-200 font-semibold text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer"
+                  onClick={handleCopyLink}
+                  className="min-h-[36px] px-3 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 text-white text-xs font-bold flex items-center gap-1 shrink-0 transition active:scale-95 cursor-pointer"
                 >
-                  <Send className="w-3.5 h-3.5 text-teal-600" />
-                  <span>LINE / 社群</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleCopyTextItinerary}
-                  className="py-2.5 px-2 rounded-xl border border-slate-200 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-200 font-semibold text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer"
-                >
-                  {copiedText ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <FileText className="w-3.5 h-3.5 text-teal-600" />}
-                  <span>{copiedText ? '已複製！' : '複製純文字'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowQrCode(!showQrCode)}
-                  className="py-2.5 px-2 rounded-xl border border-slate-200 dark:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-200 font-semibold text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer"
-                >
-                  <QrCode className="w-3.5 h-3.5 text-slate-600 dark:text-zinc-400" />
-                  <span>{showQrCode ? '隱藏 QR' : '掃碼 QR'}</span>
+                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copied ? '已複製' : '複製'}</span>
                 </button>
               </div>
+            </IosInsetGroup>
 
-              {/* QR Code Display Card */}
-              {showQrCode && (
-                <div className="p-4 rounded-2xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-center space-y-2 animate-in fade-in duration-150">
-                  <div className="inline-block p-2 rounded-xl bg-white shadow-xs border border-slate-100">
+            <IosInsetGroup header="分享方式">
+              <IosRow
+                icon={<Send className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                label="透過 LINE / 系統分享傳送"
+                onClick={handleNativeShare}
+                trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+              />
+              <IosRow
+                icon={
+                  copiedText ? (
+                    <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <FileText className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                  )
+                }
+                label={copiedText ? '已複製純文字行程摘要' : '複製純文字行程摘要'}
+                onClick={handleCopyTextItinerary}
+                trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+              />
+              <IosDisclosureRow
+                icon={<QrCode className="w-4 h-4 text-slate-600 dark:text-slate-300" />}
+                label="行動裝置掃碼 QR Code"
+                value={showQrCode ? '顯示中' : '展開'}
+                expanded={showQrCode}
+                onToggle={() => setShowQrCode((v) => !v)}
+              >
+                <div className="py-5 px-4 text-center space-y-2">
+                  <div className="inline-block p-2.5 rounded-2xl bg-white shadow-xs border border-[#E5E2DC]">
                     <img
                       src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(shareUrl)}`}
                       alt="Trip Share QR Code"
@@ -312,26 +276,15 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
                       loading="lazy"
                     />
                   </div>
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                    掃描 QR Code 立即開啟行程
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    請旅伴使用相機掃描立即開啟行程
                   </p>
                 </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="px-5 py-3 border-t border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/60 flex items-center justify-end">
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-h-[44px] sm:min-h-[38px] px-5 py-2 rounded-xl bg-[#EFECE5] dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-zinc-200 font-semibold text-xs transition cursor-pointer"
-          >
-            關閉
-          </button>
-        </div>
+              </IosDisclosureRow>
+            </IosInsetGroup>
+          </>
+        )}
       </div>
-    </div>
+    </IosModalSheet>
   );
 };

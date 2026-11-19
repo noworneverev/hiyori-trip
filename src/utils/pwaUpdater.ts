@@ -13,6 +13,14 @@ export const setGlobalUpdateSW = (updateFn: (reloadPage?: boolean) => Promise<vo
 };
 
 export const performAppUpdate = async (onStatusChange?: (state: UpdateState) => void): Promise<void> => {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    onStatusChange?.({ status: 'error', message: '目前為離線模式，請連線後再更新' });
+    setTimeout(() => {
+      onStatusChange?.({ status: 'idle' });
+    }, 2000);
+    return;
+  }
+
   // 1. Tactile haptic feedback for mobile/iOS users
   if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
     try {
@@ -69,7 +77,7 @@ export const performAppUpdate = async (onStatusChange?: (state: UpdateState) => 
     // Give a short visible transition (400ms) so the user experiences the press confirmation
     await new Promise((resolve) => setTimeout(resolve, 450));
 
-    // 5. Safe reload with cache buster instead of crashing iOS standalone PWA
+    // 5. Clean reload with cache-buster param handled by ignoreURLParametersMatching
     const currentUrl = new URL(window.location.href);
     currentUrl.searchParams.set('_v', Date.now().toString());
     window.location.replace(currentUrl.toString());

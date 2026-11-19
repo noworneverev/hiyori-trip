@@ -1,7 +1,5 @@
-import React, { useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { Trash2, AlertTriangle } from 'lucide-react';
+import React from 'react';
+import { IosActionSheet } from '../UI/IosPrimitives';
 
 interface DeleteConfirmModalProps {
   tripTitle: string;
@@ -16,80 +14,36 @@ export const DeleteConfirmModal: React.FC<DeleteConfirmModalProps> = ({
   onConfirm,
   onClose,
 }) => {
-  useBodyScrollLock(true);
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
-  const modal = (
-    <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 backdrop-blur-xs touch-none overscroll-none px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-sm max-h-full overflow-y-auto overscroll-contain touch-pan-y rounded-3xl bg-white dark:bg-[#111827] shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-6 text-center space-y-4 my-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center mx-auto ${
-          isLastTrip
-            ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400'
-            : 'bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400'
-        }`}>
-          {isLastTrip ? <AlertTriangle className="w-6 h-6" /> : <Trash2 className="w-6 h-6" />}
-        </div>
-
-        <div className="space-y-1.5">
-          <h3 className="font-bold text-base text-slate-900 dark:text-white">
-            {isLastTrip ? '無法刪除最後一個行程' : '確定要刪除此旅程嗎？'}
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-            {isLastTrip
-              ? '系統至少需保留一個旅遊行程。您可以選擇直接「編輯此行程」修改內容，或先建立新行程後再來刪除此行程。'
-              : `「${tripTitle}」將從本機與雲端同步刪除，包含所有排程與記帳記錄，此操作無法復原。`}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 pt-2">
-          {isLastTrip ? (
-            <button
-              type="button"
-              onClick={onClose}
-              className="w-full min-h-[44px] py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 text-white font-bold text-xs transition active:scale-95 cursor-pointer"
-            >
-              我知道了
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={onClose}
-                className="w-full min-h-[44px] py-2.5 px-4 rounded-xl border border-[#E5E2DC] dark:border-slate-700 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-semibold text-xs transition active:scale-95 cursor-pointer"
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onConfirm();
-                  onClose();
-                }}
-                className="w-full min-h-[44px] py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition active:scale-95 cursor-pointer"
-              >
-                確認刪除
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  if (typeof document !== 'undefined') {
-    return createPortal(modal, document.body);
+  if (isLastTrip) {
+    return (
+      <IosActionSheet
+        title="無法刪除最後一個行程"
+        message="系統至少需保留一個旅遊行程。您可以直接「編輯此行程」修改內容，或先建立新行程後再刪除此行程。"
+        options={[]}
+        cancelLabel="我知道了"
+        onClose={onClose}
+        zIndexClass="z-[90]"
+      />
+    );
   }
-  return modal;
+
+  return (
+    <IosActionSheet
+      title={`刪除「${tripTitle}」？`}
+      message="此旅程將從本機與雲端同步刪除，包含所有排程、照片索引與記帳紀錄，且無法復原。"
+      options={[
+        {
+          label: '確認刪除旅程',
+          tone: 'destructive',
+          onClick: () => {
+            onConfirm();
+            onClose();
+          },
+        },
+      ]}
+      cancelLabel="取消"
+      onClose={onClose}
+      zIndexClass="z-[90]"
+    />
+  );
 };

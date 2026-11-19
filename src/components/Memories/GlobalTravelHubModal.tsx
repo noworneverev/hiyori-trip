@@ -8,6 +8,15 @@ import { checkUserTripPermission } from '../../utils/firebase';
 import { detectTripCurrency } from '../../utils/currency';
 import { MediaImage } from '../UI/MediaImage';
 import {
+  IosModalSheet,
+  IosNavBar,
+  IosInsetGroup,
+  IosDisclosureRow,
+  IosCheckmarkRow,
+  IosToggleRow,
+  IosRow,
+} from '../UI/IosPrimitives';
+import {
   CATEGORY_NAMES,
   FlattenedSpotMemory,
   GalleryPhotoItem,
@@ -74,6 +83,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   const [selectedDestination, setSelectedDestination] = useState<string>('all');
   const [filterCompletedOnly, setFilterCompletedOnly] = useState<boolean>(true);
   const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const [expandedFilterSection, setExpandedFilterSection] = useState<'trip' | 'dest' | 'year' | 'cat' | null>(null);
 
   // Deduplicate trips cleanly
   const uniqueTrips = useMemo(() => {
@@ -741,167 +751,197 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     setLightboxState({ photos: items, index: startIndex, autoPlay: false });
   };
 
+  const toggleFilterSection = (sec: 'trip' | 'dest' | 'year' | 'cat') => {
+    setExpandedFilterSection((prev) => (prev === sec ? null : sec));
+  };
+
+  const selectedTripTitle = useMemo(() => {
+    if (selectedTripFilter === 'all') return `全部旅程 (${uniqueTrips.length})`;
+    return uniqueTrips.find((t) => t.id === selectedTripFilter)?.title || '已選旅程';
+  }, [selectedTripFilter, uniqueTrips]);
+
   const renderFilterControls = () => (
     <div className="space-y-4">
-      {/* Search */}
-      <div className="relative">
-        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="搜尋景點、城市、美食、筆記..."
-          className="w-full min-h-[42px] pl-9 pr-8 py-2 text-xs rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 outline-none focus:border-teal-500 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
-        />
-        {searchQuery && (
-          <button
-            type="button"
-            onClick={() => setSearchQuery('')}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer p-1"
-            aria-label="清除搜尋"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        )}
-      </div>
-
-      {/* Visited vs All */}
-      <div className="space-y-1.5">
-        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">足跡範圍</span>
-        <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold">
-          <button
-            type="button"
-            onClick={() => setFilterCompletedOnly(true)}
-            className={`min-h-[38px] rounded-lg transition cursor-pointer flex items-center justify-center gap-1 ${
-              filterCompletedOnly
-                ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 shadow-2xs'
-                : 'text-slate-500 dark:text-slate-400'
-            }`}
-          >
-            <Check className="w-3.5 h-3.5" />
-            <span>已造訪</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilterCompletedOnly(false)}
-            className={`min-h-[38px] rounded-lg transition cursor-pointer ${
-              !filterCompletedOnly
-                ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs'
-                : 'text-slate-500 dark:text-slate-400'
-            }`}
-          >
-            全部行程
-          </button>
-        </div>
-      </div>
-
-      {/* Trip Selector */}
-      {uniqueTrips.length > 1 && (
-        <div className="space-y-1.5">
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400">
-            指定旅程
-          </label>
-          <select
-            value={selectedTripFilter}
-            onChange={(e) => setSelectedTripFilter(e.target.value)}
-            className="w-full min-h-[40px] px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 outline-none cursor-pointer"
-          >
-            <option value="all">全部旅程 ({uniqueTrips.length})</option>
-            {uniqueTrips.map((tr) => (
-              <option key={tr.id} value={tr.id}>
-                {tr.title}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* Destination Filter */}
-      {availableDestinations.length > 1 && (
-        <div className="space-y-1.5">
-          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400">
-            目的地城市
-          </label>
-          <select
-            value={selectedDestination}
-            onChange={(e) => setSelectedDestination(e.target.value)}
-            className="w-full min-h-[40px] px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 outline-none cursor-pointer"
-          >
-            <option value="all">全部城市 ({availableDestinations.length})</option>
-            {availableDestinations.map((dest) => (
-              <option key={dest} value={dest}>
-                {dest}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* Year Filter */}
-      <div className="space-y-1.5">
-        <span className="block text-[11px] font-bold text-slate-500 dark:text-slate-400">
-          年份
-        </span>
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            onClick={() => setSelectedYear('all')}
-            className={`min-h-[36px] px-3 py-1 rounded-xl text-xs font-semibold cursor-pointer transition ${
-              selectedYear === 'all'
-                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-            }`}
-          >
-            全部
-          </button>
-          {availableYears.map((yr) => (
+      {/* Search Box */}
+      <IosInsetGroup divided={false}>
+        <div className="relative flex items-center min-h-[46px] px-3.5">
+          <Search className="w-4 h-4 text-slate-400 shrink-0 mr-2.5" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="搜尋景點、城市、美食、筆記..."
+            className="w-full py-2 text-[16px] sm:text-xs bg-transparent outline-none text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
+          />
+          {searchQuery && (
             <button
-              key={yr}
               type="button"
-              onClick={() => {
-                setSelectedYear(yr);
-                const yNum = parseInt(yr, 10);
-                if (!isNaN(yNum)) setCalendarYear(yNum);
-              }}
-              className={`min-h-[36px] px-3 py-1 rounded-xl text-xs font-semibold font-mono tabular-nums cursor-pointer transition ${
-                selectedYear === yr
-                  ? 'bg-teal-600 text-white'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
-              }`}
+              onClick={() => setSearchQuery('')}
+              className="min-w-[36px] min-h-[36px] -mr-1.5 flex items-center justify-center text-slate-400 hover:text-slate-600 cursor-pointer"
+              aria-label="清除搜尋"
             >
-              {yr}
+              <X className="w-4 h-4" />
             </button>
-          ))}
+          )}
         </div>
-      </div>
+      </IosInsetGroup>
 
-      {/* Category Filter */}
-      <div className="space-y-1.5">
-        <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400">
-          足跡類別
-        </label>
-        <select
-          value={selectedCategory}
-          onChange={(e) => setSelectedCategory(e.target.value)}
-          className="w-full min-h-[40px] px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 outline-none cursor-pointer"
+      {/* Visited Only Switch */}
+      <IosInsetGroup header="足跡範圍">
+        <IosToggleRow
+          label="僅顯示已造訪足跡"
+          subtitle={filterCompletedOnly ? '已過濾未造訪行程' : '顯示全部行程與回憶'}
+          checked={filterCompletedOnly}
+          onChange={setFilterCompletedOnly}
+        />
+      </IosInsetGroup>
+
+      {/* Inline Disclosure Filters */}
+      <IosInsetGroup header="條件篩選">
+        {uniqueTrips.length > 1 && (
+          <IosDisclosureRow
+            label="指定旅程"
+            value={selectedTripTitle}
+            valueAccent={selectedTripFilter !== 'all'}
+            expanded={expandedFilterSection === 'trip'}
+            onToggle={() => toggleFilterSection('trip')}
+          >
+            <div className="divide-y divide-[#E5E2DC]/60 dark:divide-slate-800/70 max-h-56 overflow-y-auto">
+              <IosCheckmarkRow
+                label={`全部旅程 (${uniqueTrips.length})`}
+                selected={selectedTripFilter === 'all'}
+                onSelect={() => {
+                  setSelectedTripFilter('all');
+                  setExpandedFilterSection(null);
+                }}
+              />
+              {uniqueTrips.map((tr) => (
+                <IosCheckmarkRow
+                  key={tr.id}
+                  label={tr.title}
+                  subtitle={tr.destination}
+                  selected={selectedTripFilter === tr.id}
+                  onSelect={() => {
+                    setSelectedTripFilter(tr.id);
+                    setExpandedFilterSection(null);
+                  }}
+                />
+              ))}
+            </div>
+          </IosDisclosureRow>
+        )}
+
+        {availableDestinations.length > 1 && (
+          <IosDisclosureRow
+            label="目的地城市"
+            value={
+              selectedDestination === 'all'
+                ? `全部 (${availableDestinations.length})`
+                : selectedDestination
+            }
+            valueAccent={selectedDestination !== 'all'}
+            expanded={expandedFilterSection === 'dest'}
+            onToggle={() => toggleFilterSection('dest')}
+          >
+            <div className="divide-y divide-[#E5E2DC]/60 dark:divide-slate-800/70 max-h-56 overflow-y-auto">
+              <IosCheckmarkRow
+                label={`全部城市 (${availableDestinations.length})`}
+                selected={selectedDestination === 'all'}
+                onSelect={() => {
+                  setSelectedDestination('all');
+                  setExpandedFilterSection(null);
+                }}
+              />
+              {availableDestinations.map((dest) => (
+                <IosCheckmarkRow
+                  key={dest}
+                  label={dest}
+                  selected={selectedDestination === dest}
+                  onSelect={() => {
+                    setSelectedDestination(dest);
+                    setExpandedFilterSection(null);
+                  }}
+                />
+              ))}
+            </div>
+          </IosDisclosureRow>
+        )}
+
+        <IosDisclosureRow
+          label="年份"
+          value={selectedYear === 'all' ? '全部年份' : `${selectedYear} 年`}
+          valueAccent={selectedYear !== 'all'}
+          expanded={expandedFilterSection === 'year'}
+          onToggle={() => toggleFilterSection('year')}
         >
-          <option value="all">所有類別</option>
-          {Object.entries(CATEGORY_NAMES).map(([k, label]) => (
-            <option key={k} value={k}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </div>
+          <div className="divide-y divide-[#E5E2DC]/60 dark:divide-slate-800/70 max-h-56 overflow-y-auto">
+            <IosCheckmarkRow
+              label="全部年份"
+              selected={selectedYear === 'all'}
+              onSelect={() => {
+                setSelectedYear('all');
+                setExpandedFilterSection(null);
+              }}
+            />
+            {availableYears.map((yr) => (
+              <IosCheckmarkRow
+                key={yr}
+                label={`${yr} 年`}
+                selected={selectedYear === yr}
+                onSelect={() => {
+                  setSelectedYear(yr);
+                  const yNum = parseInt(yr, 10);
+                  if (!isNaN(yNum)) setCalendarYear(yNum);
+                  setExpandedFilterSection(null);
+                }}
+              />
+            ))}
+          </div>
+        </IosDisclosureRow>
+
+        <IosDisclosureRow
+          label="足跡類別"
+          value={
+            selectedCategory === 'all'
+              ? '所有類別'
+              : (CATEGORY_NAMES as Record<string, string>)[selectedCategory] || selectedCategory
+          }
+          valueAccent={selectedCategory !== 'all'}
+          expanded={expandedFilterSection === 'cat'}
+          onToggle={() => toggleFilterSection('cat')}
+        >
+          <div className="divide-y divide-[#E5E2DC]/60 dark:divide-slate-800/70 max-h-56 overflow-y-auto">
+            <IosCheckmarkRow
+              label="所有類別"
+              selected={selectedCategory === 'all'}
+              onSelect={() => {
+                setSelectedCategory('all');
+                setExpandedFilterSection(null);
+              }}
+            />
+            {Object.entries(CATEGORY_NAMES).map(([k, label]) => (
+              <IosCheckmarkRow
+                key={k}
+                label={label}
+                selected={selectedCategory === k}
+                onSelect={() => {
+                  setSelectedCategory(k);
+                  setExpandedFilterSection(null);
+                }}
+              />
+            ))}
+          </div>
+        </IosDisclosureRow>
+      </IosInsetGroup>
 
       {activeFilterCount > 0 && (
-        <button
-          type="button"
-          onClick={handleResetFilters}
-          className="w-full min-h-[40px] px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:border-teal-500 transition cursor-pointer"
-        >
-          清除篩選條件 ({activeFilterCount})
-        </button>
+        <IosInsetGroup divided={false}>
+          <IosRow
+            label={`清除篩選條件 (${activeFilterCount})`}
+            destructive
+            onClick={handleResetFilters}
+          />
+        </IosInsetGroup>
       )}
     </div>
   );
@@ -1021,20 +1061,20 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
         {/* Desktop Workbench Body (Left Filter Rail + Main Stage) */}
         <div className="flex-1 min-h-0 flex overflow-hidden">
           {viewMode !== 'review' && (
-            <aside className="hidden lg:flex flex-col w-[276px] shrink-0 border-r border-slate-200/80 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/30 p-5 overflow-y-auto justify-between gap-6">
+            <aside className="hidden lg:flex flex-col w-[288px] shrink-0 border-r border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-[#0B1120] p-4 overflow-y-auto justify-between gap-6">
               {renderFilterControls()}
 
               {/* Compact Summary Ledger */}
-              <div className="pt-4 border-t border-slate-200/80 dark:border-slate-800 space-y-2.5">
+              <div className="pt-4 border-t border-[#E5E2DC] dark:border-slate-800 space-y-2.5">
                 <div className="text-[11px] font-bold text-slate-400">目前篩選結果</div>
                 <div className="grid grid-cols-2 gap-2 font-mono tabular-nums text-xs">
-                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800">
                     <div className="text-[10px] font-sans text-slate-400">足跡行程點</div>
                     <div className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
                       {filteredSpots.length}
                     </div>
                   </div>
-                  <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800">
+                  <div className="p-2.5 rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800">
                     <div className="text-[10px] font-sans text-slate-400">收錄相片</div>
                     <div className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
                       {filteredGalleryPhotos.length}
@@ -1046,7 +1086,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
           )}
 
           {/* Main Scrollable Stage */}
-          <main className="flex-1 min-w-0 overflow-y-auto p-4 sm:p-6 lg:p-7 bg-slate-50/40 dark:bg-slate-950/40">
+          <main className="flex-1 min-w-0 overflow-y-auto p-4 sm:p-6 lg:p-7 bg-[#FAF9F6]/60 dark:bg-slate-950/40">
             <div className="max-w-5xl mx-auto">
               {viewMode === 'map' && (
                 <TravelHubMapView
@@ -1546,46 +1586,26 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
         </footer>
       </div>
 
-      {/* Mobile Slide-Up Bottom Filter Sheet */}
+      {/* Mobile Slide-Up Bottom Filter Sheet (iOS HIG) */}
       {showMobileFilters && (
-        <div
-          className="lg:hidden fixed inset-0 z-60 flex items-end justify-center pt-[max(0.75rem,env(safe-area-inset-top,0px))] bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-150"
-          onClick={() => setShowMobileFilters(false)}
+        <IosModalSheet
+          onClose={() => setShowMobileFilters(false)}
+          variant="grouped"
+          zIndexClass="z-[75]"
+          ariaLabel="篩選足跡條件"
         >
-          <div
-            className="w-full max-h-full rounded-t-3xl bg-white dark:bg-[#111827] border-t border-[#E5E2DC] dark:border-slate-800 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-200"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="pt-3 pb-1 flex flex-col items-center shrink-0">
-              <div className="w-10 h-1.5 rounded-full bg-slate-300 dark:bg-slate-700 mb-2" />
-              <div className="w-full px-5 pb-2 flex items-center justify-between border-b border-[#E5E2DC]/80 dark:border-slate-800">
-                <h3 className="font-bold text-sm text-slate-900 dark:text-white">
-                  篩選與搜尋條件
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setShowMobileFilters(false)}
-                  className="min-w-[44px] min-h-[44px] sm:min-w-[40px] sm:min-h-[40px] rounded-xl text-slate-400 flex items-center justify-center cursor-pointer"
-                  aria-label="關閉篩選條件"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-5">{renderFilterControls()}</div>
-
-            <div className="p-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] border-t border-[#E5E2DC]/80 dark:border-slate-800 bg-white dark:bg-[#111827] shrink-0">
-              <button
-                type="button"
-                onClick={() => setShowMobileFilters(false)}
-                className="w-full min-h-[48px] rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold cursor-pointer"
-              >
-                顯示 {filteredSpots.length} 處足跡
-              </button>
-            </div>
+          <IosNavBar
+            title="篩選足跡"
+            subtitle={`${filteredSpots.length} 處符合條件`}
+            leftLabel={activeFilterCount > 0 ? '重設' : undefined}
+            onLeftClick={activeFilterCount > 0 ? handleResetFilters : undefined}
+            rightLabel="完成"
+            onRightClick={() => setShowMobileFilters(false)}
+          />
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+            {renderFilterControls()}
           </div>
-        </div>
+        </IosModalSheet>
       )}
 
       {/* Editorial PNG Share Card Studio */}

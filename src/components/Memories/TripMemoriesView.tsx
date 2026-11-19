@@ -30,6 +30,14 @@ import {
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { MediaImage } from '../UI/MediaImage';
 import {
+  IosActionSheet,
+  IosCheckmarkRow,
+  IosDisclosureRow,
+  IosInsetGroup,
+  IosModalSheet,
+  IosNavBar,
+} from '../UI/IosPrimitives';
+import {
   Camera,
   Upload,
   Printer,
@@ -278,28 +286,21 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     );
   };
 
-  // Lock background scroll when modal, lightbox, or delete dialog is open
-  useBodyScrollLock(showUploadModal || Boolean(lightboxMemory) || Boolean(pendingDriveDeleteMem));
+  // Lock background scroll when lightbox is open (upload modal & delete sheet use IosPrimitives scroll lock)
+  useBodyScrollLock(Boolean(lightboxMemory));
 
-  // Escape key handler for Dialogs, Lightbox, and Upload Modal
+  // Escape key handler for Lightbox
   useEffect(() => {
-    if (!showUploadModal && !lightboxMemory && !pendingDriveDeleteMem) return;
+    if (!lightboxMemory) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (pendingDriveDeleteMem && !isDeletingDriveFile) {
-          setPendingDriveDeleteMem(null);
-          setDriveDeleteError(null);
-        } else if (lightboxMemory) {
-          setLightboxMemory(null);
-          setConfirmDeleteMemId(null);
-        } else if (showUploadModal) {
-          closeUploadModalAndCleanup();
-        }
+        setLightboxMemory(null);
+        setConfirmDeleteMemId(null);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showUploadModal, lightboxMemory, pendingDriveDeleteMem, isDeletingDriveFile]);
+  }, [lightboxMemory]);
 
   // Form State for uploading new memory photo
   const [uploadSpotId, setUploadSpotId] = useState<string>(initialSpotId || '');
@@ -314,6 +315,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const [uploadBatchProgress, setUploadBatchProgress] = useState<{ done: number; total: number } | null>(null);
   const [uploadLimitWarning, setUploadLimitWarning] = useState<string | null>(null);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [activeUploadPicker, setActiveUploadPicker] = useState<'none' | 'spot' | 'day' | 'mood'>('none');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const closeUploadModalAndCleanup = (skipMediaDelete = false) => {
@@ -337,6 +339,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     setIsCustomSpot(false);
     setCustomLocationName('');
     setConfirmDeleteSpotPhoto(null);
+    setActiveUploadPicker('none');
     setShowUploadModal(false);
   };
 
@@ -1326,7 +1329,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               <button
                 type="button"
                 onClick={onOpenGlobalHub}
-                className="min-h-[40px] px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/80 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 text-xs font-semibold flex items-center gap-1.5 transition shadow-2xs active:scale-95 cursor-pointer"
+                className="min-h-[44px] sm:min-h-[40px] px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/80 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 text-xs font-semibold flex items-center gap-1.5 transition shadow-2xs active:scale-95 cursor-pointer"
                 title="探索跨旅程回憶與月曆足跡"
               >
                 <Compass className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
@@ -1339,7 +1342,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 href={sanitizeExternalUrl(trip.googlePhotosAlbumUrl)}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="min-h-[40px] px-3 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition active:scale-95"
+                className="min-h-[44px] sm:min-h-[40px] px-3 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition active:scale-95"
                 title={lang === 'zh' ? '開啟此行程之 Google 相簿完整相簿（原始高畫質）' : 'Open Google Photos full album'}
               >
                 <ExternalLink className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
@@ -1351,7 +1354,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               <button
                 type="button"
                 onClick={handlePrintPolaroids}
-                className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
+                className="min-h-[44px] sm:min-h-[40px] px-3.5 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
                 title="以 A4 或相片紙沖印拍立得卡片"
               >
                 <Printer className="w-3.5 h-3.5" />
@@ -1363,7 +1366,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               <button
                 type="button"
                 onClick={() => handleTriggerUpload('', true)}
-                className="min-h-[40px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
+                className="min-h-[44px] sm:min-h-[40px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span className="whitespace-nowrap">{lang === 'zh' ? '上傳相片' : 'Add Photo'}</span>
@@ -1408,7 +1411,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           <button
             type="button"
             onClick={() => setViewMode('itinerary')}
-            className={`min-h-[38px] py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
+            className={`min-h-[44px] sm:min-h-[38px] py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
               viewMode === 'itinerary'
                 ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
                 : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
@@ -1427,7 +1430,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           <button
             type="button"
             onClick={() => setViewMode('gallery')}
-            className={`min-h-[38px] py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
+            className={`min-h-[44px] sm:min-h-[38px] py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
               viewMode === 'gallery'
                 ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
                 : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
@@ -1440,7 +1443,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           <button
             type="button"
             onClick={() => setViewMode('polaroid')}
-            className={`min-h-[38px] py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
+            className={`min-h-[44px] sm:min-h-[38px] py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
               viewMode === 'polaroid'
                 ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
                 : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
@@ -1457,7 +1460,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           <button
             type="button"
             onClick={() => setSelectedDayFilter('all')}
-            className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
+            className={`min-h-[44px] sm:min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
               selectedDayFilter === 'all'
                 ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
                 : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100'
@@ -1469,7 +1472,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             <button
               type="button"
               onClick={() => setSelectedDayFilter('custom')}
-              className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
+              className={`min-h-[44px] sm:min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
                 selectedDayFilter === 'custom'
                   ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
                   : 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200/70 dark:border-teal-800/60 hover:bg-teal-100'
@@ -1485,7 +1488,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 key={day.dayNumber}
                 type="button"
                 onClick={() => setSelectedDayFilter(day.dayNumber)}
-                className={`min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
+                className={`min-h-[44px] sm:min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
                   selectedDayFilter === day.dayNumber
                     ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
                     : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100'
@@ -1692,11 +1695,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             return (
               <div key={day.dayNumber} className="space-y-3">
                 {/* Day Header */}
-                <div className="flex items-center justify-between pb-1.5 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between pb-1.5 border-b border-[#E5E2DC] dark:border-slate-800">
                   <div className="flex items-center gap-2">
-                    <span className="px-2.5 py-1 rounded-xl bg-teal-600 text-white font-bold text-xs shadow-2xs">
+                    <span className="font-mono tabular-nums font-bold text-xs text-teal-700 dark:text-teal-400">
                       Day {day.dayNumber}
                     </span>
+                    <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">·</span>
                     <span className="font-bold text-sm text-slate-800 dark:text-slate-100">
                       {formatDateSlash(day.date)} ({getDayOfWeek(day.date, lang)})
                     </span>
@@ -1711,7 +1715,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                         setCustomDate(day.date);
                         setShowUploadModal(true);
                       }}
-                      className="text-xs font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 flex items-center gap-1"
+                      className="min-h-[44px] sm:min-h-[36px] px-2 text-xs font-semibold text-teal-700 dark:text-teal-400 hover:text-teal-800 flex items-center gap-1 cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>新增 Day {day.dayNumber} 自由隨拍</span>
@@ -1884,10 +1888,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     onClick={(e) => e.stopPropagation()}
-                                    className="text-teal-600 dark:text-teal-400 hover:text-teal-700 font-bold hover:underline flex items-center gap-1 text-[10px] bg-teal-50 dark:bg-teal-950/60 px-2 py-0.5 rounded-md border border-teal-200/50 dark:border-teal-800/50"
+                                    className="text-teal-700 dark:text-teal-400 hover:text-teal-800 font-bold hover:underline flex items-center gap-1 text-[11px]"
                                     title="開啟 Google 相簿原圖"
                                   >
-                                    <ExternalLink className="w-2.5 h-2.5" />
+                                    <ExternalLink className="w-3 h-3" />
                                     <span>原圖</span>
                                   </a>
                                 )}
@@ -2172,20 +2176,6 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   loading="lazy"
                 />
 
-                {/* Day Badge & Mood Overlay */}
-                <div className="absolute top-3 left-3 flex items-center gap-1.5">
-                  {mem.dayNumber && (
-                    <span className="px-2.5 py-1 rounded-xl bg-slate-900/80 backdrop-blur-md text-white font-bold text-[11px] shadow-sm">
-                      Day {mem.dayNumber}
-                    </span>
-                  )}
-                  {mem.mood && (
-                    <span className="w-7 h-7 rounded-xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-md flex items-center justify-center text-sm shadow-sm">
-                      {mem.mood}
-                    </span>
-                  )}
-                </div>
-
                 {/* Sync Status Badge (Click to force sync) */}
                 <div className="absolute top-3 right-3 z-10">
                   {renderSyncBadge(mem)}
@@ -2201,15 +2191,19 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-bold text-teal-700 dark:text-teal-400 flex items-center gap-1 truncate">
+                    <span className="text-xs font-bold text-teal-700 dark:text-teal-400 flex items-center gap-1 truncate min-w-0">
                       <MapPin className="w-3.5 h-3.5 shrink-0" />
                       <span className="truncate">{mem.location || mem.spotTitle || trip.destination}</span>
                     </span>
-                    {mem.date && (
-                      <span className="text-[10px] text-slate-400 font-mono shrink-0">
-                        {formatMonthDaySlash(mem.date)}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono tabular-nums shrink-0">
+                      {mem.mood && <span className="text-xs">{mem.mood}</span>}
+                      {mem.dayNumber && (
+                        <span className="font-bold text-slate-600 dark:text-slate-300">
+                          D{mem.dayNumber}
+                        </span>
+                      )}
+                      {mem.date && <span>{formatMonthDaySlash(mem.date)}</span>}
+                    </div>
                   </div>
 
                   <p className="text-xs text-slate-700 dark:text-slate-300 font-medium leading-relaxed italic py-0.5">
@@ -2372,74 +2366,91 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         </div>
       )}
 
-      {/* ================= 3. UPLOAD MEMORY PHOTO MODAL ================= */}
+      {/* ================= 3. UPLOAD MEMORY PHOTO MODAL (iOS Grouped Form Sheet) ================= */}
       {showUploadModal && canShowUploadAction && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center px-3 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] bg-black/75 backdrop-blur-xs animate-in fade-in duration-150"
-          onClick={() => closeUploadModalAndCleanup()}
+        <IosModalSheet
+          variant="grouped"
+          fullHeightOnMobile
+          maxWidthClass="sm:max-w-lg"
+          zIndexClass="z-[70]"
+          disableBackdropClose={isSavingMemory || isProcessingImage}
+          onClose={() => {
+            if (!isSavingMemory && !isProcessingImage) {
+              closeUploadModalAndCleanup();
+            }
+          }}
+          ariaLabel={lang === 'zh' ? '新增回憶照片' : 'Add Memory Photo'}
         >
-          <div
-            className="w-full max-w-lg bg-white dark:bg-[#111827] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 overflow-hidden flex flex-col max-h-full sm:max-h-[92dvh] animate-in zoom-in-95 duration-150"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="px-5 py-4 border-b border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between shrink-0 bg-[#FAF9F6] dark:bg-slate-900/60">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center">
-                  <Camera className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
-                    {lang === 'zh' ? '新增回憶照片' : 'Add Memory Photo'}
-                  </h3>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {lang === 'zh' ? '關聯行程景點與心得隨筆' : 'Link to itinerary spot & add notes'}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => closeUploadModalAndCleanup()}
-                className="w-11 h-11 sm:w-10 sm:h-10 flex items-center justify-center rounded-full text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+          <IosNavBar
+            title={lang === 'zh' ? '新增回憶照片' : 'Add Memory Photo'}
+            subtitle={lang === 'zh' ? '關聯行程景點與心得隨筆' : 'Link spot & notes'}
+            leftLabel="取消"
+            leftDisabled={isSavingMemory}
+            onLeftClick={() => {
+              if (!isSavingMemory) closeUploadModalAndCleanup();
+            }}
+            rightLabel={
+              isSavingMemory
+                ? driveUploadProgress
+                  ? `Drive ${driveUploadProgress.done}/${driveUploadProgress.total}`
+                  : '儲存中...'
+                : uploadImagePreviews.length > 0
+                ? '儲存相片'
+                : '儲存連結'
+            }
+            rightType="submit"
+            rightFormId="memory-upload-form"
+            rightLoading={isSavingMemory}
+            rightDisabled={
+              (uploadImagePreviews.length === 0 &&
+                !sanitizeExternalUrl(uploadGooglePhotosUrl) &&
+                !uploadCaption.trim()) ||
+              isProcessingImage ||
+              isSavingMemory
+            }
+          />
 
-            {/* Modal Form Body */}
-            <form onSubmit={handleSaveMemory} className="p-5 space-y-4 overflow-y-auto text-xs">
-              {/* Cloud Connection & Auth Status Banner */}
+          <form
+            id="memory-upload-form"
+            onSubmit={handleSaveMemory}
+            className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 space-y-5 text-xs pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]"
+          >
+            {/* Cloud & Drive Status Group */}
+            <IosInsetGroup header="雲端備份與原圖">
               {!currentUser ? (
-                <div className="px-3.5 py-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800 text-[11px] text-slate-700 dark:text-slate-300 flex items-center justify-between gap-2">
-                  <span className="font-semibold flex items-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
-                    <span>本機模式 · 登入以啟用雲端備份</span>
+                <div className="min-h-[48px] px-4 py-2.5 flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-2 min-w-0">
+                    <AlertTriangle className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
+                    <span className="truncate">本機模式 · 登入以啟用雲端備份</span>
                   </span>
                   <button
                     type="button"
                     onClick={loginWithGoogle}
-                    className="min-h-[32px] px-3 py-1 rounded-lg bg-teal-700 hover:bg-teal-800 text-white font-bold text-[11px] shrink-0 transition cursor-pointer active:scale-95"
+                    className="min-h-[36px] px-3 py-1 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs shrink-0 transition cursor-pointer active:scale-95"
                   >
                     登入 Google
                   </button>
                 </div>
               ) : (
-                <div className="px-3 py-2 rounded-xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/60 dark:border-teal-800/60 text-[11px] text-teal-800 dark:text-teal-300 font-semibold flex items-center justify-between gap-2">
-                  <span className="flex items-center gap-1.5 truncate">
-                    <Cloud className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+                <div className="min-h-[48px] px-4 py-2.5 flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-teal-700 dark:text-teal-300 flex items-center gap-2 truncate">
+                    <Cloud className="w-4 h-4 shrink-0" />
                     <span className="truncate">已連線雲端同步 ({currentUser.email || '已登入'})</span>
                   </span>
                 </div>
               )}
 
-              {/* Google Drive Original Resolution Storage Status */}
-              <div className="flex items-center justify-between gap-2 px-1 text-[11px]">
-                <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 min-w-0">
-                  <HardDrive className={`w-3.5 h-3.5 shrink-0 ${driveConnected ? 'text-teal-700 dark:text-teal-400' : 'text-slate-400'}`} />
-                  <span className="truncate">
+              <div className="min-h-[48px] px-4 py-2.5 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300 min-w-0">
+                  <HardDrive
+                    className={`w-4 h-4 shrink-0 ${
+                      driveConnected ? 'text-teal-700 dark:text-teal-400' : 'text-slate-400'
+                    }`}
+                  />
+                  <span className="text-xs truncate">
                     {driveConnected
-                      ? 'Drive 原圖已連線 · 上傳將保留未壓縮原始畫質'
-                      : '授權 Google Drive 可免費儲存 400GB 空間原始畫質照片'}
+                      ? 'Drive 原圖已連線 · 保留未壓縮原始畫質'
+                      : '授權 Google Drive 可保留未壓縮原圖'}
                   </span>
                 </div>
                 {!driveConnected && (
@@ -2453,85 +2464,25 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                         const ok = Boolean(token) || hasDriveAccessToken();
                         setDriveConnected(ok);
                         if (!ok) {
-                          setUploadLimitWarning('Google Drive 授權未完成或被瀏覽器阻擋，若跳過授權仍可先以 1440px 高清縮圖儲存在本機與雲端。');
+                          setUploadLimitWarning(
+                            'Google Drive 授權未完成或被瀏覽器阻擋，若跳過授權仍可先以 1440px 高清縮圖儲存在本機與雲端。'
+                          );
                         }
                       } finally {
                         setIsConnectingDrive(false);
                       }
                     }}
-                    className="text-teal-700 dark:text-teal-400 font-bold hover:underline shrink-0 cursor-pointer disabled:opacity-50"
+                    className="min-h-[36px] px-2 text-xs font-bold text-teal-700 dark:text-teal-400 hover:underline shrink-0 cursor-pointer disabled:opacity-50"
                   >
-                    {isConnectingDrive ? '授權中...' : '連線 Drive 原圖'}
+                    {isConnectingDrive ? '授權中...' : '連線 Drive'}
                   </button>
                 )}
               </div>
+            </IosInsetGroup>
 
-              {/* Photo Upload Area */}
-              <div>
-                {/* Existing Spot Photos Management (if spot already has photos) */}
-                {!isCustomSpot && uploadSpotId && (() => {
-                  const currentSpot = allSpots.find((s) => s.spot.id === uploadSpotId)?.spot;
-                  const existingPhotos = currentSpot?.memoryPhotos || [];
-                  if (existingPhotos.length === 0) return null;
-                  return (
-                    <div className="mb-3 p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 space-y-2">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="font-bold text-slate-700 dark:text-slate-300">
-                          已儲存照片 ({existingPhotos.length})
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-3 gap-2">
-                        {existingPhotos.map((photoUrl, pIdx) => {
-                          const isConfirming =
-                            confirmDeleteSpotPhoto?.spotId === uploadSpotId &&
-                            confirmDeleteSpotPhoto?.photoUrl === photoUrl;
-                          return (
-                            <div key={pIdx} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 group">
-                              <MediaImage tripId={trip.id} ownerId={trip.ownerId} collabId={trip.collabId} src={photoUrl} alt="" className="w-full h-full object-cover" />
-                              {isConfirming ? (
-                                <div className="absolute inset-0 bg-slate-900/85 flex flex-col items-center justify-center gap-1.5 p-1.5 z-20">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteExistingSpotPhoto(uploadSpotId, photoUrl)}
-                                    className="w-full py-1 rounded-lg bg-rose-600 text-white font-bold text-[10px] cursor-pointer"
-                                  >
-                                    確認移除
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setConfirmDeleteSpotPhoto(null)}
-                                    className="w-full py-1 rounded-lg bg-slate-700 text-slate-200 text-[10px] cursor-pointer"
-                                  >
-                                    取消
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteSpotPhoto({ spotId: uploadSpotId, photoUrl })}
-                                  className="absolute top-1 right-1 w-8 h-8 rounded-lg bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center transition z-10 cursor-pointer"
-                                  title="移除此照片"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5 text-rose-300 hover:text-white" />
-                                </button>
-                              )}
-                              <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-md bg-black/70 text-[9px] text-white font-mono">
-                                #{pIdx + 1}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="font-bold text-slate-700 dark:text-slate-300">
-                    選擇欲上傳的照片
-                  </label>
-                </div>
-
+            {/* Photos Picker & Previews Group */}
+            <IosInsetGroup header="選擇欲上傳的照片">
+              <div className="p-3.5 space-y-3">
                 <input
                   type="file"
                   accept="image/*"
@@ -2541,9 +2492,79 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   className="hidden"
                 />
 
+                {/* Existing Spot Photos Management */}
+                {!isCustomSpot &&
+                  uploadSpotId &&
+                  (() => {
+                    const currentSpot = allSpots.find((s) => s.spot.id === uploadSpotId)?.spot;
+                    const existingPhotos = currentSpot?.memoryPhotos || [];
+                    if (existingPhotos.length === 0) return null;
+                    return (
+                      <div className="p-3 rounded-xl bg-[#FAF9F6] dark:bg-slate-800/60 border border-[#E5E2DC] dark:border-slate-700/80 space-y-2">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-bold text-slate-700 dark:text-slate-300">
+                            已儲存照片 ({existingPhotos.length})
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          {existingPhotos.map((photoUrl, pIdx) => {
+                            const isConfirming =
+                              confirmDeleteSpotPhoto?.spotId === uploadSpotId &&
+                              confirmDeleteSpotPhoto?.photoUrl === photoUrl;
+                            return (
+                              <div
+                                key={pIdx}
+                                className="relative aspect-square rounded-xl overflow-hidden border border-[#E5E2DC] dark:border-slate-700 group"
+                              >
+                                <MediaImage
+                                  tripId={trip.id}
+                                  ownerId={trip.ownerId}
+                                  collabId={trip.collabId}
+                                  src={photoUrl}
+                                  alt=""
+                                  className="w-full h-full object-cover"
+                                />
+                                {isConfirming ? (
+                                  <div className="absolute inset-0 bg-slate-900/85 flex flex-col items-center justify-center gap-1.5 p-1.5 z-20">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteExistingSpotPhoto(uploadSpotId, photoUrl)}
+                                      className="w-full py-1 rounded-lg bg-rose-600 text-white font-bold text-[10px] cursor-pointer"
+                                    >
+                                      確認移除
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteSpotPhoto(null)}
+                                      className="w-full py-1 rounded-lg bg-slate-700 text-slate-200 text-[10px] cursor-pointer"
+                                    >
+                                      取消
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteSpotPhoto({ spotId: uploadSpotId, photoUrl })}
+                                    className="absolute top-1 right-1 w-8 h-8 rounded-lg bg-black/70 hover:bg-rose-600 text-white flex items-center justify-center transition z-10 cursor-pointer"
+                                    title="移除此照片"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 text-rose-300 hover:text-white" />
+                                  </button>
+                                )}
+                                <span className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded-md bg-black/70 text-[9px] text-white font-mono tabular-nums">
+                                  #{pIdx + 1}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                 {/* Limit Warning Alert */}
                 {uploadLimitWarning && (
-                  <div className="mb-2 p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-200 text-[11px] flex items-center gap-1.5">
+                  <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900/60 text-amber-800 dark:text-amber-200 text-[11px] flex items-center gap-1.5">
                     <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                     <span>{uploadLimitWarning}</span>
                   </div>
@@ -2551,10 +2572,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
                 {/* Previews Grid or Upload Dropzone */}
                 {uploadImagePreviews.length > 0 ? (
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     <div className="grid grid-cols-3 gap-2 max-h-64 overflow-y-auto pr-0.5">
                       {uploadImagePreviews.map((preview, idx) => (
-                        <div key={idx} className="relative aspect-square rounded-2xl overflow-hidden border-2 border-teal-500 shadow-xs group">
+                        <div
+                          key={idx}
+                          className="relative aspect-square rounded-2xl overflow-hidden border-2 border-teal-600 shadow-xs group"
+                        >
                           <MediaImage
                             tripId={trip.id}
                             ownerId={trip.ownerId}
@@ -2583,9 +2607,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                         </div>
                       ))}
 
-                      {/* Add more button if under limit (24 for custom/memory, 3 for specific spot) */}
                       {(() => {
-                        const curSpot = !isCustomSpot && uploadSpotId ? allSpots.find((s) => s.spot.id === uploadSpotId)?.spot : null;
+                        const curSpot =
+                          !isCustomSpot && uploadSpotId
+                            ? allSpots.find((s) => s.spot.id === uploadSpotId)?.spot
+                            : null;
                         const existingCount = curSpot?.memoryPhotos?.length || 0;
                         const cap = isCustomSpot ? 24 : 3;
                         const total = (isCustomSpot ? 0 : existingCount) + uploadImagePreviews.length;
@@ -2617,18 +2643,21 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       })()}
                     </div>
 
-                    <div className="flex items-center justify-between text-[11px] pt-1">
+                    <div className="flex items-center justify-between text-[11px]">
                       <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
                         disabled={(() => {
                           if (isProcessingImage) return true;
-                          const curSpot = !isCustomSpot && uploadSpotId ? allSpots.find((s) => s.spot.id === uploadSpotId)?.spot : null;
+                          const curSpot =
+                            !isCustomSpot && uploadSpotId
+                              ? allSpots.find((s) => s.spot.id === uploadSpotId)?.spot
+                              : null;
                           const existingCount = curSpot?.memoryPhotos?.length || 0;
                           const cap = isCustomSpot ? 24 : 3;
                           return (isCustomSpot ? 0 : existingCount) + uploadImagePreviews.length >= cap;
                         })()}
-                        className="text-teal-700 dark:text-teal-400 font-bold hover:underline disabled:opacity-40 disabled:hover:no-underline cursor-pointer"
+                        className="min-h-[36px] text-teal-700 dark:text-teal-400 font-bold hover:underline disabled:opacity-40 disabled:hover:no-underline cursor-pointer"
                       >
                         {isProcessingImage && uploadBatchProgress
                           ? `正在讀取拍攝日期與 GPS (${uploadBatchProgress.done}/${uploadBatchProgress.total})...`
@@ -2647,7 +2676,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                           });
                           setUploadLimitWarning(null);
                         }}
-                        className="text-rose-600 hover:underline cursor-pointer"
+                        className="min-h-[36px] text-rose-600 font-semibold hover:underline cursor-pointer"
                       >
                         清空已選
                       </button>
@@ -2655,11 +2684,14 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   </div>
                 ) : (
                   (() => {
-                    const curSpot = !isCustomSpot && uploadSpotId ? allSpots.find((s) => s.spot.id === uploadSpotId)?.spot : null;
+                    const curSpot =
+                      !isCustomSpot && uploadSpotId
+                        ? allSpots.find((s) => s.spot.id === uploadSpotId)?.spot
+                        : null;
                     const existingCount = curSpot?.memoryPhotos?.length || 0;
                     if (!isCustomSpot && uploadSpotId && existingCount >= 3) {
                       return (
-                        <div className="p-4 rounded-2xl border-2 border-dashed border-teal-300 dark:border-teal-800 bg-teal-50/50 dark:bg-teal-950/20 text-center space-y-1">
+                        <div className="p-4 rounded-2xl border border-dashed border-teal-300 dark:border-teal-800 bg-teal-50/50 dark:bg-teal-950/20 text-center space-y-1">
                           <p className="font-bold text-teal-800 dark:text-teal-200 text-xs flex items-center justify-center gap-1.5">
                             <Check className="w-3.5 h-3.5 text-teal-600" />
                             <span>景點照片已達 3 張上限</span>
@@ -2671,171 +2703,226 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       );
                     }
                     return (
-                      <div
+                      <button
+                        type="button"
                         onClick={() => !isProcessingImage && fileInputRef.current?.click()}
-                        className="aspect-16/9 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-teal-500 bg-slate-50 dark:bg-slate-800/40 flex flex-col items-center justify-center p-5 text-center cursor-pointer transition hover:bg-teal-50/20"
+                        className="w-full aspect-16/9 rounded-2xl border border-dashed border-[#D5D0C5] dark:border-slate-700 hover:border-teal-600 bg-[#FAF9F6] dark:bg-slate-800/40 flex flex-col items-center justify-center p-5 text-center cursor-pointer transition hover:bg-teal-50/30"
                       >
-                        <div className="w-10 h-10 rounded-2xl bg-teal-100 dark:bg-teal-950 text-teal-600 flex items-center justify-center mb-1.5">
+                        <div className="w-10 h-10 rounded-2xl bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-400 flex items-center justify-center mb-2">
                           {isProcessingImage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Camera className="w-5 h-5" />}
                         </div>
-                        <p className="font-bold text-slate-800 dark:text-slate-200">
+                        <p className="font-bold text-slate-800 dark:text-slate-200 text-xs">
                           {isProcessingImage && uploadBatchProgress
                             ? `正在處理與讀取 EXIF (${uploadBatchProgress.done}/${uploadBatchProgress.total})...`
                             : isProcessingImage
                             ? '照片處理中...'
                             : isCustomSpot
-                            ? '點擊批次選擇相片（一次最多 24 張，自動讀日期與 GPS）'
+                            ? '點擊批次選擇相片（最多 24 張，自動讀日期與 GPS）'
                             : '點擊選擇相片（支援多選）'}
                         </p>
-                      </div>
+                      </button>
                     );
                   })()
                 )}
               </div>
+            </IosInsetGroup>
 
-              {/* Association Mode: Itinerary Spot vs Custom Snap */}
-              <div className="space-y-2">
-                <label className="block font-bold text-slate-700 dark:text-slate-300">
-                  相片關聯類型
-                </label>
-                <div className="grid grid-cols-2 gap-2">
+            {/* Association Mode & Spot/Day Selection Group */}
+            <IosInsetGroup header="關聯行程與時間地點">
+              {/* iOS Segmented Mode Switcher */}
+              <div className="px-3.5 py-2.5">
+                <div className="grid grid-cols-2 p-1 rounded-xl bg-[#F3F1EC] dark:bg-slate-900 gap-1">
                   <button
                     type="button"
-                    onClick={() => setIsCustomSpot(false)}
-                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                    onClick={() => {
+                      setIsCustomSpot(false);
+                      setActiveUploadPicker('none');
+                    }}
+                    className={`min-h-[38px] px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
                       !isCustomSpot
-                        ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-200'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                        ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 shadow-2xs'
+                        : 'text-slate-500 dark:text-slate-400'
                     }`}
                   >
                     <Route className="w-3.5 h-3.5" />
-                    <span>🗺️ 行程既定景點</span>
+                    <span>行程既定景點</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => {
                       setIsCustomSpot(true);
                       setUploadSpotId('');
+                      setActiveUploadPicker('none');
                     }}
-                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+                    className={`min-h-[38px] px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
                       isCustomSpot
-                        ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-200'
-                        : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                        ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 shadow-2xs'
+                        : 'text-slate-500 dark:text-slate-400'
                     }`}
                   >
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>✨ 自訂隨拍打卡</span>
+                    <span>自訂隨拍打卡</span>
                   </button>
                 </div>
-
-                {!isCustomSpot ? (
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-                      選擇對應行程景點：
-                    </label>
-                    <select
-                      value={uploadSpotId}
-                      onChange={(e) => setUploadSpotId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-teal-500"
-                    >
-                      <option value="">全行程通用打卡回憶</option>
-                      {allSpots.map((item) => (
-                        <option key={item.spot.id} value={item.spot.id}>
-                          Day {item.dayNumber} · {item.spot.title}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : (
-                  <div className="space-y-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                        自訂打卡名稱 / 地標景點 *
-                      </label>
-                      <input
-                        type="text"
-                        value={customLocationName}
-                        onChange={(e) => setCustomLocationName(e.target.value)}
-                        placeholder="例：街角私房咖啡店、新幹線窗外雪景、道地拉麵攤..."
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-teal-500"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                          歸屬日程天數
-                        </label>
-                        <select
-                          value={customDayNumber}
-                          onChange={(e) => setCustomDayNumber(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 outline-none"
-                        >
-                          <option value="all">全行程通則</option>
-                          {trip.days.map((d) => (
-                            <option key={d.dayNumber} value={d.dayNumber}>
-                              Day {d.dayNumber} ({formatMonthDaySlash(d.date)})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                          拍攝日期
-                        </label>
-                        <input
-                          type="date"
-                          value={customDate}
-                          onChange={(e) => setCustomDate(e.target.value)}
-                          className="w-full px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 outline-none"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
 
-              {/* Mood Emoji Picker */}
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                  打卡心情與天氣氛圍
-                </label>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {PRESET_MOODS.map((m) => (
-                    <button
-                      key={m.label}
-                      type="button"
-                      onClick={() => setUploadMood(m.icon)}
-                      className={`p-1.5 rounded-xl text-center border transition cursor-pointer ${
-                        uploadMood === m.icon
-                          ? 'border-teal-600 bg-teal-50 dark:bg-teal-950/60 font-bold text-teal-800 dark:text-teal-200'
-                          : 'border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                      }`}
+              {!isCustomSpot ? (
+                <IosDisclosureRow
+                  label="對應行程景點"
+                  value={(() => {
+                    if (!uploadSpotId) return '全行程通用打卡回憶';
+                    const matched = allSpots.find((s) => s.spot.id === uploadSpotId);
+                    return matched ? `Day ${matched.dayNumber} · ${matched.spot.title}` : '全行程通用打卡回憶';
+                  })()}
+                  valueAccent={Boolean(uploadSpotId)}
+                  expanded={activeUploadPicker === 'spot'}
+                  onToggle={() => setActiveUploadPicker((prev) => (prev === 'spot' ? 'none' : 'spot'))}
+                >
+                  <div className="max-h-56 overflow-y-auto divide-y divide-[#E5E2DC]/65 dark:divide-slate-800/70">
+                    <IosCheckmarkRow
+                      label="全行程通用打卡回憶"
+                      selected={!uploadSpotId}
+                      onSelect={() => {
+                        setUploadSpotId('');
+                        setActiveUploadPicker('none');
+                      }}
+                    />
+                    {allSpots.map((item) => (
+                      <IosCheckmarkRow
+                        key={item.spot.id}
+                        label={item.spot.title}
+                        subtitle={`Day ${item.dayNumber} · ${formatMonthDaySlash(item.date)}`}
+                        selected={uploadSpotId === item.spot.id}
+                        onSelect={() => {
+                          setUploadSpotId(item.spot.id);
+                          setActiveUploadPicker('none');
+                        }}
+                      />
+                    ))}
+                  </div>
+                </IosDisclosureRow>
+              ) : (
+                <>
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3 min-h-[48px]">
+                    <label
+                      htmlFor="mem-custom-loc"
+                      className="text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0"
                     >
-                      <div className="text-base">{m.icon}</div>
-                      <div className="text-[9px] truncate">{m.label}</div>
-                    </button>
+                      打卡地點 *
+                    </label>
+                    <input
+                      id="mem-custom-loc"
+                      type="text"
+                      value={customLocationName}
+                      onChange={(e) => setCustomLocationName(e.target.value)}
+                      placeholder="例：街角咖啡店、道地拉麵攤..."
+                      className="flex-1 min-w-0 text-right bg-transparent text-[16px] sm:text-xs font-medium text-slate-900 dark:text-white outline-none placeholder:text-slate-400"
+                    />
+                  </div>
+
+                  <IosDisclosureRow
+                    label="歸屬日程天數"
+                    value={(() => {
+                      if (customDayNumber === 'all') return '全行程通則';
+                      const matchedDay = trip.days.find((d) => d.dayNumber === customDayNumber);
+                      return matchedDay
+                        ? `Day ${matchedDay.dayNumber} (${formatMonthDaySlash(matchedDay.date)})`
+                        : `Day ${customDayNumber}`;
+                    })()}
+                    valueAccent={customDayNumber !== 'all'}
+                    expanded={activeUploadPicker === 'day'}
+                    onToggle={() => setActiveUploadPicker((prev) => (prev === 'day' ? 'none' : 'day'))}
+                  >
+                    <div className="max-h-52 overflow-y-auto divide-y divide-[#E5E2DC]/65 dark:divide-slate-800/70">
+                      <IosCheckmarkRow
+                        label="全行程通則"
+                        selected={customDayNumber === 'all'}
+                        onSelect={() => {
+                          setCustomDayNumber('all');
+                          setActiveUploadPicker('none');
+                        }}
+                      />
+                      {trip.days.map((d) => (
+                        <IosCheckmarkRow
+                          key={d.dayNumber}
+                          label={`Day ${d.dayNumber} (${formatMonthDaySlash(d.date)})`}
+                          selected={customDayNumber === d.dayNumber}
+                          onSelect={() => {
+                            setCustomDayNumber(d.dayNumber);
+                            setActiveUploadPicker('none');
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </IosDisclosureRow>
+
+                  <div className="px-4 py-2.5 flex items-center justify-between gap-3 min-h-[48px]">
+                    <label
+                      htmlFor="mem-custom-date"
+                      className="text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0"
+                    >
+                      拍攝日期
+                    </label>
+                    <input
+                      id="mem-custom-date"
+                      type="date"
+                      value={customDate}
+                      onChange={(e) => setCustomDate(e.target.value)}
+                      className="bg-transparent text-right text-[16px] sm:text-xs font-mono tabular-nums text-slate-900 dark:text-white outline-none"
+                    />
+                  </div>
+                </>
+              )}
+            </IosInsetGroup>
+
+            {/* Mood, Caption & Google Photos URL Group */}
+            <IosInsetGroup header="氛圍與隨筆">
+              <IosDisclosureRow
+                label="打卡心情與天氣氛圍"
+                value={`${uploadMood} ${PRESET_MOODS.find((m) => m.icon === uploadMood)?.label || ''}`}
+                valueAccent
+                expanded={activeUploadPicker === 'mood'}
+                onToggle={() => setActiveUploadPicker((prev) => (prev === 'mood' ? 'none' : 'mood'))}
+              >
+                <div className="max-h-56 overflow-y-auto divide-y divide-[#E5E2DC]/65 dark:divide-slate-800/70">
+                  {PRESET_MOODS.map((m) => (
+                    <IosCheckmarkRow
+                      key={m.label}
+                      icon={<span className="text-base">{m.icon}</span>}
+                      label={m.label}
+                      selected={uploadMood === m.icon}
+                      onSelect={() => {
+                        setUploadMood(m.icon);
+                        setActiveUploadPicker('none');
+                      }}
+                    />
                   ))}
                 </div>
-              </div>
+              </IosDisclosureRow>
 
-              {/* Caption / Note */}
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+              <div className="px-4 py-3 space-y-1.5">
+                <label
+                  htmlFor="mem-caption"
+                  className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400"
+                >
                   心得隨筆
                 </label>
                 <textarea
+                  id="mem-caption"
                   rows={2}
                   value={uploadCaption}
                   onChange={(e) => setUploadCaption(e.target.value)}
                   placeholder="寫下當時心情或紀錄..."
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 outline-none focus:ring-2 focus:ring-teal-500 resize-none"
+                  className="w-full bg-transparent text-[16px] sm:text-xs text-slate-900 dark:text-white outline-none resize-none placeholder:text-slate-400 leading-relaxed"
                 />
               </div>
 
-              {/* Google Photos Original Resolution Link */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block font-bold text-slate-700 dark:text-slate-300">
+              <div className="px-4 py-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label
+                    htmlFor="mem-gphoto-url"
+                    className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400"
+                  >
                     Google 相簿連結（選填）
                   </label>
                   {sanitizeExternalUrl(uploadGooglePhotosUrl) && (
@@ -2843,62 +2930,25 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       href={sanitizeExternalUrl(uploadGooglePhotosUrl)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[10px] text-teal-600 dark:text-teal-400 hover:underline flex items-center gap-1 font-semibold"
+                      className="text-[11px] text-teal-700 dark:text-teal-400 hover:underline flex items-center gap-1 font-semibold"
                     >
                       <span>開啟測試</span>
-                      <ExternalLink className="w-2.5 h-2.5" />
+                      <ExternalLink className="w-3 h-3" />
                     </a>
                   )}
                 </div>
                 <input
+                  id="mem-gphoto-url"
                   type="url"
                   value={uploadGooglePhotosUrl}
                   onChange={(e) => setUploadGooglePhotosUrl(e.target.value)}
                   placeholder="https://photos.app.goo.gl/..."
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-400"
+                  className="w-full bg-transparent text-[16px] sm:text-xs text-slate-900 dark:text-white outline-none placeholder:text-slate-400"
                 />
               </div>
-
-              {/* Submit Button */}
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => closeUploadModalAndCleanup()}
-                  className="min-h-[44px] px-4 py-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold cursor-pointer"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  disabled={
-                    (uploadImagePreviews.length === 0 && !sanitizeExternalUrl(uploadGooglePhotosUrl) && !uploadCaption.trim()) ||
-                    isProcessingImage ||
-                    isSavingMemory
-                  }
-                  className="min-h-[44px] px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-bold shadow-xs transition active:scale-95 flex items-center gap-1.5 cursor-pointer"
-                >
-                  {isSavingMemory ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span className="font-mono tabular-nums">
-                        {driveUploadProgress
-                          ? `備份原圖至 Drive (${driveUploadProgress.done}/${driveUploadProgress.total})...`
-                          : '儲存中...'}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-4 h-4" />
-                      <span>
-                        {uploadImagePreviews.length > 0 ? '儲存相片' : '儲存連結'}
-                      </span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+            </IosInsetGroup>
+          </form>
+        </IosModalSheet>
       )}
 
       {/* ================= 4. FULLSCREEN LIGHTBOX PREVIEW ================= */}
@@ -2993,7 +3043,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   value={lightboxEditUrl}
                   onChange={(e) => setLightboxEditUrl(e.target.value)}
                   placeholder="貼上 Google 相簿分享或原始照片連結 (如 https://photos.app.goo.gl/...)"
-                  className="flex-1 min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-500"
+                  className="flex-1 min-h-[44px] sm:min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-[16px] sm:text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-500"
                 />
                 <div className="flex items-center gap-2 justify-end">
                   <button
@@ -3257,81 +3307,39 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         </div>
       )}
 
-      {/* ================= 5. EXPLICIT GOOGLE DRIVE DELETE CONFIRMATION ================= */}
+      {/* ================= 5. EXPLICIT GOOGLE DRIVE DELETE CONFIRMATION (iOS Action Sheet) ================= */}
       {pendingDriveDeleteMem && (
-        <div
-          className="fixed inset-0 z-60 flex items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] bg-black/75 backdrop-blur-xs animate-in fade-in duration-150"
-          onClick={() => {
+        <IosActionSheet
+          title="刪除此回憶照片"
+          message={
+            driveDeleteError
+              ? `這張照片在 Google Drive 存有原圖。\n${driveDeleteError}`
+              : '這張照片在您的 Google Drive 同時存有未壓縮原圖。請確認是否一併刪除雲端原圖檔案：'
+          }
+          cancelLabel="取消"
+          onClose={() => {
             if (!isDeletingDriveFile) {
               setPendingDriveDeleteMem(null);
               setDriveDeleteError(null);
             }
           }}
-        >
-          <div
-            className="w-full max-w-md max-h-full overflow-y-auto rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-5 sm:p-6 shadow-2xl space-y-4 text-slate-800 dark:text-slate-100"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
-                <Trash2 className="w-5 h-5" />
-              </div>
-              <div className="space-y-1">
-                <h4 className="font-bold text-base text-slate-900 dark:text-white">
-                  刪除此回憶照片
-                </h4>
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                  這張照片在您的 Google Drive 同時存有未壓縮原圖。請確認是否一併刪除雲端原圖檔案：
-                </p>
-              </div>
-            </div>
-
-            {driveDeleteError && (
-              <p className="text-xs text-rose-600 dark:text-rose-400 font-medium bg-rose-50 dark:bg-rose-950/40 px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-900">
-                {driveDeleteError}
-              </p>
-            )}
-
-            <div className="space-y-2 pt-1">
-              <button
-                type="button"
-                disabled={isDeletingDriveFile}
-                onClick={() => handleConfirmDriveDelete(true)}
-                className="w-full min-h-[44px] px-4 py-2.5 rounded-2xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer"
-              >
-                {isDeletingDriveFile ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>正在刪除相簿與 Drive 原圖...</span>
-                  </>
-                ) : (
-                  <span>刪除相簿照片，並永久移除 Google Drive 原圖</span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                disabled={isDeletingDriveFile}
-                onClick={() => handleConfirmDriveDelete(false)}
-                className="w-full min-h-[44px] px-4 py-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 text-xs font-semibold transition cursor-pointer disabled:opacity-50"
-              >
-                僅從日和相簿移除（保留 Google Drive 原圖）
-              </button>
-
-              <button
-                type="button"
-                disabled={isDeletingDriveFile}
-                onClick={() => {
-                  setPendingDriveDeleteMem(null);
-                  setDriveDeleteError(null);
-                }}
-                className="w-full min-h-[40px] px-4 py-2 rounded-2xl text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold transition cursor-pointer"
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        </div>
+          options={[
+            {
+              label: isDeletingDriveFile
+                ? '正在刪除相簿與 Drive 原圖...'
+                : '刪除相簿照片，並永久移除 Google Drive 原圖',
+              tone: 'destructive',
+              disabled: isDeletingDriveFile,
+              onClick: () => handleConfirmDriveDelete(true),
+            },
+            {
+              label: '僅從日和相簿移除（保留 Google Drive 原圖）',
+              tone: 'default',
+              disabled: isDeletingDriveFile,
+              onClick: () => handleConfirmDriveDelete(false),
+            },
+          ]}
+        />
       )}
     </div>
   );

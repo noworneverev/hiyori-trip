@@ -47,6 +47,9 @@ html {
   background-color: var(--bg-canvas);
   color: var(--text-primary);
   font-family: var(--font-sans);
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: contain;
 }
 
 @media (min-width: 768px) {
@@ -62,9 +65,17 @@ html.dark {
 body {
   min-height: 100vh;
   min-height: -webkit-fill-available;
+  min-height: 100dvh;
   background-color: var(--bg-canvas);
   color: var(--text-primary);
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  overscroll-behavior-y: contain;
+}
+
+button,
+a,
+[role="button"] {
+  touch-action: manipulation;
 }
 
 html.dark body {

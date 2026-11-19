@@ -30,7 +30,7 @@ export const UpdateNotificationBanner: React.FC<UpdateNotificationBannerProps> =
   const isUpdating = updateState.status === 'checking' || updateState.status === 'updating';
 
   return (
-    <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:bottom-6 sm:max-w-md z-90 animate-in slide-in-from-bottom-5 duration-300">
+    <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] left-4 right-4 sm:left-auto sm:right-6 sm:bottom-6 sm:max-w-md z-90 animate-in slide-in-from-bottom-5 duration-300">
       <div className="bg-slate-900/95 dark:bg-slate-950/95 backdrop-blur-xl border border-teal-500/40 text-white rounded-3xl p-4 shadow-2xl flex flex-col gap-3">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3">
@@ -55,9 +55,11 @@ export const UpdateNotificationBanner: React.FC<UpdateNotificationBannerProps> =
           </div>
 
           <button
+            type="button"
             onClick={() => setIsDismissed(true)}
-            className="p-1 rounded-full text-slate-400 hover:text-white transition"
+            className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] -mr-2 -mt-2 flex items-center justify-center rounded-full text-slate-400 hover:text-white transition cursor-pointer"
             title={lang === 'zh' ? '稍後提醒' : 'Dismiss'}
+            aria-label={lang === 'zh' ? '稍後提醒' : 'Dismiss'}
           >
             <X className="w-4 h-4" />
           </button>
@@ -65,17 +67,19 @@ export const UpdateNotificationBanner: React.FC<UpdateNotificationBannerProps> =
 
         <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800">
           <button
+            type="button"
             onClick={() => setIsDismissed(true)}
-            className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition"
+            className="min-h-[44px] sm:min-h-[36px] px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition cursor-pointer"
           >
             {lang === 'zh' ? '稍後' : 'Later'}
           </button>
           <button
+            type="button"
             disabled={isUpdating}
             onClick={async () => {
               await performAppUpdate((s) => setUpdateState(s));
             }}
-            className="px-4 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-bold transition shadow-md active:scale-95 flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+            className="min-h-[44px] sm:min-h-[36px] px-4 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-bold transition shadow-md active:scale-95 flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
           >
             {isUpdating ? (
               <>
