@@ -1411,17 +1411,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 </button>
               </div>
             )}
-
-            {/* Add Expense Button */}
-            {canEdit && (
-              <button
-                onClick={() => handleOpenAddExpense()}
-                className="min-h-[38px] px-3.5 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>{t.addExpense}</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -1976,7 +1965,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
               <DollarSign className="w-6 h-6 stroke-1" />
             </div>
-            <p>{lang === 'zh' ? '目前尚無花費記錄，點擊上方「記一筆」新增支出與發票' : 'No expenses recorded yet. Tap "Add Expense" to start.'}</p>
+            <p>{lang === 'zh' ? '目前尚無花費記錄，點擊右下角 ＋ 新增支出與發票' : 'No expenses recorded yet. Tap + at bottom-right to add.'}</p>
           </div>
         ) : chartView === 'daily' ? (
           /* Daily Spending Bar Chart */
@@ -2273,16 +2262,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   >
                     {expandedTableDate ? '全部折疊' : '展開最近明細'}
                   </button>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onClick={() => handleOpenAddExpense()}
-                      className="px-3.5 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>{lang === 'zh' ? '記一筆' : 'Add Expense'}</span>
-                    </button>
-                  )}
                 </div>
               </div>
 
@@ -2313,7 +2292,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                     {dailyTableData.length === 0 ? (
                       <tr>
                         <td colSpan={6} className="py-8 text-center text-slate-400 text-xs">
-                          目前尚無支出記錄，點擊上方「記一筆」新增
+                          目前尚無支出記錄，點擊右下角 ＋ 即可新增
                         </td>
                       </tr>
                     ) : (
@@ -2432,16 +2411,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                                       </div>
 
                                       <div className="flex items-center gap-2">
-                                        {canEdit && (
-                                          <button
-                                            type="button"
-                                            onClick={() => handleOpenAddExpense(row.date)}
-                                            className="px-2.5 py-1 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-[11px] font-bold flex items-center gap-1 shadow-2xs cursor-pointer"
-                                          >
-                                            <Plus className="w-3 h-3" />
-                                            <span>為這天記一筆</span>
-                                          </button>
-                                        )}
                                         <button
                                           type="button"
                                           onClick={() => {
@@ -2457,7 +2426,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
                                     {row.items.length === 0 ? (
                                       <div className="py-4 text-center text-slate-400 text-xs">
-                                        此日期尚無任何消費記錄，可點擊上方「為這天記一筆」新增！
+                                        此日期尚無任何消費記錄，點擊右下角 ＋ 即可新增！
                                       </div>
                                     ) : (
                                       <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
@@ -2644,7 +2613,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                     <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
                       <PieChartIcon className="w-6 h-6 stroke-1 text-slate-300 dark:text-slate-600" />
                     </div>
-                    <p>{lang === 'zh' ? '目前尚無花費記錄，上方可單手極速記一筆' : 'No expenses yet. Add one above to see breakdown.'}</p>
+                    <p>{lang === 'zh' ? '目前尚無花費記錄，點擊右下角 ＋ 即可快速記一筆' : 'No expenses yet. Tap + at bottom-right to add one.'}</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-center">
@@ -2729,17 +2698,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               </span>
             )}
           </div>
-
-          {canEdit && (
-            <button
-              type="button"
-              onClick={() => handleOpenAddExpense()}
-              className="min-h-[44px] sm:min-h-[38px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition self-start sm:self-auto cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>{lang === 'zh' ? '記一筆' : 'Add Expense'}</span>
-            </button>
-          )}
         </div>
 
         {/* Collapsible Month Calendar Date Switcher */}
@@ -2961,27 +2919,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold transition active:scale-95 cursor-pointer"
                 >
                   顯示全部明細
-                </button>
-              )}
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const targetDate =
-                      selectedDateFilter !== 'all' &&
-                      selectedDateFilter !== 'pre' &&
-                      selectedDateFilter !== 'today' &&
-                      selectedDateFilter !== 'cash_only'
-                        ? selectedDateFilter
-                        : selectedDateFilter === 'today'
-                        ? todayStr
-                        : undefined;
-                    handleOpenAddExpense(targetDate);
-                  }}
-                  className="px-4 py-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold transition shadow-xs flex items-center gap-1 active:scale-95 cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>{selectedDateFilter !== 'all' && selectedDateFilter !== 'today' ? '為這天記一筆' : '立即記一筆'}</span>
                 </button>
               )}
             </div>
@@ -3753,6 +3690,39 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           onClose={() => setPendingDeleteExpense(null)}
         />
       )}
+
+      {/* Bottom-Right Floating Action Button (+) for Quick Add Expense */}
+      {canEdit &&
+        !showAddModal &&
+        !showRateModal &&
+        !showCashModal &&
+        !showFilterDrawer &&
+        !showCategoryManageModal &&
+        !viewingReceiptGallery &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <button
+            type="button"
+            onClick={() => {
+              const targetDate =
+                selectedDateFilter !== 'all' &&
+                selectedDateFilter !== 'pre' &&
+                selectedDateFilter !== 'today' &&
+                selectedDateFilter !== 'cash_only'
+                  ? selectedDateFilter
+                  : selectedDateFilter === 'today'
+                  ? todayStr
+                  : undefined;
+              handleOpenAddExpense(targetDate);
+            }}
+            aria-label={lang === 'zh' ? '新增記帳' : 'Add expense'}
+            title={lang === 'zh' ? '記一筆' : 'Add expense'}
+            className="fixed right-4 sm:right-6 bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] sm:bottom-6 z-40 w-14 h-14 rounded-full bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white shadow-lg shadow-teal-900/25 flex items-center justify-center transition-transform active:scale-95 cursor-pointer"
+          >
+            <Plus className="w-6 h-6 stroke-[2.5]" />
+          </button>,
+          document.body
+        )}
     </div>
   );
 };

@@ -30,6 +30,8 @@ interface RemindersTodoListProps {
   requireAuth?: (action: () => void, reason?: string) => boolean;
   onShowToast?: (msg: string) => void;
   compact?: boolean;
+  hideInlineAddRow?: boolean;
+  externalAddTrigger?: number;
 }
 
 interface AutoGrowTitleInputProps {
@@ -144,6 +146,8 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
   requireAuth,
   onShowToast,
   compact = false,
+  hideInlineAddRow = false,
+  externalAddTrigger = 0,
 }) => {
   const todos = trip.todos || [];
   const pendingTodos = todos.filter((t) => !t.completed);
@@ -154,6 +158,59 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
   const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
   const [confirmClearCompleted, setConfirmClearCompleted] = useState(false);
+
+  // Quick-Add Sheet State (triggered by bottom-right + FAB)
+  const [showAddSheet, setShowAddSheet] = useState(false);
+  const [addSheetTitle, setAddSheetTitle] = useState('');
+  const [addSheetNotes, setAddSheetNotes] = useState('');
+  const [addSheetHasDate, setAddSheetHasDate] = useState(false);
+  const [addSheetDueDate, setAddSheetDueDate] = useState('');
+  const addSheetInputRef = useRef<HTMLInputElement | null>(null);
+  const lastExternalTriggerRef = useRef(externalAddTrigger);
+
+  useEffect(() => {
+    if (externalAddTrigger > 0 && externalAddTrigger !== lastExternalTriggerRef.current) {
+      lastExternalTriggerRef.current = externalAddTrigger;
+      if (canEdit) {
+        setAddSheetTitle('');
+        setAddSheetNotes('');
+        setAddSheetHasDate(false);
+        setAddSheetDueDate(getTodayLocal());
+        setShowAddSheet(true);
+        requestAnimationFrame(() => {
+          setTimeout(() => addSheetInputRef.current?.focus({ preventScroll: true }), 80);
+        });
+      }
+    }
+  }, [externalAddTrigger, canEdit]);
+
+  const handleCommitAddSheet = () => {
+    if (!canEdit) return;
+    const trimmed = addSheetTitle.trim();
+    if (!trimmed) return;
+    const doAdd = () => {
+      const newTodo: TodoItem = {
+        id: `todo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        title: trimmed,
+        category: 'preparation',
+        completed: false,
+        notes: addSheetNotes.trim() || undefined,
+        dueDate: addSheetHasDate && addSheetDueDate ? addSheetDueDate : undefined,
+      };
+      onUpdateTrip({
+        ...trip,
+        todos: [newTodo, ...todos],
+        updatedAt: Date.now(),
+      });
+      setShowAddSheet(false);
+      setAddSheetTitle('');
+      setAddSheetNotes('');
+    };
+    if (requireAuth && !requireAuth(doAdd, isZh ? '新增待辦事項' : 'Add reminder')) {
+      return;
+    }
+    doAdd();
+  };
 
   // iOS Reminders "(i)" Details Sheet State
   const [detailTodo, setDetailTodo] = useState<TodoItem | null>(null);
@@ -425,8 +482,8 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
 
   return (
     <div className="flex flex-col">
-      {/* Borderless iOS Reminders Quick-Add Row (No accidental IME onBlur auto-commit!) */}
-      {canEdit && (
+      {/* Borderless iOS Reminders Quick-Add Row (hidden when bottom-right + FAB owns creation) */}
+      {canEdit && !hideInlineAddRow && (
         <div
           className={`flex items-center gap-1.5 ${
             compact ? 'px-3 py-2' : 'px-3.5 sm:px-5 py-2.5'
@@ -652,6 +709,77 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
                 destructive
                 onClick={() => handleDeleteTodo(detailTodo.id)}
               />
+            </IosInsetGroup>
+          </div>
+        </IosModalSheet>
+      )}
+
+      {/* iOS Quick-Add Todo Sheet (opened by bottom-right + FAB) */}
+      {showAddSheet && (
+        <IosModalSheet
+          onClose={() => setShowAddSheet(false)}
+          maxWidthClass="sm:max-w-md"
+          zIndexClass="z-[72]"
+          variant="grouped"
+          ariaLabel={isZh ? '新增待辦事項' : 'New To-Do'}
+        >
+          <IosNavBar
+            title={isZh ? '新增待辦' : 'New To-Do'}
+            leftLabel={isZh ? '取消' : 'Cancel'}
+            onLeftClick={() => setShowAddSheet(false)}
+            rightLabel={isZh ? '加入' : 'Add'}
+            rightDisabled={!addSheetTitle.trim()}
+            onRightClick={handleCommitAddSheet}
+          />
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 space-y-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+            <IosInsetGroup>
+              <div className="px-4 py-3">
+                <input
+                  ref={addSheetInputRef}
+                  type="text"
+                  value={addSheetTitle}
+                  onChange={(e) => setAddSheetTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing && addSheetTitle.trim()) {
+                      e.preventDefault();
+                      handleCommitAddSheet();
+                    }
+                  }}
+                  placeholder={isZh ? '輸入待辦事項...' : 'What needs to be done?'}
+                  className="w-full bg-transparent text-[16px] font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
+                />
+              </div>
+              <div className="px-4 py-3">
+                <textarea
+                  rows={3}
+                  value={addSheetNotes}
+                  onChange={(e) => setAddSheetNotes(e.target.value)}
+                  placeholder={isZh ? '備註（選填，例如門禁密碼、櫃檯資訊...）' : 'Notes (optional)'}
+                  className="w-full bg-transparent text-[16px] sm:text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-400 outline-none resize-none"
+                />
+              </div>
+            </IosInsetGroup>
+
+            <IosInsetGroup>
+              <IosToggleRow
+                icon={<Calendar className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                label={isZh ? '設定日期提醒' : 'Due Date'}
+                checked={addSheetHasDate}
+                onChange={(checked) => {
+                  setAddSheetHasDate(checked);
+                  if (checked && !addSheetDueDate) setAddSheetDueDate(todayStr);
+                }}
+              />
+              {addSheetHasDate && (
+                <div className="px-4 py-3 bg-[#FAF9F6]/70 dark:bg-slate-900/40">
+                  <input
+                    type="date"
+                    value={addSheetDueDate}
+                    onChange={(e) => setAddSheetDueDate(e.target.value)}
+                    className="w-full min-h-[44px] px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-sm font-mono tabular-nums text-slate-900 dark:text-white outline-none focus:border-teal-600"
+                  />
+                </div>
+              )}
             </IosInsetGroup>
           </div>
         </IosModalSheet>

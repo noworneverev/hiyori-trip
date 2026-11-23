@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Trip, BookingVoucher, BookingCategory, ItineraryItem } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { copyTextToClipboard } from '../../utils/clipboard';
@@ -46,6 +46,8 @@ interface BookingVaultViewProps {
   onUpdateTrip: (updatedTrip: Trip) => void;
   requireAuth?: (action: () => void, reason?: string) => boolean;
   onJumpToDay?: (dayNumber: number) => void;
+  hideInlineAddButton?: boolean;
+  externalAddTrigger?: number;
 }
 
 const BOOKING_CATEGORIES: Array<{
@@ -95,8 +97,11 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
   onUpdateTrip,
   requireAuth,
   onJumpToDay,
+  hideInlineAddButton = false,
+  externalAddTrigger = 0,
 }) => {
   const isZh = lang === 'zh' || lang === 'zh-CN';
+  const lastExternalTriggerRef = useRef(externalAddTrigger);
   const [filterCat, setFilterCat] = useState<'all' | BookingCategory>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -160,6 +165,13 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     resetForm();
     setShowForm(true);
   };
+
+  useEffect(() => {
+    if (externalAddTrigger > 0 && externalAddTrigger !== lastExternalTriggerRef.current) {
+      lastExternalTriggerRef.current = externalAddTrigger;
+      openCreateForm();
+    }
+  }, [externalAddTrigger]);
 
   const openEditForm = (v: BookingVoucher) => {
     if (!canEdit) return;
@@ -402,7 +414,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
             </p>
           </div>
 
-          {canEdit && (
+          {canEdit && !hideInlineAddButton && (
             <button
               type="button"
               onClick={openCreateForm}

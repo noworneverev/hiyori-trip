@@ -73,6 +73,8 @@ import {
   CheckCircle2,
   Circle,
   HardDrive,
+  MoreHorizontal,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 interface TripMemoriesViewProps {
@@ -155,8 +157,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   requireAuth,
 }) => {
   const [viewMode, setViewMode] = useState<'itinerary' | 'gallery' | 'polaroid'>(() =>
-    trip.tripMode === 'memory' && !initialSpotId ? 'gallery' : 'itinerary'
+    initialSpotId ? 'itinerary' : 'gallery'
   );
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showDayFilterBar, setShowDayFilterBar] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedDayFilter, setSelectedDayFilter] = useState<number | 'all' | 'custom'>('all');
   const [lightboxMemory, setLightboxMemory] = useState<TripMemoryItem | null>(null);
@@ -191,16 +195,16 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const [editGoogleUrl, setEditGoogleUrl] = useState('');
   const [editPicker, setEditPicker] = useState<'none' | 'day' | 'mood'>('none');
 
-  // Sync default tab & reset upload state when switching trips
+  // Sync default tab & reset upload state when switching trips (Apple Photos: Gallery first!)
   useEffect(() => {
     if (initialSpotId) {
       setViewMode('itinerary');
-    } else if (trip.tripMode === 'memory') {
-      setViewMode('gallery');
     } else {
-      setViewMode('itinerary');
+      setViewMode('gallery');
     }
     setSelectedDayFilter('all');
+    setShowDayFilterBar(false);
+    setShowMoreMenu(false);
     setCustomDayNumber('all');
     setCustomDate('');
     setEditingMemory(null);
@@ -1474,149 +1478,153 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         }
       `}</style>
 
-      {/* 1. Compact Header Banner with Inline Stats */}
-      <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-5 shadow-2xs no-print space-y-3.5">
-        {/* Top Row: Title, Inline Clean Stats, and Quick Actions */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-2xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center shrink-0">
-              <Camera className="w-5 h-5" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-bold text-slate-900 dark:text-white text-base sm:text-lg whitespace-nowrap">
-                  {lang === 'zh' ? '旅程回憶相簿' : 'Trip Memories'}
-                </h3>
-                {/* Clean Unboxed Inline Stats (Zero-Pill) */}
-                <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium flex-wrap">
-                  <span className="hidden sm:inline" aria-hidden="true">·</span>
-                  <span className="font-mono tabular-nums font-bold text-slate-700 dark:text-slate-200">
-                    {allMemories.length}
-                  </span>
-                  <span>張相片</span>
-                  <span aria-hidden="true">·</span>
-                  <span className="font-mono tabular-nums font-bold text-slate-700 dark:text-slate-200">
-                    {new Set(allMemories.map((m) => m.spotId).filter(Boolean)).size}
-                  </span>
-                  <span>處打卡</span>
-                  {allMemories.some((m) => !m.spotId) && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span className="font-mono tabular-nums font-bold text-teal-700 dark:text-teal-400">
-                        {allMemories.filter((m) => !m.spotId).length}
-                      </span>
-                      <span>隨拍</span>
-                    </>
-                  )}
-                  <span aria-hidden="true">·</span>
-                  {currentUser ? (
-                    <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400">
-                      雲端已連線
-                    </span>
-                  ) : (
-                    <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400" title="登入後同步至雲端">
-                      本機模式
-                    </span>
-                  )}
-                  <span aria-hidden="true">·</span>
-                  {driveConnected ? (
-                    <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 inline-flex items-center gap-1">
-                      <HardDrive className="w-3 h-3" />
-                      <span>Drive 原圖已連線</span>
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={isConnectingDrive}
-                      onClick={async () => {
-                        setIsConnectingDrive(true);
-                        try {
-                          const token = await connectGoogleDrive();
-                          const ok = Boolean(token) || hasDriveAccessToken();
-                          setDriveConnected(ok);
-                          if (!ok) {
-                            setToastMessage('⚠️ Google Drive 授權未完成或被瀏覽器阻擋，請允許彈出視窗後重試');
-                            setSaveSuccessToast(true);
-                            setTimeout(() => setSaveSuccessToast(false), 3500);
-                          }
-                        } finally {
-                          setIsConnectingDrive(false);
-                        }
-                      }}
-                      className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 hover:underline inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                    >
-                      <HardDrive className="w-3 h-3" />
-                      <span>{isConnectingDrive ? '授權中...' : '連線 Drive 原圖'}</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
+      {/* 1. Apple Photos Minimalist Single-Row Header Toolbar */}
+      <div className="no-print space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
+          {/* Left: Clean 2-Way Segmented Control (相片牆 / 景點足跡) */}
+          <div className="inline-flex p-1 rounded-2xl bg-[#EFECE5] dark:bg-slate-800/90 border border-[#E5E2DC]/80 dark:border-slate-800 gap-1">
+            <button
+              type="button"
+              onClick={() => setViewMode('gallery')}
+              className={`min-h-[36px] px-3.5 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer ${
+                viewMode === 'gallery' || viewMode === 'polaroid'
+                  ? 'bg-white dark:bg-[#111827] text-teal-800 dark:text-teal-300 font-bold shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold'
+              }`}
+            >
+              <ImageIcon className="w-3.5 h-3.5 shrink-0" />
+              <span className="whitespace-nowrap">
+                {viewMode === 'polaroid'
+                  ? lang === 'zh' ? '拍立得' : 'Polaroid'
+                  : lang === 'zh' ? '相片牆' : 'Photos'}
+              </span>
+              {allMemories.length > 0 && (
+                <span className="font-mono tabular-nums text-[10px] opacity-75">
+                  {allMemories.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setViewMode('itinerary')}
+              className={`min-h-[36px] px-3.5 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer ${
+                viewMode === 'itinerary'
+                  ? 'bg-white dark:bg-[#111827] text-teal-800 dark:text-teal-300 font-bold shadow-2xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold'
+              }`}
+            >
+              <Route className="w-3.5 h-3.5 shrink-0" />
+              <span className="whitespace-nowrap">
+                {lang === 'zh'
+                  ? trip.tripMode === 'memory' && allSpots.length === 0
+                    ? '按日整理'
+                    : '景點足跡'
+                  : 'Spots'}
+              </span>
+            </button>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
-            {onOpenGlobalHub && (
-              <button
-                type="button"
-                onClick={onOpenGlobalHub}
-                className="min-h-[44px] sm:min-h-[40px] px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/80 text-teal-700 dark:text-teal-300 border border-teal-200/80 dark:border-teal-800/80 text-xs font-semibold flex items-center gap-1.5 transition shadow-2xs active:scale-95 cursor-pointer"
-                title="探索跨旅程回憶與月曆足跡"
-              >
-                <Compass className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                <span className="whitespace-nowrap">足跡時光庫</span>
-              </button>
-            )}
-
-            {sanitizeExternalUrl(trip.googlePhotosAlbumUrl) && (
-              <a
-                href={sanitizeExternalUrl(trip.googlePhotosAlbumUrl)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="min-h-[44px] sm:min-h-[40px] px-3 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition active:scale-95"
-                title={lang === 'zh' ? '開啟此行程之 Google 相簿完整相簿（原始高畫質）' : 'Open Google Photos full album'}
-              >
-                <ExternalLink className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-                <span className="whitespace-nowrap">Google 相簿</span>
-              </a>
-            )}
-
+          {/* Right: Quiet Filter Toggle (only when relevant) + iOS More (...) Menu */}
+          <div className="flex items-center gap-1.5 shrink-0">
             {viewMode === 'polaroid' && (
               <button
                 type="button"
                 onClick={handlePrintPolaroids}
-                className="min-h-[44px] sm:min-h-[40px] px-3.5 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 hover:bg-teal-50 dark:hover:bg-slate-700 text-teal-800 dark:text-teal-300 border border-[#E5E2DC] dark:border-slate-700 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition active:scale-95 cursor-pointer"
-                title="以 A4 或相片紙沖印拍立得卡片"
+                className="min-h-[38px] px-3 rounded-full bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 text-teal-700 dark:text-teal-300 text-xs font-bold inline-flex items-center gap-1 shadow-2xs cursor-pointer"
+                title="列印拍立得"
               >
                 <Printer className="w-3.5 h-3.5" />
-                <span className="whitespace-nowrap">列印拍立得</span>
+                <span className="hidden sm:inline">列印</span>
               </button>
             )}
 
-            {canShowUploadAction && (
+            {(allMemories.length > 0 || viewMode === 'itinerary') && trip.days.length > 1 && (
               <button
                 type="button"
-                onClick={() => handleTriggerUpload('', true)}
-                className="min-h-[44px] sm:min-h-[40px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
+                onClick={() => setShowDayFilterBar((v) => !v)}
+                className={`w-10 h-10 rounded-full border flex items-center justify-center transition cursor-pointer ${
+                  showDayFilterBar || selectedDayFilter !== 'all'
+                    ? 'bg-teal-700 dark:bg-teal-600 border-teal-700 dark:border-teal-600 text-white shadow-2xs'
+                    : 'bg-white dark:bg-[#111827] border-[#E5E2DC] dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-400'
+                }`}
+                title={lang === 'zh' ? '依天數篩選' : 'Filter by day'}
+                aria-label={lang === 'zh' ? '依天數篩選' : 'Filter by day'}
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span className="whitespace-nowrap">{lang === 'zh' ? '上傳相片' : 'Add Photo'}</span>
+                <SlidersHorizontal className="w-4 h-4" />
               </button>
             )}
+
+            <button
+              type="button"
+              onClick={() => setShowMoreMenu(true)}
+              className="w-10 h-10 rounded-full bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-400 flex items-center justify-center transition cursor-pointer"
+              title={lang === 'zh' ? '更多相簿選項' : 'More options'}
+              aria-label={lang === 'zh' ? '更多相簿選項' : 'More options'}
+            >
+              <MoreHorizontal className="w-4 h-4" />
+            </button>
           </div>
         </div>
+
+        {/* Collapsible Day Filter Strip (Hidden by default when 0 photos, never clutters above-the-fold) */}
+        {(showDayFilterBar || selectedDayFilter !== 'all') && (allMemories.length > 0 || viewMode === 'itinerary') && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar scroll-smooth animate-in fade-in duration-150">
+            <button
+              type="button"
+              onClick={() => setSelectedDayFilter('all')}
+              className={`min-h-[34px] px-3 py-1 rounded-full text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
+                selectedDayFilter === 'all'
+                  ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                  : 'bg-white dark:bg-[#111827] text-slate-600 dark:text-slate-400 border border-[#E5E2DC] dark:border-slate-800'
+              }`}
+            >
+              全部 ({allMemories.length})
+            </button>
+            {unassignedMemories.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedDayFilter('custom')}
+                className={`min-h-[34px] px-3 py-1 rounded-full text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
+                  selectedDayFilter === 'custom'
+                    ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                    : 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 border border-[#E5E2DC] dark:border-slate-800'
+                }`}
+              >
+                隨拍 ({unassignedMemories.length})
+              </button>
+            )}
+            {trip.days.map((day) => {
+              const countInDay = allMemories.filter((m) => m.dayNumber === day.dayNumber).length;
+              return (
+                <button
+                  key={day.dayNumber}
+                  type="button"
+                  onClick={() => setSelectedDayFilter(day.dayNumber)}
+                  className={`min-h-[34px] px-3 py-1 rounded-full text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
+                    selectedDayFilter === day.dayNumber
+                      ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                      : 'bg-white dark:bg-[#111827] text-slate-600 dark:text-slate-400 border border-[#E5E2DC] dark:border-slate-800'
+                  }`}
+                >
+                  D{day.dayNumber}{countInDay > 0 ? ` (${countInDay})` : ''}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Optional World Footprint Coordinate Hint for Memory Trips missing GPS */}
         {trip.tripMode === 'memory' &&
           typeof trip.destinationLat !== 'number' &&
           !allMemories.some((m) => typeof m.lat === 'number' && typeof m.lng === 'number') && (
-            <div className="px-3.5 py-2.5 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            <div className="px-3.5 py-2.5 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                 <MapPin className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
                 <span>
                   {lang === 'zh'
-                    ? '這趟回憶旅程尚未紀錄 GPS 座標，補上城市位置即可點亮足跡地圖。'
-                    : 'Add city coordinates to light up this trip on the World Footprint Map.'}
+                    ? '補上城市位置即可在足跡地圖點亮這趟回憶。'
+                    : 'Add city coordinates to pin this trip on the World Footprint Map.'}
                 </span>
               </div>
               {canEdit && (
@@ -1624,112 +1632,14 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   type="button"
                   onClick={handleQuickLocateCity}
                   disabled={isLocatingCity}
-                  className="min-h-[34px] px-3 py-1 rounded-xl bg-white dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600 text-teal-700 dark:text-teal-300 font-bold text-[11px] flex items-center gap-1.5 shrink-0 self-start sm:self-auto transition cursor-pointer disabled:opacity-50"
+                  className="min-h-[34px] px-3 py-1 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600 text-teal-700 dark:text-teal-300 font-bold text-[11px] flex items-center gap-1.5 shrink-0 self-start sm:self-auto transition cursor-pointer disabled:opacity-50"
                 >
-                  {isLocatingCity ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <MapPin className="w-3.5 h-3.5" />
-                  )}
-                  <span>{isLocatingCity ? '定位中...' : `一鍵定位「${trip.destination || trip.title}」`}</span>
+                  {isLocatingCity ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
+                  <span>{isLocatingCity ? '定位中...' : `定位「${trip.destination || trip.title}」`}</span>
                 </button>
               )}
             </div>
           )}
-
-        {/* Middle Row: View Mode Switcher */}
-        <div className="grid grid-cols-3 gap-1 p-1 bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 rounded-2xl text-xs font-semibold">
-          <button
-            type="button"
-            onClick={() => setViewMode('itinerary')}
-            className={`min-h-[44px] sm:min-h-[38px] py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
-              viewMode === 'itinerary'
-                ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
-                : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <Route className="w-3.5 h-3.5 shrink-0" />
-            <span className="whitespace-nowrap truncate">
-              {lang === 'zh'
-                ? trip.tripMode === 'memory' && allSpots.length === 0
-                  ? '按日整理'
-                  : '景點打卡'
-                : 'Itinerary'}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setViewMode('gallery')}
-            className={`min-h-[44px] sm:min-h-[38px] py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
-              viewMode === 'gallery'
-                ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
-                : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <ImageIcon className="w-3.5 h-3.5 shrink-0" />
-            <span className="whitespace-nowrap truncate">{lang === 'zh' ? '相片畫廊' : 'Gallery'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setViewMode('polaroid')}
-            className={`min-h-[44px] sm:min-h-[38px] py-2 px-1.5 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer min-w-0 ${
-              viewMode === 'polaroid'
-                ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
-                : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5 shrink-0 text-teal-700 dark:text-teal-400" />
-            <span className="whitespace-nowrap truncate">{lang === 'zh' ? '拍立得' : 'Polaroid'}</span>
-          </button>
-        </div>
-
-        {/* Bottom Row: Day Filter Chips */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pt-1 no-scrollbar scroll-smooth">
-          <span className="text-[11px] font-bold text-slate-400 shrink-0 pr-1">天數</span>
-          <button
-            type="button"
-            onClick={() => setSelectedDayFilter('all')}
-            className={`min-h-[44px] sm:min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
-              selectedDayFilter === 'all'
-                ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
-                : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            全部 ({allMemories.length})
-          </button>
-          {unassignedMemories.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setSelectedDayFilter('custom')}
-              className={`min-h-[44px] sm:min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
-                selectedDayFilter === 'custom'
-                  ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
-                  : 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200/70 dark:border-teal-800/60 hover:bg-teal-100'
-              }`}
-            >
-              ✨ 漫遊隨拍 ({unassignedMemories.length})
-            </button>
-          )}
-          {trip.days.map((day) => {
-            const countInDay = allMemories.filter((m) => m.dayNumber === day.dayNumber).length;
-            return (
-              <button
-                key={day.dayNumber}
-                type="button"
-                onClick={() => setSelectedDayFilter(day.dayNumber)}
-                className={`min-h-[44px] sm:min-h-[34px] px-3 py-1 rounded-xl text-xs font-bold font-mono tabular-nums transition shrink-0 cursor-pointer ${
-                  selectedDayFilter === day.dayNumber
-                    ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
-                    : 'bg-[#FAF9F6] dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-[#E5E2DC] dark:border-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                Day {day.dayNumber} ({countInDay})
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       {/* Global Cloud/Local Save Toast */}
@@ -1752,38 +1662,19 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       {/* 2. Main Content Views */}
       {viewMode === 'itinerary' ? (
         /* ================= 2A. ITINERARY SPOTS CHECK-IN & RETROSPECTIVE VIEW ================= */
-        <div className="space-y-6">
-
-      {/* Compact Spots Check-in Progress & Filter Bar */}
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs space-y-2.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                <Route className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                <span>景點記錄進度</span>
-              </span>
-              <span className="font-mono tabular-nums text-xs text-teal-700 dark:text-teal-400 font-bold">
-                {visitedSpotsCount} / {allSpots.length} 景點 ({allSpots.length > 0 ? Math.round((visitedSpotsCount / allSpots.length) * 100) : 0}%)
-              </span>
-            </div>
-            <div className="w-full bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC]/60 dark:border-slate-700/50 h-1.5 rounded-full overflow-hidden">
-              <div
-                className="bg-teal-700 dark:bg-teal-500 h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${allSpots.length > 0 ? Math.round((visitedSpotsCount / allSpots.length) * 100) : 0}%`,
-                }}
-              />
-            </div>
-            <div className="flex items-center justify-between gap-2 pt-0.5">
-              <div className="flex items-center p-0.5 bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 rounded-xl text-xs font-bold">
+        <div className="space-y-4 pb-24">
+          {/* Quiet Inline Visited/All Filter Row (No bulky progress bar or duplicate add button) */}
+          {allSpots.length > 0 && (
+            <div className="flex items-center justify-between gap-2 px-1">
+              <div className="inline-flex items-center p-0.5 bg-[#EFECE5] dark:bg-slate-800/90 rounded-xl text-xs font-bold">
                 <button
                   type="button"
                   onClick={() => setFilterVisitedOnly(true)}
-                  className={`min-h-[34px] px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[11px] font-mono tabular-nums ${
+                  className={`min-h-[32px] px-3 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[11px] font-mono tabular-nums ${
                     filterVisitedOnly
-                      ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 shadow-2xs'
+                      ? 'bg-white dark:bg-[#111827] text-teal-800 dark:text-teal-300 shadow-2xs'
                       : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                   }`}
-                  title="僅呈現有照片或已造訪景點"
                 >
                   <Check className="w-3 h-3 stroke-[2.5]" />
                   <span>已打卡 ({visitedSpotsCount})</span>
@@ -1791,29 +1682,20 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setFilterVisitedOnly(false)}
-                  className={`min-h-[34px] px-2.5 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[11px] font-mono tabular-nums ${
+                  className={`min-h-[32px] px-3 py-1 rounded-lg transition cursor-pointer flex items-center gap-1 text-[11px] font-mono tabular-nums ${
                     !filterVisitedOnly
-                      ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 shadow-2xs'
+                      ? 'bg-white dark:bg-[#111827] text-teal-800 dark:text-teal-300 shadow-2xs'
                       : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
                   }`}
-                  title="顯示全部景點"
                 >
                   <span>全部 ({allSpots.length})</span>
                 </button>
               </div>
-
-              {canShowUploadAction && (
-                <button
-                  type="button"
-                  onClick={() => handleTriggerUpload('', true)}
-                  className="text-teal-700 dark:text-teal-400 font-bold hover:underline text-xs flex items-center gap-1 cursor-pointer"
-                >
-                  <Plus className="w-3 h-3" />
-                  <span>新增隨拍</span>
-                </button>
-              )}
+              <span className="text-[11px] font-mono tabular-nums text-slate-400">
+                {visitedSpotsCount}/{allSpots.length}
+              </span>
             </div>
-          </div>
+          )}
 
           {/* Unassigned / All-trip Custom Snapshots (honors selectedDayFilter) */}
           {unassignedMemories.length > 0 && (selectedDayFilter === 'all' || selectedDayFilter === 'custom') && (
@@ -1836,19 +1718,6 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     </p>
                   </div>
                 </div>
-                {canShowUploadAction && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCustomDayNumber('all');
-                      handleTriggerUpload('', true);
-                    }}
-                    className="text-xs font-semibold text-teal-600 dark:text-teal-400 hover:text-teal-700 flex items-center gap-1"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>新增隨拍</span>
-                  </button>
-                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
@@ -2365,33 +2234,24 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           })}
         </div>
       ) : filteredMemories.length === 0 ? (
-        <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-12 text-center space-y-4">
-          <div className="w-16 h-16 rounded-3xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center mx-auto">
-            <Camera className="w-8 h-8" />
+        <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 px-6 py-16 text-center space-y-3 mb-24">
+          <div className="w-14 h-14 rounded-full bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center mx-auto">
+            <Camera className="w-7 h-7 stroke-[1.75]" />
           </div>
-          <div className="space-y-1 max-w-sm mx-auto">
-            <h4 className="font-bold text-base text-slate-800 dark:text-slate-200">
-              {lang === 'zh' ? '尚未新增照片' : 'No photos added yet'}
+          <div className="space-y-1 max-w-xs mx-auto">
+            <h4 className="font-bold text-base text-slate-900 dark:text-white">
+              {lang === 'zh' ? '尚無旅途回憶' : 'No Memories Yet'}
             </h4>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
               {lang === 'zh'
-                ? '上傳景點隨拍與心得，自動排版為相簿或拍立得。'
-                : 'Upload travel photos and captions to create a beautiful memory album and printable Polaroid cards.'}
+                ? '點擊右下角 ＋ 匯入相片，系統將自動依拍攝時間與 GPS 座標為你整理成相簿。'
+                : 'Tap + at the bottom-right to add photos. Dates and GPS locations are organized automatically.'}
             </p>
           </div>
-          {canShowUploadAction && (
-            <button
-              type="button"
-              onClick={() => setShowUploadModal(true)}
-              className="min-h-[44px] px-5 py-2.5 rounded-2xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs shadow-sm transition active:scale-95 cursor-pointer"
-            >
-              📸 上傳照片
-            </button>
-          )}
         </div>
       ) : viewMode === 'gallery' ? (
-        /* ================= 2A. EXQUISITE STORY GALLERY VIEW ================= */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        /* ================= 2A. APPLE PHOTOS STYLE GALLERY GRID ================= */
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 sm:gap-4 pb-24">
           {filteredMemories.map((mem) => (
             <div
               key={mem.id}
@@ -3742,6 +3602,104 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           ]}
         />
       )}
+
+      {/* ================= 6. APPLE PHOTOS MORE (...) ACTION SHEET ================= */}
+      {showMoreMenu && (
+        <IosActionSheet
+          title={lang === 'zh' ? '相簿選項' : 'Album Options'}
+          message={`${allMemories.length} 張相片 · ${visitedSpotsCount} 處打卡 · ${
+            driveConnected ? 'Google Drive 原圖已連線' : currentUser ? '雲端同步中' : '本機模式'
+          }`}
+          cancelLabel={lang === 'zh' ? '取消' : 'Cancel'}
+          onClose={() => setShowMoreMenu(false)}
+          options={[
+            ...(onOpenGlobalHub
+              ? [
+                  {
+                    label: lang === 'zh' ? '探索足跡時光庫（跨旅程地圖）' : 'World Travel Footprint Hub',
+                    onClick: () => {
+                      setShowMoreMenu(false);
+                      onOpenGlobalHub();
+                    },
+                  },
+                ]
+              : []),
+            ...(allMemories.length > 0
+              ? [
+                  {
+                    label:
+                      viewMode === 'polaroid'
+                        ? lang === 'zh' ? '切換回相片牆檢視' : 'Back to Photos Grid'
+                        : lang === 'zh' ? '切換拍立得沖印模式' : 'Polaroid Print View',
+                    onClick: () => {
+                      setShowMoreMenu(false);
+                      setViewMode((prev) => (prev === 'polaroid' ? 'gallery' : 'polaroid'));
+                    },
+                  },
+                ]
+              : []),
+            ...(!driveConnected
+              ? [
+                  {
+                    label: isConnectingDrive
+                      ? '正在連線 Google Drive...'
+                      : lang === 'zh' ? '連線 Google Drive 原圖備份' : 'Connect Google Drive Originals',
+                    disabled: isConnectingDrive,
+                    onClick: async () => {
+                      setShowMoreMenu(false);
+                      setIsConnectingDrive(true);
+                      try {
+                        const token = await connectGoogleDrive();
+                        const ok = Boolean(token) || hasDriveAccessToken();
+                        setDriveConnected(ok);
+                        if (!ok) {
+                          setToastMessage('⚠️ Google Drive 授權未完成或被瀏覽器阻擋，請允許彈出視窗後重試');
+                          setSaveSuccessToast(true);
+                          setTimeout(() => setSaveSuccessToast(false), 3500);
+                        }
+                      } finally {
+                        setIsConnectingDrive(false);
+                      }
+                    },
+                  },
+                ]
+              : []),
+            ...(sanitizeExternalUrl(trip.googlePhotosAlbumUrl)
+              ? [
+                  {
+                    label: lang === 'zh' ? '開啟 Google 相簿共享連結' : 'Open Google Photos Album',
+                    onClick: () => {
+                      setShowMoreMenu(false);
+                      const url = sanitizeExternalUrl(trip.googlePhotosAlbumUrl);
+                      if (url) window.open(url, '_blank', 'noopener,noreferrer');
+                    },
+                  },
+                ]
+              : []),
+          ]}
+        />
+      )}
+
+      {/* ================= 7. UNIFIED BOTTOM-RIGHT FLOATING (+) UPLOAD BUTTON ================= */}
+      {canShowUploadAction &&
+        !showUploadModal &&
+        !lightboxMemory &&
+        !editingMemory &&
+        !showMoreMenu &&
+        !pendingDriveDeleteMem &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <button
+            type="button"
+            onClick={() => handleTriggerUpload('', true)}
+            aria-label={lang === 'zh' ? '上傳相片' : 'Add photo'}
+            title={lang === 'zh' ? '上傳相片' : 'Add photo'}
+            className="no-print fixed right-4 sm:right-6 bottom-[calc(5.25rem+env(safe-area-inset-bottom,0px))] sm:bottom-6 z-40 w-14 h-14 rounded-full bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white shadow-lg shadow-teal-900/25 flex items-center justify-center transition-transform active:scale-95 cursor-pointer"
+          >
+            <Plus className="w-6 h-6 stroke-[2.5]" />
+          </button>,
+          document.body
+        )}
     </div>
   );
 };

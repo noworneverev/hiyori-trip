@@ -149,19 +149,19 @@ const HTML_LANG_MAP: Record<Language, string> = {
 };
 
 const TAB_MOBILE_LABELS: Record<Language, Record<TabType, string>> = {
-  zh: { timeline: '行程', live: '隨行', expenses: '記帳', prep: '準備', memories: '回憶' },
-  'zh-CN': { timeline: '行程', live: '随行', expenses: '记账', prep: '准备', memories: '回忆' },
-  en: { timeline: 'Plan', live: 'Live', expenses: 'Spend', prep: 'Prep', memories: 'Album' },
-  ja: { timeline: '旅程', live: 'ガイド', expenses: '家計', prep: '準備', memories: '思い出' },
-  ko: { timeline: '일정', live: '동행', expenses: '가계부', prep: '준비', memories: '추억' },
+  zh: { timeline: '行程', live: '隨行', expenses: '記帳', prep: '待辦', memories: '回憶' },
+  'zh-CN': { timeline: '行程', live: '随行', expenses: '记账', prep: '待办', memories: '回忆' },
+  en: { timeline: 'Plan', live: 'Live', expenses: 'Spend', prep: 'To-Do', memories: 'Album' },
+  ja: { timeline: '旅程', live: 'ガイド', expenses: '家計', prep: 'タスク', memories: '思い出' },
+  ko: { timeline: '일정', live: '동행', expenses: '가계부', prep: '할 일', memories: '추억' },
 };
 
 const TAB_DESKTOP_PREP_LABELS: Record<Language, string> = {
-  zh: '行前準備',
-  'zh-CN': '行前准备',
-  en: 'Trip Prep',
-  ja: '旅の準備',
-  ko: '여행 준비',
+  zh: '待辦',
+  'zh-CN': '待办',
+  en: 'To-Do',
+  ja: 'タスク',
+  ko: '할 일',
 };
 
 const TabLoadingFallback: React.FC = () => (
@@ -2097,7 +2097,7 @@ export default function App() {
               { id: 'timeline' as TabType, label: t.timeline, Icon: Route },
               { id: 'live' as TabType, label: t.live, Icon: Sparkles },
               { id: 'expenses' as TabType, label: t.expenses, Icon: Wallet },
-              { id: 'prep' as TabType, label: TAB_DESKTOP_PREP_LABELS[lang] || '行前準備', Icon: CheckCircle },
+              { id: 'prep' as TabType, label: TAB_DESKTOP_PREP_LABELS[lang] || '待辦', Icon: CheckCircle },
               { id: 'memories' as TabType, label: t.memories, Icon: Camera },
             ] as const
           ).map(({ id, label, Icon }) => {

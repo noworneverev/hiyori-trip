@@ -168,7 +168,7 @@ export const TripPhaseBanner: React.FC<TripPhaseBannerProps> = ({
             onClick={() => onSwitchTab('prep')}
             className="min-h-[34px] px-2.5 py-1 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 text-white text-[11px] font-bold inline-flex items-center gap-1 transition cursor-pointer"
           >
-            <span>{isZh ? '行前待辦' : 'Prep'}</span>
+            <span>{isZh ? '待辦' : 'To-Do'}</span>
             <ArrowRight className="w-3 h-3" />
           </button>
         )}

@@ -2,12 +2,12 @@
  * Application Version and Release Metadata
  * Displayed across the App Menu, Settings, and Update Engine
  */
-export const APP_VERSION = 'v2.0.0';
+export const APP_VERSION = 'v2.0.1';
 export const BUILD_DATE = '2026.11.23';
-export const BUILD_ID = `build-${BUILD_DATE.replace(/\./g, '')}-v200`;
+export const BUILD_ID = `build-${BUILD_DATE.replace(/\./g, '')}-v201`;
 
 export const RELEASE_HIGHLIGHTS = [
-  '全面商業級重構 iOS 原生 PWA 體驗：行程支援長按／拖曳排序、相鄰景點兩點路線規劃、Google Maps 連結一鍵貼上匯入與旅程三階段智慧情境條',
-  '記帳收斂為「明細／統計／分帳」三大分段視圖，新增分帳結算已還清勾選與免稅／含稅快速試算；準備頁極簡化為「待辦與隨記／預約憑證」',
-  '圖片升級為輕量 WebP 壓縮並支援選配 Cloudinary／Cloudflare R2 圖床，靜態部署支援本機自訂 Gemini API Key（BYOK）與離線優先零衝突同步',
+  '回憶頁全面改版為 Apple Photos 極簡單列設計（相片牆／景點足跡＋⋯ 更多選項表單），移除冗餘進度卡與空白天數列',
+  '記帳、待辦與回憶三大分頁統一採用右下角懸浮 ＋ 按鈕快速新增，移除頁面內重複的新增按鈕',
+  '導覽列「準備」更名為「待辦」並移除隨手速記，介面更輕盈聚焦',
 ];
