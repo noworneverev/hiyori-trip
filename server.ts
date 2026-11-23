@@ -10,9 +10,36 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const port = 3000;
+const port = Number(process.env.PORT) || 3000;
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '2mb' }));
+
+// Lightweight in-memory IP rate limiter for AI endpoints (30 requests / 10 minutes per IP)
+const aiRateBuckets = new Map<string, { count: number; resetAt: number }>();
+const AI_RATE_LIMIT_MAX = 30;
+const AI_RATE_WINDOW_MS = 10 * 60 * 1000;
+
+function checkAiRateLimit(req: express.Request, res: express.Response): boolean {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const entry = aiRateBuckets.get(ip);
+  if (!entry || now > entry.resetAt) {
+    aiRateBuckets.set(ip, { count: 1, resetAt: now + AI_RATE_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= AI_RATE_LIMIT_MAX) {
+    res.status(429).json({ error: '請求過於頻繁，請稍候片刻再試，或改用本機快速解析。' });
+    return false;
+  }
+  entry.count++;
+  return true;
+}
+
+function stripJsonCodeFences(raw: string): string {
+  const trimmed = raw.trim();
+  const fenceMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenceMatch ? fenceMatch[1].trim() : trimmed;
+}
 
 // Initialize Google Gemini SDK
 const apiKey = process.env.GEMINI_API_KEY;
@@ -43,13 +70,62 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Safe Google Maps short-link expander (strictly whitelisted Google Maps domains only)
+const ALLOWED_MAPS_HOSTS = new Set([
+  'maps.app.goo.gl',
+  'goo.gl',
+  'g.co',
+  'maps.google.com',
+  'www.google.com',
+  'google.com',
+]);
+
+app.post('/api/resolve-maps-url', async (req, res) => {
+  try {
+    const rawUrl = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    if (!rawUrl || rawUrl.length > 2048) {
+      return res.status(400).json({ error: 'Invalid URL' });
+    }
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      return res.status(400).json({ error: 'Unsupported protocol' });
+    }
+    if (!ALLOWED_MAPS_HOSTS.has(parsed.hostname.toLowerCase())) {
+      return res.status(400).json({ error: 'Only Google Maps links are permitted' });
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(parsed.toString(), {
+        method: 'GET',
+        redirect: 'follow',
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; HiyoriTrip/1.0)',
+        },
+      });
+      return res.json({ resolvedUrl: response.url || parsed.toString() });
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err: any) {
+    return res.status(400).json({ error: err?.message || 'Failed to resolve URL' });
+  }
+});
+
 // Helper: Multi-model fallback execution
 async function generateWithModelFallback(params: {
   contents: any[];
   config: any;
 }) {
   if (!ai) throw new Error('Gemini API key is not configured');
-  const models = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite'];
+  const configuredModels = (process.env.GEMINI_MODELS || '')
+    .split(',')
+    .map((m) => m.trim())
+    .filter(Boolean);
+  const models =
+    configuredModels.length > 0 ? configuredModels : ['gemini-2.5-flash', 'gemini-2.0-flash'];
   let lastError: any = null;
 
   for (const model of models) {
@@ -73,10 +149,14 @@ async function generateWithModelFallback(params: {
 
 // AI Intelligent Travel Itinerary Parser
 app.post('/api/parse-itinerary', async (req, res) => {
+  if (!checkAiRateLimit(req, res)) return;
   try {
     const { text, destinationHint, preferredCurrency, startDate, endDate } = req.body;
     if (!text || typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ error: '請提供行程文字或檔案內容' });
+    }
+    if (text.length > 40000) {
+      return res.status(400).json({ error: '文字內容過長（上限 40,000 字），請分段解析。' });
     }
 
     if (!ai) {
@@ -187,7 +267,7 @@ ${text}
       throw new Error('LLM 未返回有效解析數據');
     }
 
-    const tripData = JSON.parse(parsedJsonText);
+    const tripData = JSON.parse(stripJsonCodeFences(parsedJsonText));
 
     const tripDays = Array.isArray(tripData.days) ? tripData.days : [];
     const computedStart = tripData.startDate || todayStr;
@@ -231,6 +311,7 @@ ${text}
           completed: false,
         })),
       })),
+      todos: [],
       packingList: [
         { id: 'p1', name: '護照正本（有效期6個月以上）', category: 'documents', packed: false, essential: true },
         { id: 'p2', name: '海外高回饋信用卡與現金', category: 'documents', packed: false, essential: true },
@@ -252,13 +333,14 @@ ${text}
   } catch (err: any) {
     console.error('AI itinerary parse error:', err);
     return res.status(500).json({
-      error: `AI 行程解析發生錯誤: ${err.message || '請稍後重試'}`,
+      error: 'AI 行程解析暫時發生異常，已自動建議改用本機快速解析。',
     });
   }
 });
 
 // AI Smart Trip Generator Endpoint
 app.post('/api/generate-trip', async (req, res) => {
+  if (!checkAiRateLimit(req, res)) return;
   try {
     const { destination, daysCount, style, preferences, currency, startDate } = req.body;
     if (!destination || typeof destination !== 'string' || !destination.trim()) {
@@ -358,7 +440,7 @@ app.post('/api/generate-trip', async (req, res) => {
 
     const parsedJsonText = response.text;
     if (!parsedJsonText) throw new Error('LLM 未返回有效數據');
-    const tripData = JSON.parse(parsedJsonText);
+    const tripData = JSON.parse(stripJsonCodeFences(parsedJsonText));
 
     const computedStart = tripData.startDate || start;
     const processedTrip = {
@@ -394,6 +476,7 @@ app.post('/api/generate-trip', async (req, res) => {
           completed: false,
         })),
       })),
+      todos: [],
       packingList: [
         { id: 'p1', name: '護照正本（有效期6個月以上）', category: 'documents', packed: false, essential: true },
         { id: 'p2', name: '海外回饋信用卡與當地現金', category: 'documents', packed: false, essential: true },
@@ -415,7 +498,7 @@ app.post('/api/generate-trip', async (req, res) => {
   } catch (err: any) {
     console.error('AI trip generation error:', err);
     return res.status(500).json({
-      error: `AI 規劃行程發生錯誤: ${err.message || '請稍後重試'}`,
+      error: 'AI 規劃行程暫時無法連線，請稍後重試或使用本機範本。',
     });
   }
 });

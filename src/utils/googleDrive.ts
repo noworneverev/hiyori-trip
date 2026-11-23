@@ -3,10 +3,11 @@ import { clearDriveAccessToken } from './firebase';
 const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
 const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
 const HIYORI_ROOT_FOLDER_NAME = '日和手帳 Hiyori 原圖備份';
-const MAX_OBJECT_URL_CACHE = 30;
+const MAX_OBJECT_URL_CACHE = 20;
+const MULTIPART_MAX_BYTES = 4.5 * 1024 * 1024; // Drive API v3 caps multipart at 5MB; use resumable above 4.5MB
 
 export class DriveAuthExpiredError extends Error {
-  constructor(message = 'Google Drive 授權已過期，請重新授權連線') {
+  constructor(message = 'Google Drive 授權已過期或權限不足，請重新授權連線') {
     super(message);
     this.name = 'DriveAuthExpiredError';
   }
@@ -14,18 +15,16 @@ export class DriveAuthExpiredError extends Error {
 
 let cachedRootFolderId: string | null = null;
 const tripFolderCache = new Map<string, string>();
-const originalObjectUrlCache = new Map<string, string>();
+const originalObjectUrlCache = new Map<string, { url: string; mimeType: string }>();
 const inFlightOriginalFetches = new Map<string, Promise<string>>();
 
 export function clearDriveClientCaches(): void {
   cachedRootFolderId = null;
   tripFolderCache.clear();
-  for (const url of originalObjectUrlCache.values()) {
+  for (const entry of originalObjectUrlCache.values()) {
     try {
-      URL.revokeObjectURL(url);
-    } catch {
-      // Ignore revoke errors
-    }
+      URL.revokeObjectURL(entry.url);
+    } catch {}
   }
   originalObjectUrlCache.clear();
   inFlightOriginalFetches.clear();
@@ -39,11 +38,22 @@ function sanitizeFolderName(name: string): string {
   return (name || '未命名旅程').replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 80) || '未命名旅程';
 }
 
+function extensionForMime(mimeType?: string): string {
+  if (!mimeType) return '.jpg';
+  const lower = mimeType.toLowerCase();
+  if (lower.includes('heic')) return '.heic';
+  if (lower.includes('heif')) return '.heif';
+  if (lower.includes('png')) return '.png';
+  if (lower.includes('webp')) return '.webp';
+  if (lower.includes('gif')) return '.gif';
+  return '.jpg';
+}
+
 async function driveFetch(url: string, token: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers || {});
   headers.set('Authorization', `Bearer ${token}`);
   const res = await fetch(url, { ...init, headers });
-  if (res.status === 401) {
+  if (res.status === 401 || res.status === 403) {
     clearDriveAccessToken();
     clearDriveClientCaches();
     throw new DriveAuthExpiredError();
@@ -186,6 +196,49 @@ export async function uploadOriginalPhotoToDrive(
     },
   };
 
+  // Files > 4.5MB must use Drive Resumable Upload API (multipart caps at 5MB)
+  if (file.size > MULTIPART_MAX_BYTES) {
+    const initRes = await driveFetch(
+      `${DRIVE_UPLOAD_BASE}/files?uploadType=resumable&fields=id,name,size,mimeType`,
+      opts.token,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=UTF-8',
+          'X-Upload-Content-Type': mimeType,
+          'X-Upload-Content-Length': String(file.size),
+        },
+        body: JSON.stringify(metadata),
+      }
+    );
+    if (!initRes.ok) {
+      const errText = await initRes.text().catch(() => '');
+      throw new Error(`無法建立 Google Drive 大檔上傳階段 (${initRes.status}): ${errText}`);
+    }
+    const uploadUrl = initRes.headers.get('Location');
+    if (!uploadUrl) {
+      throw new Error('Google Drive 未回傳續傳網址');
+    }
+    const putRes = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': mimeType,
+      },
+      body: file,
+    });
+    if (!putRes.ok) {
+      const errText = await putRes.text().catch(() => '');
+      throw new Error(`原圖續傳 Google Drive 失敗 (${putRes.status}): ${errText}`);
+    }
+    const created = await putRes.json();
+    return {
+      driveFileId: created.id,
+      driveFolderId: folderId,
+      originalBytes: Number(created.size) || file.size,
+      originalMimeType: created.mimeType || mimeType,
+    };
+  }
+
   const boundary = `hiyori_drive_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const metaPart =
     `--${boundary}\r\n` +
@@ -227,7 +280,7 @@ export async function uploadOriginalPhotoToDrive(
 
 export function getCachedDriveOriginalObjectUrl(driveFileId?: string): string | null {
   if (!driveFileId) return null;
-  return originalObjectUrlCache.get(driveFileId) || null;
+  return originalObjectUrlCache.get(driveFileId)?.url || null;
 }
 
 export async function fetchDriveOriginalObjectUrl(
@@ -236,10 +289,9 @@ export async function fetchDriveOriginalObjectUrl(
 ): Promise<string> {
   const cached = originalObjectUrlCache.get(driveFileId);
   if (cached) {
-    // Refresh LRU order
     originalObjectUrlCache.delete(driveFileId);
     originalObjectUrlCache.set(driveFileId, cached);
-    return cached;
+    return cached.url;
   }
 
   const existingPromise = inFlightOriginalFetches.get(driveFileId);
@@ -262,19 +314,20 @@ export async function fetchDriveOriginalObjectUrl(
     if (originalObjectUrlCache.size >= MAX_OBJECT_URL_CACHE) {
       const oldestKey = originalObjectUrlCache.keys().next().value;
       if (oldestKey) {
-        const oldestUrl = originalObjectUrlCache.get(oldestKey);
+        const oldestEntry = originalObjectUrlCache.get(oldestKey);
         originalObjectUrlCache.delete(oldestKey);
-        if (oldestUrl) {
+        if (oldestEntry) {
           try {
-            URL.revokeObjectURL(oldestUrl);
-          } catch {
-            // Ignore
-          }
+            URL.revokeObjectURL(oldestEntry.url);
+          } catch {}
         }
       }
     }
 
-    originalObjectUrlCache.set(driveFileId, objectUrl);
+    originalObjectUrlCache.set(driveFileId, {
+      url: objectUrl,
+      mimeType: blob.type || res.headers.get('Content-Type') || 'image/jpeg',
+    });
     return objectUrl;
   })();
 
@@ -292,9 +345,17 @@ export async function downloadDriveOriginalFile(
   token: string
 ): Promise<void> {
   const objectUrl = await fetchDriveOriginalObjectUrl(driveFileId, token);
+  const entry = originalObjectUrlCache.get(driveFileId);
+  const expectedExt = extensionForMime(entry?.mimeType);
+  let safeName = (filename || `hiyori_original_${driveFileId}`).replace(/[\\/:*?"<>|]/g, '_');
+  // Avoid saving an image/heic blob with a forced .jpg extension
+  if (entry?.mimeType && !safeName.toLowerCase().endsWith(expectedExt)) {
+    safeName = safeName.replace(/\.(jpe?g|png|webp|heic|heif)$/i, '') + expectedExt;
+  }
   const a = document.createElement('a');
   a.href = objectUrl;
-  a.download = filename || `hiyori_original_${driveFileId}.jpg`;
+  a.download = safeName;
+  a.rel = 'noopener';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -313,10 +374,8 @@ export async function deleteDriveFile(driveFileId: string, token: string): Promi
   if (cached) {
     originalObjectUrlCache.delete(driveFileId);
     try {
-      URL.revokeObjectURL(cached);
-    } catch {
-      // Ignore
-    }
+      URL.revokeObjectURL(cached.url);
+    } catch {}
   }
 }
 

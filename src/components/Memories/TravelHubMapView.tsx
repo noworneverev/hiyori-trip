@@ -62,12 +62,15 @@ export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
   const mapRef = useRef<L.Map | null>(null);
   const markersLayerRef = useRef<L.LayerGroup | null>(null);
   const hotspotLayerRef = useRef<L.LayerGroup | null>(null);
+  const markerByKeyRef = useRef<Map<string, { marker: L.Marker; spot: FlattenedSpotMemory }>>(new Map());
+  const prevActiveKeyRef = useRef<string | null>(null);
 
   const [colorBy, setColorBy] = useState<'trip' | 'category'>('trip');
   const [showHotspots, setShowHotspots] = useState(true);
   const [selectedSpot, setSelectedSpot] = useState<FlattenedSpotMemory | null>(null);
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [showUnmapped, setShowUnmapped] = useState(false);
+  const [showAllUnmapped, setShowAllUnmapped] = useState(false);
 
   const mappedSpots = useMemo(
     () =>
@@ -192,7 +195,37 @@ export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
     };
   }, []);
 
-  // Render markers & city density rings whenever filtered data or styling changes
+  const buildMarkerIcon = (spot: FlattenedSpotMemory, isActive: boolean) => {
+    const color =
+      colorBy === 'trip'
+        ? tripColorMap.get(spot.tripId) || '#0d9488'
+        : CATEGORY_HEX[spot.category] || '#0d9488';
+    const hasPhoto = spot.photos.length > 0;
+    const size = isActive ? 30 : hasPhoto ? 24 : 18;
+
+    return L.divIcon({
+      className: 'hiyori-hub-marker',
+      html: `<div style="
+        width:${size}px;
+        height:${size}px;
+        border-radius:9999px;
+        background:${color};
+        border:${isActive ? '3px solid #ffffff' : '2px solid #ffffff'};
+        box-shadow:0 3px 10px rgba(15,23,42,0.35);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        color:#ffffff;
+        font-size:10px;
+        font-weight:700;
+        transition:transform 0.15s ease;
+      ">${hasPhoto ? '●' : ''}</div>`,
+      iconSize: [size, size],
+      iconAnchor: [size / 2, size / 2],
+    });
+  };
+
+  // Render markers & city density rings ONLY when filtered data or styling changes (decoupled from selectedSpot!)
   useEffect(() => {
     const map = mapRef.current;
     const markersLayer = markersLayerRef.current;
@@ -201,6 +234,7 @@ export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
 
     markersLayer.clearLayers();
     hotspotLayer.clearLayers();
+    markerByKeyRef.current.clear();
 
     if (showHotspots) {
       cityHotspots.forEach((hs) => {
@@ -221,58 +255,91 @@ export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
       });
     }
 
+    // Group overlapping coordinates to apply gentle deterministic spiderfy offsets
+    const coordGroups = new Map<string, FlattenedSpotMemory[]>();
+    mappedSpots.forEach((spot) => {
+      const k = `${spot.lat!.toFixed(4)},${spot.lng!.toFixed(4)}`;
+      const bucket = coordGroups.get(k) || [];
+      bucket.push(spot);
+      coordGroups.set(k, bucket);
+    });
+
     const latLngs: L.LatLngExpression[] = [];
 
     mappedSpots.forEach((spot) => {
-      const color =
-        colorBy === 'trip'
-          ? tripColorMap.get(spot.tripId) || '#0d9488'
-          : CATEGORY_HEX[spot.category] || '#0d9488';
+      const spotKey = `${spot.tripId}::${spot.spotId}`;
+      const coordKey = `${spot.lat!.toFixed(4)},${spot.lng!.toFixed(4)}`;
+      const bucket = coordGroups.get(coordKey) || [spot];
+      let displayLat = spot.lat!;
+      let displayLng = spot.lng!;
+      if (bucket.length > 1) {
+        const idx = bucket.indexOf(spot);
+        const angle = (2 * Math.PI * idx) / bucket.length;
+        const radiusDeg = 0.00028 * Math.ceil((idx + 1) / 8);
+        displayLat += Math.sin(angle) * radiusDeg;
+        displayLng += Math.cos(angle) * radiusDeg;
+      }
+
       const isActive =
         selectedSpot?.tripId === spot.tripId && selectedSpot?.spotId === spot.spotId;
-      const hasPhoto = spot.photos.length > 0;
-      const size = isActive ? 30 : hasPhoto ? 24 : 18;
+      const icon = buildMarkerIcon(spot, isActive);
 
-      const icon = L.divIcon({
-        className: 'hiyori-hub-marker',
-        html: `<div style="
-          width:${size}px;
-          height:${size}px;
-          border-radius:9999px;
-          background:${color};
-          border:${isActive ? '3px solid #ffffff' : '2px solid #ffffff'};
-          box-shadow:0 3px 10px rgba(15,23,42,0.35);
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          color:#ffffff;
-          font-size:10px;
-          font-weight:700;
-          transition:transform 0.15s ease;
-        ">${hasPhoto ? '●' : ''}</div>`,
-        iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2],
+      const marker = L.marker([displayLat, displayLng], {
+        icon,
+        zIndexOffset: isActive ? 600 : 0,
       });
-
-      const marker = L.marker([spot.lat!, spot.lng!], { icon });
       marker.on('click', () => {
         setSelectedSpot(spot);
         setSelectedCity(spot.tripDestination || null);
-        map.flyTo([spot.lat!, spot.lng!], Math.max(map.getZoom(), 13), { duration: 0.45 });
+        const targetZoom = Math.max(map.getZoom(), 13);
+        const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+        if (isMobile) {
+          // Offset camera slightly south so the active pin remains visible above the bottom preview card
+          const targetPt = map.project([displayLat, displayLng], targetZoom);
+          const shiftedLatLng = map.unproject(L.point(targetPt.x, targetPt.y + 92), targetZoom);
+          map.flyTo(shiftedLatLng, targetZoom, { duration: 0.45 });
+        } else {
+          map.flyTo([displayLat, displayLng], targetZoom, { duration: 0.45 });
+        }
       });
       marker.bindTooltip(`${escapeHtml(spot.spotTitle)} · ${escapeHtml(spot.tripDestination || '')}`, {
         direction: 'top',
         offset: [0, -10],
       });
       marker.addTo(markersLayer);
-      latLngs.push([spot.lat!, spot.lng!]);
+      markerByKeyRef.current.set(spotKey, { marker, spot });
+      latLngs.push([displayLat, displayLng]);
     });
 
-    if (latLngs.length > 0 && !selectedSpot && !selectedCity) {
+    prevActiveKeyRef.current = selectedSpot ? `${selectedSpot.tripId}::${selectedSpot.spotId}` : null;
+
+    if (latLngs.length > 0 && !selectedCity) {
       const bounds = L.latLngBounds(latLngs);
       map.fitBounds(bounds.pad(0.18), { maxZoom: 13 });
     }
-  }, [mappedSpots, cityHotspots, colorBy, showHotspots, selectedSpot?.spotId, tripColorMap]);
+  }, [mappedSpots, cityHotspots, colorBy, showHotspots, tripColorMap]);
+
+  // Lightweight active-marker icon highlight update (zero teardown, zero zoom reset on card dismiss!)
+  useEffect(() => {
+    const nextKey = selectedSpot ? `${selectedSpot.tripId}::${selectedSpot.spotId}` : null;
+    const prevKey = prevActiveKeyRef.current;
+
+    if (prevKey && prevKey !== nextKey) {
+      const prevEntry = markerByKeyRef.current.get(prevKey);
+      if (prevEntry) {
+        prevEntry.marker.setIcon(buildMarkerIcon(prevEntry.spot, false));
+        prevEntry.marker.setZIndexOffset(0);
+      }
+    }
+    if (nextKey) {
+      const nextEntry = markerByKeyRef.current.get(nextKey);
+      if (nextEntry) {
+        nextEntry.marker.setIcon(buildMarkerIcon(nextEntry.spot, true));
+        nextEntry.marker.setZIndexOffset(600);
+      }
+    }
+    prevActiveKeyRef.current = nextKey;
+  }, [selectedSpot?.tripId, selectedSpot?.spotId, colorBy, tripColorMap]);
 
   const handleCityFocus = (hs: CityHotspot) => {
     setSelectedCity(hs.city);
@@ -379,20 +446,22 @@ export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
         />
 
         {mappedSpots.length === 0 && (
-          <div className="absolute inset-0 z-20 bg-white/85 dark:bg-slate-950/85 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-center space-y-2">
-            <MapPin className="w-8 h-8 text-slate-400" />
-            <p className="text-sm font-bold text-slate-800 dark:text-slate-200">
+          <div className="absolute inset-0 z-[450] bg-white/92 dark:bg-slate-900/92 backdrop-blur-xs flex flex-col items-center justify-center p-6 text-center space-y-2">
+            <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+              <MapPin className="w-6 h-6 text-teal-600 dark:text-teal-400" />
+            </div>
+            <p className="text-sm font-bold text-slate-900 dark:text-white">
               目前篩選條件下尚無經緯度座標
             </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md">
+            <p className="text-xs text-slate-600 dark:text-slate-300 max-w-md leading-relaxed">
               在行程景點中使用「地圖選點」或搜尋地點儲存後，足跡座標將自動點亮於世界地圖上。
             </p>
           </div>
         )}
 
-        {/* Selected Spot Editorial Preview Overlay */}
+        {/* Selected Spot Editorial Preview Overlay (z-[500] sits reliably above Leaflet panes) */}
         {selectedSpot && (
-          <div className="absolute inset-x-3 bottom-3 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:w-[360px] z-30 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl p-4 space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-150">
+          <div className="absolute inset-x-3 bottom-3 sm:inset-x-auto sm:right-4 sm:bottom-4 sm:w-[360px] z-[500] bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-2xl border border-slate-200 dark:border-slate-700 shadow-2xl p-4 space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-150">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 space-y-0.5">
                 <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1.5 flex-wrap">
@@ -525,25 +594,38 @@ export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
           </button>
 
           {showUnmapped && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 mt-3">
-              {unmappedSpots.slice(0, 18).map((s) => (
+            <div className="space-y-3 mt-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                {(showAllUnmapped ? unmappedSpots : unmappedSpots.slice(0, 18)).map((s) => (
+                  <button
+                    key={`${s.tripId}-${s.spotId}`}
+                    type="button"
+                    onClick={() => {
+                      onSelectTrip(s.tripId, s.spotId);
+                      onCloseHub();
+                    }}
+                    className="text-left p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-teal-500 transition space-y-1 cursor-pointer"
+                  >
+                    <div className="text-[11px] text-slate-400 font-mono tabular-nums truncate">
+                      {s.tripDestination} · {s.date ? formatDateSlash(s.date) : `D${s.dayNumber}`}
+                    </div>
+                    <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
+                      {s.spotTitle}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {unmappedSpots.length > 18 && (
                 <button
-                  key={`${s.tripId}-${s.spotId}`}
                   type="button"
-                  onClick={() => {
-                    onSelectTrip(s.tripId, s.spotId);
-                    onCloseHub();
-                  }}
-                  className="text-left p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 hover:border-teal-500 transition space-y-1 cursor-pointer"
+                  onClick={() => setShowAllUnmapped((prev) => !prev)}
+                  className="text-xs font-bold text-teal-700 dark:text-teal-400 hover:underline cursor-pointer"
                 >
-                  <div className="text-[11px] text-slate-400 font-mono tabular-nums truncate">
-                    {s.tripDestination} · {s.date ? formatDateSlash(s.date) : `D${s.dayNumber}`}
-                  </div>
-                  <div className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
-                    {s.spotTitle}
-                  </div>
+                  {showAllUnmapped
+                    ? '收合部分紀錄'
+                    : `顯示全部 ${unmappedSpots.length} 筆未標記紀錄`}
                 </button>
-              ))}
+              )}
             </div>
           )}
         </div>

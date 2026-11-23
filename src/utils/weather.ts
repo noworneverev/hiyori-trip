@@ -1,4 +1,6 @@
 import { Language } from './i18n';
+import { isValidCoordinate } from './geo';
+import { getTodayInTimezone } from './date';
 
 export interface WeatherData {
   temperature: number;
@@ -13,13 +15,13 @@ export interface WeatherData {
   locationName: string;
   source: 'destination' | 'gps';
   fetchedAt: number;
+  isStale?: boolean;
 }
 
 /**
  * WMO Weather Codes translation dictionary
  */
 export function getWeatherDescription(code: number, lang: Language): { label: string; icon: string } {
-  // Mapping of WMO weather codes
   if (code === 0) {
     const labels: Record<Language, string> = {
       zh: '晴朗無雲',
@@ -137,7 +139,7 @@ export function getWeatherDescription(code: number, lang: Language): { label: st
 export function getBrowserCoordinates(): Promise<{ lat: number; lng: number }> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
-      reject(new Error('Geolocation is not supported by your browser'));
+      reject(Object.assign(new Error('Geolocation is not supported by your browser'), { code: 0 }));
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -159,63 +161,221 @@ export function getBrowserCoordinates(): Promise<{ lat: number; lng: number }> {
   });
 }
 
-/**
- * Geocode city name to coordinates via Open-Meteo geocoding API
- */
-export async function geocodeCity(name: string): Promise<{ lat: number; lng: number; name: string } | null> {
+// --- Geocoding Cache & Multi-token Querying ---
+const GEOCODE_CACHE_KEY = 'hiyori_geocode_cache_v1';
+const memoryGeocodeCache = new Map<string, { lat: number; lng: number; name: string } | null>();
+
+function readGeocodeDiskCache(): Record<string, { lat: number; lng: number; name: string }> {
   try {
-    const cleanName = encodeURIComponent(name.trim().split(/[,/]/)[0]);
-    const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${cleanName}&count=1&language=en&format=json`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.results && data.results.length > 0) {
-      const match = data.results[0];
-      return {
-        lat: match.latitude,
-        lng: match.longitude,
-        name: match.name,
-      };
-    }
-  } catch (e) {
-    console.warn('Geocoding failed for', name, e);
+    const raw = localStorage.getItem(GEOCODE_CACHE_KEY);
+    return raw ? JSON.parse(raw) || {} : {};
+  } catch {
+    return {};
   }
+}
+
+function writeGeocodeDiskCache(key: string, value: { lat: number; lng: number; name: string }): void {
+  try {
+    const all = readGeocodeDiskCache();
+    all[key] = value;
+    const trimmed = Object.entries(all).slice(-40);
+    localStorage.setItem(GEOCODE_CACHE_KEY, JSON.stringify(Object.fromEntries(trimmed)));
+  } catch {
+    // Ignore quota
+  }
+}
+
+/**
+ * Build progressive candidate city tokens from compound destination strings
+ * e.g. "日本北陸 (金澤・富山)" -> ["金澤", "富山", "日本北陸"]
+ */
+function extractGeocodeCandidates(raw: string): string[] {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return [];
+  const candidates: string[] = [];
+
+  // Extract parenthesized city list first — usually the most specific city names
+  const parenMatch = trimmed.match(/[（(]([^）)]+)[）)]/);
+  if (parenMatch && parenMatch[1]) {
+    parenMatch[1]
+      .split(/[・、,/／\s+&·]+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2)
+      .forEach((t) => candidates.push(t));
+  }
+
+  // Strip parenthesized portion and split by delimiters
+  const outside = trimmed.replace(/[（(][^）)]*[）)]/g, ' ').trim();
+  if (outside) {
+    candidates.push(outside);
+    outside
+      .split(/[・、,/／\-–—\s+&·]+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2)
+      .forEach((t) => candidates.push(t));
+  }
+
+  return Array.from(new Set(candidates)).slice(0, 4);
+}
+
+/**
+ * Geocode city name to coordinates via Open-Meteo geocoding API with cache & compound-title fallback
+ */
+export async function geocodeCity(
+  name: string,
+  signal?: AbortSignal
+): Promise<{ lat: number; lng: number; name: string } | null> {
+  const normalized = (name || '').trim();
+  if (!normalized) return null;
+
+  const cacheKey = normalized.toLowerCase();
+  if (memoryGeocodeCache.has(cacheKey)) {
+    return memoryGeocodeCache.get(cacheKey) ?? null;
+  }
+
+  const diskAll = readGeocodeDiskCache();
+  if (diskAll[cacheKey] && isValidCoordinate(diskAll[cacheKey].lat, diskAll[cacheKey].lng)) {
+    memoryGeocodeCache.set(cacheKey, diskAll[cacheKey]);
+    return diskAll[cacheKey];
+  }
+
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return null;
+  }
+
+  const candidates = extractGeocodeCandidates(normalized);
+
+  for (const candidate of candidates) {
+    try {
+      const cleanName = encodeURIComponent(candidate);
+      const res = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${cleanName}&count=1&language=en&format=json`,
+        { signal }
+      );
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data.results && data.results.length > 0) {
+        const match = data.results[0];
+        if (isValidCoordinate(match.latitude, match.longitude)) {
+          const hit = {
+            lat: match.latitude,
+            lng: match.longitude,
+            name: match.name || candidate,
+          };
+          memoryGeocodeCache.set(cacheKey, hit);
+          writeGeocodeDiskCache(cacheKey, hit);
+          return hit;
+        }
+      }
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return null;
+    }
+  }
+
+  memoryGeocodeCache.set(cacheKey, null);
   return null;
+}
+
+// --- Current Weather Cache (30-min TTL + Offline Stale Fallback) ---
+const CURRENT_WEATHER_CACHE_KEY = 'hiyori_current_weather_cache_v1';
+const CURRENT_WEATHER_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const memoryCurrentWeatherCache = new Map<string, WeatherData>();
+
+function readCurrentWeatherDiskCache(): Record<string, WeatherData> {
+  try {
+    const raw = localStorage.getItem(CURRENT_WEATHER_CACHE_KEY);
+    return raw ? JSON.parse(raw) || {} : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCurrentWeatherDiskCache(key: string, entry: WeatherData): void {
+  memoryCurrentWeatherCache.set(key, entry);
+  try {
+    const all = readCurrentWeatherDiskCache();
+    all[key] = entry;
+    const trimmed = Object.entries(all)
+      .sort((a, b) => b[1].fetchedAt - a[1].fetchedAt)
+      .slice(0, 16);
+    localStorage.setItem(CURRENT_WEATHER_CACHE_KEY, JSON.stringify(Object.fromEntries(trimmed)));
+  } catch {
+    // Ignore quota issues
+  }
 }
 
 /**
  * Fetch live weather from Open-Meteo (Free, reliable, no API key required)
+ * Supports 30-min caching and offline stale-cache fallback.
  */
 export async function fetchCurrentWeather(
   lat: number,
   lng: number,
   locationName: string,
-  source: 'destination' | 'gps' = 'destination'
+  source: 'destination' | 'gps' = 'destination',
+  options?: { forceRefresh?: boolean; signal?: AbortSignal }
 ): Promise<WeatherData> {
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`;
-
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Weather fetch failed: ${res.statusText}`);
+  if (!isValidCoordinate(lat, lng)) {
+    throw new Error('Invalid coordinates for weather lookup');
   }
 
-  const data = await res.json();
-  const current = data.current;
-  const daily = data.daily;
+  const bucketKey = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+  const memHit = memoryCurrentWeatherCache.get(bucketKey);
+  const diskHit = !memHit ? readCurrentWeatherDiskCache()[bucketKey] : memHit;
 
-  return {
-    temperature: Math.round(current.temperature_2m),
-    apparentTemperature: Math.round(current.apparent_temperature),
-    humidity: current.relative_humidity_2m,
-    windSpeed: Math.round(current.wind_speed_10m),
-    precipitation: current.precipitation,
-    weatherCode: current.weather_code,
-    maxTemp: daily?.temperature_2m_max?.[0] !== undefined ? Math.round(daily.temperature_2m_max[0]) : Math.round(current.temperature_2m),
-    minTemp: daily?.temperature_2m_min?.[0] !== undefined ? Math.round(daily.temperature_2m_min[0]) : Math.round(current.temperature_2m),
-    rainProbability: daily?.precipitation_probability_max?.[0] || 0,
-    locationName,
-    source,
-    fetchedAt: Date.now(),
-  };
+  if (!options?.forceRefresh && diskHit && Date.now() - diskHit.fetchedAt < CURRENT_WEATHER_TTL_MS) {
+    memoryCurrentWeatherCache.set(bucketKey, diskHit);
+    return { ...diskHit, locationName, source, isStale: false };
+  }
+
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat.toFixed(4)}&longitude=${lng.toFixed(4)}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto`;
+
+  try {
+    const res = await fetch(url, { signal: options?.signal });
+    if (!res.ok) {
+      throw new Error(`Weather fetch failed: ${res.status}`);
+    }
+
+    const data = await res.json();
+    const current = data.current;
+    const daily = data.daily;
+
+    if (!current || typeof current.temperature_2m !== 'number') {
+      throw new Error('Malformed weather payload');
+    }
+
+    const fresh: WeatherData = {
+      temperature: Math.round(current.temperature_2m),
+      apparentTemperature: Math.round(current.apparent_temperature ?? current.temperature_2m),
+      humidity: Math.round(current.relative_humidity_2m ?? 0),
+      windSpeed: Math.round(current.wind_speed_10m ?? 0),
+      precipitation: current.precipitation ?? 0,
+      weatherCode: current.weather_code ?? 1,
+      maxTemp:
+        daily?.temperature_2m_max?.[0] !== undefined
+          ? Math.round(daily.temperature_2m_max[0])
+          : Math.round(current.temperature_2m),
+      minTemp:
+        daily?.temperature_2m_min?.[0] !== undefined
+          ? Math.round(daily.temperature_2m_min[0])
+          : Math.round(current.temperature_2m),
+      rainProbability: Math.round(daily?.precipitation_probability_max?.[0] ?? 0),
+      locationName,
+      source,
+      fetchedAt: Date.now(),
+      isStale: false,
+    };
+
+    writeCurrentWeatherDiskCache(bucketKey, fresh);
+    return fresh;
+  } catch (err: any) {
+    if (err?.name === 'AbortError') throw err;
+    // Graceful offline / error fallback to cached reading if available
+    if (diskHit) {
+      return { ...diskHit, locationName, source, isStale: true };
+    }
+    throw err;
+  }
 }
 
 export interface DailyWeatherForecast {
@@ -224,6 +384,7 @@ export interface DailyWeatherForecast {
   maxTemp: number;
   minTemp: number;
   rainProbability: number;
+  precipitationSum?: number;
   windSpeedMax: number;
   locationName: string;
   source: 'forecast' | 'archive';
@@ -235,7 +396,7 @@ export interface DayWeatherStatus {
   daysUntilForecast?: number;
 }
 
-const DAILY_WEATHER_CACHE_KEY = 'hiyori_daily_weather_cache_v1';
+const DAILY_WEATHER_CACHE_KEY = 'hiyori_daily_weather_cache_v2';
 const FORECAST_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
 const ARCHIVE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -262,7 +423,6 @@ function writeWeatherCache(key: string, entry: CachedDailyWeatherEntry): void {
   try {
     const existing = readWeatherCache();
     existing[key] = entry;
-    // Keep at most 24 cache entries to keep localStorage lightweight
     const entries = Object.entries(existing)
       .sort((a, b) => b[1].fetchedAt - a[1].fetchedAt)
       .slice(0, 24);
@@ -270,14 +430,6 @@ function writeWeatherCache(key: string, entry: CachedDailyWeatherEntry): void {
   } catch {
     // Ignore storage quota issues
   }
-}
-
-function getLocalTodayYYYYMMDD(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
 }
 
 function diffDaysYYYYMMDD(fromDate: string, toDate: string): number {
@@ -295,8 +447,9 @@ function addDaysYYYYMMDD(base: string, offset: number): string {
 }
 
 /**
- * Fetch Open-Meteo daily forecast (up to +15 days from today) or historical archive (< today)
- * for a rounded coordinate bucket and date range, using memory + localStorage caching.
+ * Fetch Open-Meteo daily forecast (recent past -5d up to +15d) or historical ERA5 archive (<= -6d).
+ * IMPORTANT: Archive API rejects `precipitation_probability_max` with HTTP 400, so we request
+ * `precipitation_sum` in archive mode and map observed rainfall to an intuitive display indicator.
  */
 async function fetchOpenMeteoRange(
   lat: number,
@@ -304,7 +457,8 @@ async function fetchOpenMeteoRange(
   startDate: string,
   endDate: string,
   locationName: string,
-  mode: 'forecast' | 'archive'
+  mode: 'forecast' | 'archive',
+  signal?: AbortSignal
 ): Promise<Record<string, DailyWeatherForecast>> {
   const bucketKey = `${mode}:${lat.toFixed(2)},${lng.toFixed(2)}:${startDate}:${endDate}`;
   const ttl = mode === 'forecast' ? FORECAST_CACHE_TTL_MS : ARCHIVE_CACHE_TTL_MS;
@@ -326,54 +480,75 @@ async function fetchOpenMeteoRange(
       ? 'https://api.open-meteo.com/v1/forecast'
       : 'https://archive-api.open-meteo.com/v1/archive';
 
+  // Archive API does NOT support precipitation_probability_max (returns HTTP 400).
+  const dailyFields =
+    mode === 'forecast'
+      ? 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max'
+      : 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max';
+
   const params = new URLSearchParams({
     latitude: lat.toFixed(4),
     longitude: lng.toFixed(4),
-    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max',
+    daily: dailyFields,
     timezone: 'auto',
     start_date: startDate,
     end_date: endDate,
   });
 
-  const res = await fetch(`${baseUrl}?${params.toString()}`);
-  if (!res.ok) {
-    // If diskHit exists even slightly stale, return gracefully
-    if (diskHit) return diskHit.days;
-    throw new Error(`Open-Meteo ${mode} failed: ${res.status}`);
-  }
-
-  const json = await res.json();
-  const daily = json?.daily;
-  const result: Record<string, DailyWeatherForecast> = {};
-
-  if (daily && Array.isArray(daily.time)) {
-    for (let i = 0; i < daily.time.length; i++) {
-      const date = daily.time[i];
-      const maxT = daily.temperature_2m_max?.[i];
-      const minT = daily.temperature_2m_min?.[i];
-      const code = daily.weather_code?.[i];
-      if (typeof maxT !== 'number' || typeof minT !== 'number') continue;
-
-      result[date] = {
-        date,
-        weatherCode: typeof code === 'number' ? code : 1,
-        maxTemp: Math.round(maxT),
-        minTemp: Math.round(minT),
-        rainProbability: Math.round(daily.precipitation_probability_max?.[i] ?? 0),
-        windSpeedMax: Math.round(daily.wind_speed_10m_max?.[i] ?? 0),
-        locationName,
-        source: mode,
-      };
+  try {
+    const res = await fetch(`${baseUrl}?${params.toString()}`, { signal });
+    if (!res.ok) {
+      if (diskHit) return diskHit.days;
+      throw new Error(`Open-Meteo ${mode} failed: ${res.status}`);
     }
+
+    const json = await res.json();
+    const daily = json?.daily;
+    const result: Record<string, DailyWeatherForecast> = {};
+
+    if (daily && Array.isArray(daily.time)) {
+      for (let i = 0; i < daily.time.length; i++) {
+        const date = daily.time[i];
+        const maxT = daily.temperature_2m_max?.[i];
+        const minT = daily.temperature_2m_min?.[i];
+        const code = daily.weather_code?.[i];
+        if (typeof maxT !== 'number' || typeof minT !== 'number') continue;
+
+        const precipSum = typeof daily.precipitation_sum?.[i] === 'number' ? daily.precipitation_sum[i] : 0;
+        let rainProb = 0;
+        if (mode === 'forecast' && typeof daily.precipitation_probability_max?.[i] === 'number') {
+          rainProb = Math.round(daily.precipitation_probability_max[i]);
+        } else {
+          // For historical archive days, translate actual recorded rainfall (mm) cleanly
+          rainProb = precipSum >= 5 ? 95 : precipSum >= 1 ? 80 : precipSum > 0.2 ? 50 : 0;
+        }
+
+        result[date] = {
+          date,
+          weatherCode: typeof code === 'number' ? code : 1,
+          maxTemp: Math.round(maxT),
+          minTemp: Math.round(minT),
+          rainProbability: rainProb,
+          precipitationSum: Math.round(precipSum * 10) / 10,
+          windSpeedMax: Math.round(daily.wind_speed_10m_max?.[i] ?? 0),
+          locationName,
+          source: mode,
+        };
+      }
+    }
+
+    writeWeatherCache(bucketKey, {
+      fetchedAt: Date.now(),
+      source: mode,
+      days: result,
+    });
+
+    return result;
+  } catch (err: any) {
+    if (err?.name === 'AbortError') throw err;
+    if (diskHit) return diskHit.days;
+    throw err;
   }
-
-  writeWeatherCache(bucketKey, {
-    fetchedAt: Date.now(),
-    source: mode,
-    days: result,
-  });
-
-  return result;
 }
 
 export interface DayWeatherQueryInput {
@@ -388,19 +563,22 @@ export interface DayWeatherQueryInput {
  */
 export async function fetchTripWeatherByDay(
   days: DayWeatherQueryInput[],
-  fallbackDestination: string
+  fallbackDestination: string,
+  destinationTz?: string,
+  signal?: AbortSignal
 ): Promise<Record<number, DayWeatherStatus>> {
   const output: Record<number, DayWeatherStatus> = {};
   if (!days || days.length === 0) return output;
 
-  const todayStr = getLocalTodayYYYYMMDD();
+  const todayStr = getTodayInTimezone(destinationTz);
   const maxForecastDate = addDaysYYYYMMDD(todayStr, 15);
-  const yesterdayStr = addDaysYYYYMMDD(todayStr, -1);
+  // Open-Meteo /v1/forecast covers recent past days seamlessly (avoiding the 2-5 day ERA5 archive lag)
+  const archiveCutoffStr = addDaysYYYYMMDD(todayStr, -6);
 
   // Find trip-wide fallback coordinates from any spot or geocode destination
   let globalCoords: { lat: number; lng: number; name: string } | null = null;
   for (const d of days) {
-    const withCoords = d.items.find((it) => typeof it.lat === 'number' && typeof it.lng === 'number');
+    const withCoords = d.items.find((it) => isValidCoordinate(it.lat, it.lng));
     if (withCoords) {
       globalCoords = {
         lat: withCoords.lat!,
@@ -412,13 +590,12 @@ export async function fetchTripWeatherByDay(
   }
 
   if (!globalCoords && fallbackDestination) {
-    const geo = await geocodeCity(fallbackDestination);
+    const geo = await geocodeCity(fallbackDestination, signal);
     if (geo) {
       globalCoords = geo;
     }
   }
 
-  // Group day requests by coordinate bucket + mode ('forecast' | 'archive') to minimize HTTP requests
   interface BucketGroup {
     lat: number;
     lng: number;
@@ -435,7 +612,7 @@ export async function fetchTripWeatherByDay(
     const cleanDate = (d.date || '').slice(0, 10).replace(/\//g, '-');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate)) continue;
 
-    const daySpot = d.items.find((it) => typeof it.lat === 'number' && typeof it.lng === 'number');
+    const daySpot = d.items.find((it) => isValidCoordinate(it.lat, it.lng));
     const coords = daySpot
       ? {
           lat: daySpot.lat!,
@@ -455,14 +632,13 @@ export async function fetchTripWeatherByDay(
       continue;
     }
 
-    const mode: 'forecast' | 'archive' = cleanDate < todayStr ? 'archive' : 'forecast';
-    const clampedEnd = mode === 'archive' && cleanDate > yesterdayStr ? yesterdayStr : cleanDate;
+    const mode: 'forecast' | 'archive' = cleanDate <= archiveCutoffStr ? 'archive' : 'forecast';
     const bucketKey = `${mode}:${coords.lat.toFixed(2)},${coords.lng.toFixed(2)}`;
 
     const existing = groups.get(bucketKey);
     if (existing) {
-      if (clampedEnd < existing.minDate) existing.minDate = clampedEnd;
-      if (clampedEnd > existing.maxDate) existing.maxDate = clampedEnd;
+      if (cleanDate < existing.minDate) existing.minDate = cleanDate;
+      if (cleanDate > existing.maxDate) existing.maxDate = cleanDate;
       existing.dayEntries.push({ dayNumber: d.dayNumber, date: cleanDate });
     } else {
       groups.set(bucketKey, {
@@ -470,8 +646,8 @@ export async function fetchTripWeatherByDay(
         lng: coords.lng,
         locationName: coords.name,
         mode,
-        minDate: clampedEnd,
-        maxDate: clampedEnd,
+        minDate: cleanDate,
+        maxDate: cleanDate,
         dayEntries: [{ dayNumber: d.dayNumber, date: cleanDate }],
       });
     }
@@ -486,7 +662,8 @@ export async function fetchTripWeatherByDay(
           group.minDate,
           group.maxDate,
           group.locationName,
-          group.mode
+          group.mode,
+          signal
         );
         for (const entry of group.dayEntries) {
           const hit = rangeMap[entry.date];
@@ -496,7 +673,8 @@ export async function fetchTripWeatherByDay(
             output[entry.dayNumber] = { status: 'error' };
           }
         }
-      } catch {
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
         for (const entry of group.dayEntries) {
           output[entry.dayNumber] = { status: 'error' };
         }

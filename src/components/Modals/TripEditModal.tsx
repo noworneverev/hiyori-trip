@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Trip, TripMemoryItem, DayPlan } from '../../types/itinerary';
 import { PRESET_TRIPS } from '../../data/presetTrips';
-import { generateAiTrip, universalParseItinerary } from '../../utils/aiClient';
+import { generateAiTrip, universalParseItinerary, checkAiAvailability, AiBackendMode } from '../../utils/aiClient';
 import { MediaImage } from '../UI/MediaImage';
 import { resolveDestinationTimezone } from '../../utils/timezone';
 import { getTodayLocal, addDaysLocal, formatMonthDaySlash } from '../../utils/date';
@@ -100,6 +100,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
   const [currency, setCurrency] = useState(trip?.currency || 'JPY');
   const [coverGradient, setCoverGradient] = useState(trip?.coverGradient || GRADIENTS[0].class);
   const [googlePhotosAlbumUrl, setGooglePhotosAlbumUrl] = useState(trip?.googlePhotosAlbumUrl || '');
+  const [notes, setNotes] = useState(trip?.notes || '');
 
   // Inline Disclosure Sections
   const [datesExpanded, setDatesExpanded] = useState(false);
@@ -151,7 +152,22 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
 
   // Folded Advanced Options (AI / Paste / Preset)
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [advancedSubTab, setAdvancedSubTab] = useState<'ai' | 'paste' | 'preset'>('ai');
+  const [aiMode, setAiMode] = useState<AiBackendMode>('local_only');
+  const [advancedSubTab, setAdvancedSubTab] = useState<'ai' | 'paste' | 'preset'>('paste');
+
+  useEffect(() => {
+    let active = true;
+    checkAiAvailability().then((mode) => {
+      if (!active) return;
+      setAiMode(mode);
+      if (mode !== 'local_only') {
+        setAdvancedSubTab('ai');
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // AI Generation State
   const [aiStyle, setAiStyle] = useState('classic');
@@ -307,8 +323,57 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
     const resolvedLat = destinationLat ?? exifSummary.centroidLat;
     const resolvedLng = destinationLng ?? exifSummary.centroidLng;
 
+    const safeStart = startDate || today;
+    const safeEnd = !endDate || endDate < safeStart ? safeStart : endDate;
+
     if (isEditing && trip) {
       const safeAlbumUrl = sanitizeExternalUrl(googlePhotosAlbumUrl) || undefined;
+      const effectiveMode: 'planner' | 'memory' = isMemoryMode || isPhotoMemoryOnly ? 'memory' : 'planner';
+      const targetDaysCount = effectiveMode === 'memory' ? Math.max(1, (trip.days || []).length) : calculateDays(safeStart, safeEnd);
+
+      // Keep trip.days synchronized when user updates startDate / endDate on an existing planner trip
+      let syncedDays = trip.days || [];
+      if (effectiveMode === 'planner') {
+        const existing = [...syncedDays];
+        const nextDays: DayPlan[] = [];
+        for (let i = 0; i < targetDaysCount; i++) {
+          const dDate = addDaysLocal(safeStart, i);
+          if (existing[i]) {
+            nextDays.push({
+              ...existing[i],
+              dayNumber: i + 1,
+              date: dDate,
+            });
+          } else {
+            nextDays.push({
+              id: `day-${i + 1}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+              dayNumber: i + 1,
+              date: dDate,
+              theme: `Day ${i + 1} 行程`,
+              items: [],
+            });
+          }
+        }
+        // Preserve any extra trailing days that still contain planned spots so edits never silently delete user itineraries
+        if (existing.length > targetDaysCount) {
+          for (let i = targetDaysCount; i < existing.length; i++) {
+            if ((existing[i].items || []).length > 0) {
+              nextDays.push({
+                ...existing[i],
+                dayNumber: nextDays.length + 1,
+                date: addDaysLocal(safeStart, nextDays.length),
+              });
+            }
+          }
+        }
+        syncedDays = nextDays;
+      }
+
+      const finalSyncedEnd =
+        effectiveMode === 'planner' && syncedDays.length > 0
+          ? syncedDays[syncedDays.length - 1].date
+          : safeEnd;
+
       didSaveRef.current = true;
       onSave({
         ...trip,
@@ -316,14 +381,16 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
         destination: finalDest,
         destinationLat: resolvedLat,
         destinationLng: resolvedLng,
-        tripMode: isMemoryMode ? 'memory' : 'planner',
-        startDate,
-        endDate: isPhotoMemoryOnly && !isMemoryMode ? startDate : endDate,
+        tripMode: effectiveMode,
+        startDate: safeStart,
+        endDate: finalSyncedEnd,
+        days: syncedDays,
         currency,
         coverGradient,
         isSoloTrip,
         isSplitEnabled: isSoloTrip ? false : trip.isSplitEnabled,
         googlePhotosAlbumUrl: safeAlbumUrl,
+        notes: notes.trim(),
         updatedAt: Date.now(),
       });
       onClose();
@@ -434,7 +501,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
         isSplitEnabled: false,
         googlePhotosAlbumUrl: safeAlbumUrl,
         driveFolderId: resolvedTripFolderId,
-        notes: '',
+        notes: notes.trim(),
         days: dayList,
         todos: [],
         packingList: [],
@@ -479,7 +546,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
       isSoloTrip,
       isSplitEnabled: !isSoloTrip,
       googlePhotosAlbumUrl: sanitizeExternalUrl(googlePhotosAlbumUrl) || undefined,
-      notes: '',
+      notes: notes.trim(),
       days: dayList,
       todos: [],
       packingList: [],
@@ -548,10 +615,19 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
         endDate
       );
 
+      const safeBaseStart = startDate || today;
       const parsedTrip = result.trip;
       parsedTrip.title = title.trim() || parsedTrip.title;
-      parsedTrip.startDate = startDate;
-      parsedTrip.endDate = endDate;
+      parsedTrip.startDate = safeBaseStart;
+      parsedTrip.days = (parsedTrip.days || []).map((d, idx) => ({
+        ...d,
+        dayNumber: idx + 1,
+        date: addDaysLocal(safeBaseStart, idx),
+      }));
+      parsedTrip.endDate =
+        parsedTrip.days.length > 0
+          ? parsedTrip.days[parsedTrip.days.length - 1].date
+          : endDate || safeBaseStart;
       parsedTrip.coverGradient = coverGradient;
       parsedTrip.isSoloTrip = isSoloTrip;
       parsedTrip.isSplitEnabled = !isSoloTrip;
@@ -568,16 +644,35 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
   };
 
   const handleApplyPreset = (preset: Trip) => {
+    const now = Date.now();
+    const safeStart = startDate || today;
+    const shiftedDays: DayPlan[] = (preset.days || []).map((d, dIdx) => ({
+      ...d,
+      id: `day-preset-${now}-${dIdx + 1}`,
+      dayNumber: dIdx + 1,
+      date: addDaysLocal(safeStart, dIdx),
+      items: (d.items || []).map((it, iIdx) => ({
+        ...it,
+        id: `item-preset-${now}-${dIdx + 1}-${iIdx + 1}`,
+        completed: false,
+      })),
+    }));
     const clonedTrip: Trip = {
       ...preset,
-      id: `trip-preset-${Date.now()}`,
+      id: `trip-preset-${now}`,
       title: title.trim() || preset.title,
-      startDate,
-      endDate: addDaysLocal(startDate, Math.max(0, preset.days.length - 1)),
+      startDate: safeStart,
+      endDate: shiftedDays.length > 0 ? shiftedDays[shiftedDays.length - 1].date : safeStart,
+      days: shiftedDays,
+      todos: (preset.todos || []).map((td, idx) => ({ ...td, id: `todo-preset-${now}-${idx}` })),
+      packingList: (preset.packingList || []).map((pk, idx) => ({ ...pk, id: `pack-preset-${now}-${idx}` })),
+      expenses: [],
+      bookings: (preset.bookings || []).map((bk, idx) => ({ ...bk, id: `bk-preset-${now}-${idx}` })),
+      emergencyContacts: (preset.emergencyContacts || []).map((ec, idx) => ({ ...ec, id: `em-preset-${now}-${idx}` })),
       isSoloTrip,
       isSplitEnabled: !isSoloTrip,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
     };
     didSaveRef.current = true;
     onSave(clonedTrip);
@@ -858,17 +953,16 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
                     onChange={(e) => handleDestinationChange(e.target.value)}
                     className="min-w-0 flex-1 bg-transparent text-right text-[16px] sm:text-xs text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
                   />
-                  {tripMode === 'memory' && (
-                    <button
-                      type="button"
-                      disabled={isSearchingGeo || !(destination.trim() || title.trim())}
-                      onClick={handleSearchDestinationGeo}
-                      className="min-h-[34px] px-2.5 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 text-xs font-bold flex items-center gap-1 shrink-0 disabled:opacity-40 cursor-pointer"
-                    >
-                      {isSearchingGeo ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
-                      <span>定位</span>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    disabled={isSearchingGeo || !(destination.trim() || title.trim())}
+                    onClick={handleSearchDestinationGeo}
+                    className="min-h-[34px] px-2.5 rounded-lg bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 text-xs font-bold flex items-center gap-1 shrink-0 disabled:opacity-40 cursor-pointer"
+                    title="搜尋城市座標以啟用氣象與全球地圖足跡"
+                  >
+                    {isSearchingGeo ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+                    <span>定位</span>
+                  </button>
                 </div>
               </div>
 
@@ -961,6 +1055,24 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
                 )}
               </div>
             </IosDisclosureRow>
+
+            {/* Trip Overview / Notes Field */}
+            <div className="px-4 py-3 space-y-1.5">
+              <label
+                htmlFor="trip-edit-notes"
+                className="block text-sm sm:text-xs font-semibold text-slate-800 dark:text-slate-200"
+              >
+                旅程簡介與備註（選填）
+              </label>
+              <textarea
+                id="trip-edit-notes"
+                rows={3}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="記錄這趟旅程的主題、交通票券重點或航班備註..."
+                className="w-full px-3 py-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs text-slate-900 dark:text-white placeholder:text-slate-400 outline-none focus:border-teal-600 leading-relaxed resize-y"
+              />
+            </div>
           </IosInsetGroup>
 
           {/* Options & Preferences Inset Group */}
@@ -1042,7 +1154,8 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
               >
                 <div className="p-3.5 space-y-2">
                   <input
-                    type="url"
+                    type="text"
+                    inputMode="url"
                     placeholder="https://photos.app.goo.gl/..."
                     value={googlePhotosAlbumUrl}
                     onChange={(e) => setGooglePhotosAlbumUrl(e.target.value)}
@@ -1070,24 +1183,26 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
           <IosInsetGroup header="智慧建立助手">
             <IosDisclosureRow
               icon={<Sparkles className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-              label="AI 規劃 · 貼上筆記 · 經典範本"
+              label={aiMode !== 'local_only' ? 'AI 規劃 · 貼上筆記 · 經典範本' : '貼上筆記 · 經典範本'}
               value={showAdvanced ? '收合' : '展開'}
               expanded={showAdvanced}
               onToggle={() => setShowAdvanced((v) => !v)}
             >
               <div className="p-3.5 space-y-3.5">
-                <div className="grid grid-cols-3 gap-1 p-1 bg-[#EFECE5] dark:bg-slate-800 rounded-xl">
-                  <button
-                    type="button"
-                    onClick={() => setAdvancedSubTab('ai')}
-                    className={`min-h-[34px] text-xs font-semibold rounded-lg transition cursor-pointer ${
-                      advancedSubTab === 'ai'
-                        ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 shadow-2xs font-bold'
-                        : 'text-slate-600 dark:text-slate-400'
-                    }`}
-                  >
-                    AI 規劃
-                  </button>
+                <div className={`grid ${aiMode !== 'local_only' ? 'grid-cols-3' : 'grid-cols-2'} gap-1 p-1 bg-[#EFECE5] dark:bg-slate-800 rounded-xl`}>
+                  {aiMode !== 'local_only' && (
+                    <button
+                      type="button"
+                      onClick={() => setAdvancedSubTab('ai')}
+                      className={`min-h-[34px] text-xs font-semibold rounded-lg transition cursor-pointer ${
+                        advancedSubTab === 'ai'
+                          ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 shadow-2xs font-bold'
+                          : 'text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      AI 規劃
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setAdvancedSubTab('paste')}
@@ -1112,7 +1227,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
                   </button>
                 </div>
 
-                {advancedSubTab === 'ai' && (
+                {aiMode !== 'local_only' && advancedSubTab === 'ai' && (
                   <div className="space-y-3">
                     <div className="rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 overflow-hidden divide-y divide-[#E5E2DC]/75 dark:divide-slate-800">
                       <IosDisclosureRow

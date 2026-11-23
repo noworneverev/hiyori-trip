@@ -19,6 +19,7 @@ import {
   IosInsetGroup,
   IosToggleRow,
   IosRow,
+  IosActionSheet,
 } from '../UI/IosPrimitives';
 
 interface RemindersTodoListProps {
@@ -152,6 +153,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
   const [focusedTodoId, setFocusedTodoId] = useState<string | null>(null);
   const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [confirmClearCompleted, setConfirmClearCompleted] = useState(false);
 
   // iOS Reminders "(i)" Details Sheet State
   const [detailTodo, setDetailTodo] = useState<TodoItem | null>(null);
@@ -198,9 +200,9 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
     if (focusedTodoId === id) setFocusedTodoId(null);
   };
 
-  const handleClearCompleted = () => {
-    if (!canEdit || completedTodos.length === 0) return;
-    if (requireAuth && !requireAuth(handleClearCompleted, isZh ? '清除已完成待辦' : 'Clear completed')) {
+  const executeClearCompleted = () => {
+    if (!canEdit || completedTodos.length === 0) {
+      setConfirmClearCompleted(false);
       return;
     }
     const now = Date.now();
@@ -214,6 +216,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
       deletedItemIds: deletedMap,
       updatedAt: now,
     });
+    setConfirmClearCompleted(false);
     onShowToast?.(isZh ? '已清除所有已完成項目' : 'Cleared completed reminders');
   };
 
@@ -226,9 +229,9 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
     }
 
     const newTodo: TodoItem = {
-      id: `todo-${Date.now()}`,
+      id: `todo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       title: trimmed,
-      category: 'other',
+      category: 'preparation',
       completed: false,
     };
     onUpdateTrip({
@@ -292,7 +295,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
 
     const rowInner = (
       <div
-        className={`flex items-start gap-1.5 ${
+        className={`group/row flex items-start gap-1.5 ${
           compact ? 'px-3 py-2.5' : 'px-3.5 sm:px-5 py-3'
         } transition-colors ${
           isFocused
@@ -337,15 +340,12 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
             }}
           />
 
-          {(todo.notes || todo.dueDate) && (
+          {(todo.dueDate || todo.notes) && (
             <button
               type="button"
               onClick={() => canEdit && openDetailsSheet(todo)}
-              className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-left text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition cursor-pointer"
+              className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-left text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition cursor-pointer"
             >
-              {todo.notes && (
-                <span className="line-clamp-1 max-w-full">{todo.notes}</span>
-              )}
               {todo.dueDate && (
                 <span
                   className={`inline-flex items-center gap-1 font-mono tabular-nums ${
@@ -358,29 +358,48 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
                   <span>{todo.dueDate}</span>
                 </span>
               )}
+              {todo.notes && (
+                <span className="line-clamp-1 max-w-full">
+                  {todo.dueDate ? `· ${todo.notes}` : todo.notes}
+                </span>
+              )}
             </button>
           )}
         </div>
 
-        {/* Right iPhone-style (i) Details Button */}
+        {/* Right Actions: Desktop Delete + iPhone-style (i) Details Button */}
         {canEdit && (
-          <button
-            type="button"
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={(e) => {
-              e.stopPropagation();
-              openDetailsSheet(todo);
-            }}
-            className={`min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] -mr-2 -mt-1.5 flex items-center justify-center rounded-full transition cursor-pointer shrink-0 ${
-              isFocused
-                ? 'text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/60 opacity-100'
-                : 'text-slate-400 dark:text-slate-500 hover:text-teal-700 dark:hover:text-teal-400 hover:bg-slate-100 dark:hover:bg-slate-800/70 opacity-65 sm:opacity-45 hover:opacity-100'
-            }`}
-            title={isZh ? '詳細資訊' : 'Details'}
-            aria-label={isZh ? '詳細資訊' : 'Reminder details'}
-          >
-            <Info className="w-[18px] h-[18px]" />
-          </button>
+          <div className="flex items-center gap-0.5 -mr-2 -mt-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteTodo(todo.id);
+              }}
+              className="hidden md:flex min-w-[34px] min-h-[34px] items-center justify-center rounded-full text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 opacity-0 group-hover/row:opacity-100 transition cursor-pointer"
+              title={isZh ? '刪除' : 'Delete'}
+              aria-label={isZh ? '刪除待辦' : 'Delete reminder'}
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation();
+                openDetailsSheet(todo);
+              }}
+              className={`min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-full transition cursor-pointer ${
+                isFocused
+                  ? 'text-teal-700 dark:text-teal-400 bg-teal-50 dark:bg-teal-950/60 opacity-100'
+                  : 'text-slate-400 dark:text-slate-500 hover:text-teal-700 dark:hover:text-teal-400 hover:bg-slate-100 dark:hover:bg-slate-800/70 opacity-70 sm:opacity-50 hover:opacity-100'
+              }`}
+              title={isZh ? '詳細資訊' : 'Details'}
+              aria-label={isZh ? '詳細資訊' : 'Reminder details'}
+            >
+              <Info className="w-[18px] h-[18px]" />
+            </button>
+          </div>
         )}
       </div>
     );
@@ -406,7 +425,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
 
   return (
     <div className="flex flex-col">
-      {/* Borderless iOS Reminders Quick-Add Row */}
+      {/* Borderless iOS Reminders Quick-Add Row (No accidental IME onBlur auto-commit!) */}
       {canEdit && (
         <div
           className={`flex items-center gap-1.5 ${
@@ -429,9 +448,8 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
                 commitNewReminder(true);
               }
             }}
-            onBlur={() => commitNewReminder(false)}
             enterKeyHint="done"
-            placeholder={isZh ? '新增提醒事項...' : 'New Reminder...'}
+            placeholder={isZh ? '新增提醒事項（按 Enter 或右側加入）...' : 'New Reminder...'}
             aria-label={isZh ? '新增提醒事項' : 'New reminder'}
             className="flex-1 min-h-[44px] sm:min-h-[36px] bg-transparent border-0 p-0 text-base sm:text-[15px] text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-hidden focus:ring-0"
           />
@@ -440,7 +458,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => commitNewReminder(true)}
-              className="min-h-[36px] px-3 rounded-xl text-xs font-bold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/50 transition cursor-pointer shrink-0"
+              className="min-h-[38px] px-3.5 rounded-xl text-xs font-bold bg-teal-700 text-white hover:bg-teal-800 transition cursor-pointer shrink-0"
             >
               {isZh ? '加入' : 'Add'}
             </button>
@@ -460,7 +478,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
               : isZh ? '全部項目已完成' : 'All Completed'}
           </p>
           <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-            {isZh ? '點選文字即可直接編輯，右側 (i) 可設定日期與備註' : 'Tap text to edit inline, tap (i) for date & notes'}
+            {isZh ? '點選文字即可原位編輯，右側 (i) 可補充備註與到期日' : 'Tap text to edit inline, tap (i) for notes & date'}
           </p>
         </div>
       ) : (
@@ -487,7 +505,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
             {showCompleted && canEdit && (
               <button
                 type="button"
-                onClick={handleClearCompleted}
+                onClick={() => setConfirmClearCompleted(true)}
                 className="min-h-[36px] px-2 text-xs font-semibold text-rose-500 hover:text-rose-600 dark:hover:text-rose-400 cursor-pointer"
               >
                 {isZh ? '清除全部' : 'Clear'}
@@ -501,6 +519,22 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
             </div>
           )}
         </div>
+      )}
+
+      {/* Confirm Clear Completed Action Sheet */}
+      {confirmClearCompleted && (
+        <IosActionSheet
+          title={isZh ? `確定清除 ${completedTodos.length} 筆已完成待辦？` : `Clear ${completedTodos.length} completed items?`}
+          message={isZh ? '清除後無法復原。' : 'This action cannot be undone.'}
+          options={[
+            {
+              label: isZh ? '確認清除' : 'Clear Completed',
+              tone: 'destructive',
+              onClick: executeClearCompleted,
+            },
+          ]}
+          onClose={() => setConfirmClearCompleted(false)}
+        />
       )}
 
       {/* iOS Reminders-style "(i)" Details Sheet Modal */}
@@ -522,7 +556,6 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
           />
 
           <div className="p-4 space-y-4 overflow-y-auto overscroll-contain touch-pan-y flex-1 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
-            {/* Group 1: Title & Notes */}
             <IosInsetGroup>
               <div className="px-4 py-2.5">
                 <input
@@ -544,7 +577,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
               </div>
             </IosInsetGroup>
 
-            {/* Group 2: Date Toggle + Date Picker */}
+            {/* Date Toggle + Date Picker */}
             <IosInsetGroup>
               <IosToggleRow
                 icon={
@@ -552,7 +585,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
                     <Calendar className="w-4 h-4" />
                   </div>
                 }
-                label={isZh ? '日期' : 'Date'}
+                label={isZh ? '到期日' : 'Due Date'}
                 subtitle={detailHasDate && detailDueDate ? detailDueDate : undefined}
                 checked={detailHasDate}
                 onChange={(next) => {
@@ -569,7 +602,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
                     <button
                       type="button"
                       onClick={() => setDetailDueDate(todayStr)}
-                      className={`min-h-[44px] sm:min-h-[36px] px-3.5 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                      className={`min-h-[40px] sm:min-h-[36px] px-3.5 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
                         detailDueDate === todayStr
                           ? 'bg-teal-700 text-white border-teal-700'
                           : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-[#E5E2DC] dark:border-slate-700'
@@ -580,7 +613,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
                     <button
                       type="button"
                       onClick={() => setDetailDueDate(getTomorrowStr())}
-                      className={`min-h-[44px] sm:min-h-[36px] px-3.5 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                      className={`min-h-[40px] sm:min-h-[36px] px-3.5 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
                         detailDueDate === getTomorrowStr()
                           ? 'bg-teal-700 text-white border-teal-700'
                           : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-[#E5E2DC] dark:border-slate-700'
@@ -595,7 +628,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
                           setDetailHasDate(false);
                           setDetailDueDate('');
                         }}
-                        className="min-h-[44px] sm:min-h-[36px] px-3 ml-auto text-xs text-slate-500 hover:text-rose-500 flex items-center gap-1 cursor-pointer"
+                        className="min-h-[40px] sm:min-h-[36px] px-3 ml-auto text-xs text-slate-500 hover:text-rose-500 flex items-center gap-1 cursor-pointer"
                       >
                         <X className="w-3.5 h-3.5" />
                         <span>清除</span>
@@ -612,7 +645,6 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
               )}
             </IosInsetGroup>
 
-            {/* Group 3: Explicit Delete Row */}
             <IosInsetGroup divided={false}>
               <IosRow
                 icon={<Trash2 className="w-4 h-4 text-rose-600 dark:text-rose-400" />}

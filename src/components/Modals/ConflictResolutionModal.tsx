@@ -42,17 +42,20 @@ export const ConflictResolutionModal: React.FC<ConflictResolutionModalProps> = (
   const [selectedStrategy, setSelectedStrategy] = useState<'keep_local' | 'keep_cloud' | 'smart_merge' | null>(null);
 
   if (!conflicts || conflicts.length === 0) return null;
-  const currentConflict = conflicts[currentIndex] || conflicts[0];
+  const safeIndex = Math.min(currentIndex, conflicts.length - 1);
+  const currentConflict = conflicts[safeIndex];
 
   const handleResolve = async (strategy: 'keep_local' | 'keep_cloud' | 'smart_merge') => {
     setSelectedStrategy(strategy);
     setIsResolving(true);
     try {
+      const remainingAfter = conflicts.length - 1;
       const resolved = await resolveTripConflict(currentConflict, strategy, userId);
       onResolved(resolved);
 
-      if (currentIndex + 1 < conflicts.length) {
-        setCurrentIndex(currentIndex + 1);
+      // Parent removes resolved item from `conflicts`, so keep index clamped instead of incrementing past next item
+      if (remainingAfter > 0) {
+        setCurrentIndex(Math.min(safeIndex, remainingAfter - 1));
       } else {
         onClose();
       }
@@ -66,7 +69,7 @@ export const ConflictResolutionModal: React.FC<ConflictResolutionModalProps> = (
   };
 
   const { localSummary, cloudSummary, newerVersion, timeDiffMinutes } = currentConflict;
-  const isZh = lang === 'zh';
+  const isZh = lang === 'zh' || lang === 'zh-CN';
 
   return (
     <IosModalSheet

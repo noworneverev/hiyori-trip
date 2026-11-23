@@ -1,6 +1,6 @@
 /**
- * Copy text to clipboard reliably across desktop, mobile Safari/Android WebViews,
- * and non-HTTPS localhost/iframe contexts with an automatic textarea fallback.
+ * Copy text to clipboard reliably across desktop, iOS Safari/PWA, Android WebViews,
+ * and non-HTTPS localhost contexts with an iOS-compatible textarea fallback.
  */
 export async function copyTextToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
@@ -19,11 +19,20 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
   try {
     const textarea = document.createElement('textarea');
     textarea.value = text;
-    textarea.setAttribute('readonly', '');
+    // Do NOT set readonly attribute: older iOS Safari blocks execCommand('copy') on readonly inputs
+    textarea.contentEditable = 'true';
     textarea.style.position = 'fixed';
-    textarea.style.top = '-9999px';
-    textarea.style.left = '-9999px';
+    textarea.style.top = '0';
+    textarea.style.left = '0';
+    textarea.style.width = '2em';
+    textarea.style.height = '2em';
+    textarea.style.padding = '0';
+    textarea.style.border = 'none';
+    textarea.style.outline = 'none';
+    textarea.style.boxShadow = 'none';
+    textarea.style.background = 'transparent';
     textarea.style.opacity = '0';
+    textarea.style.fontSize = '16px'; // Prevent iOS Safari auto-zoom
     document.body.appendChild(textarea);
 
     const selection = document.getSelection();

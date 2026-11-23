@@ -5,7 +5,12 @@ import { useIsMobileViewport } from '../../hooks/useIsMobileViewport';
 import { Language, TRANSLATIONS, LANGUAGE_OPTIONS } from '../../utils/i18n';
 import { performAppUpdate, UpdateState } from '../../utils/pwaUpdater';
 import { APP_VERSION, BUILD_DATE } from '../../constants/version';
-import { getSavedAccessibilityScale, applyAccessibilityScale, AccessibilityScale } from '../../utils/accessibility';
+import {
+  getSavedAccessibilityScale,
+  applyAccessibilityScale,
+  AccessibilityScale,
+  ACCESSIBILITY_OPTIONS,
+} from '../../utils/accessibility';
 import { getStorageUsage, getStorageUsageAsync, resetAllLocalData } from '../../utils/storage';
 import {
   IosModalSheet,
@@ -25,7 +30,6 @@ import {
   Upload,
   Smartphone,
   ExternalLink,
-  ShieldCheck,
   Github,
   ChevronRight,
   Printer,
@@ -36,8 +40,10 @@ import {
   HardDrive,
   Share,
   CheckCircle2,
+  Compass,
+  Settings,
+  AlertCircle,
 } from 'lucide-react';
-
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 
 interface AppMenuProps {
@@ -49,6 +55,8 @@ interface AppMenuProps {
   onOpenExportPDF: () => void;
   onOpenShareTrip?: () => void;
   onOpenCollaborate?: () => void;
+  onOpenGlobalHub?: () => void;
+  onOpenSettings?: () => void;
   onResetData?: () => void;
   onOpenChange?: (isOpen: boolean) => void;
 }
@@ -62,6 +70,8 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   onOpenExportPDF,
   onOpenShareTrip,
   onOpenCollaborate,
+  onOpenGlobalHub,
+  onOpenSettings,
   onResetData,
   onOpenChange,
 }) => {
@@ -76,6 +86,8 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle' });
   const [scale, setScale] = useState<AccessibilityScale>(getSavedAccessibilityScale);
   const [storageInfo, setStorageInfo] = useState(getStorageUsage);
+
+  const isZh = lang === 'zh' || lang === 'zh-CN';
 
   useEffect(() => {
     onOpenChange?.(isOpen);
@@ -94,11 +106,12 @@ export const AppMenu: React.FC<AppMenuProps> = ({
 
   useBodyScrollLock(updateState.status === 'checking' || updateState.status === 'updating');
   const menuRef = useRef<HTMLDivElement>(null);
-  const t = TRANSLATIONS[lang];
+  const t = TRANSLATIONS[lang] || TRANSLATIONS.zh;
 
   useEffect(() => {
-    const handleScaleEvent = (e: any) => {
-      setScale(e.detail?.scale || getSavedAccessibilityScale());
+    const handleScaleEvent = (e: Event) => {
+      const detail = (e as CustomEvent<{ scale?: AccessibilityScale }>).detail;
+      setScale(detail?.scale || getSavedAccessibilityScale());
     };
     window.addEventListener('accessibility_scale_changed', handleScaleEvent);
     return () => window.removeEventListener('accessibility_scale_changed', handleScaleEvent);
@@ -109,22 +122,26 @@ export const AppMenu: React.FC<AppMenuProps> = ({
     applyAccessibilityScale(nextScale);
   };
 
-  // Close desktop popover on click outside
+  const closeMenu = () => {
+    setIsOpen(false);
+    setShowLangSubmenu(false);
+    setShowScaleSubmenu(false);
+    setShowAdvanced(false);
+    setShowConfirmReset(false);
+  };
+
+  // Close desktop popover on click outside or Escape
   useEffect(() => {
     if (!isOpen || isMobile) return;
     const handleClickOutside = (e: MouseEvent | TouchEvent) => {
       const target = e.target as Node;
       if (!menuRef.current?.contains(target)) {
-        setIsOpen(false);
-        setShowLangSubmenu(false);
-        setShowScaleSubmenu(false);
+        closeMenu();
       }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setIsOpen(false);
-        setShowLangSubmenu(false);
-        setShowScaleSubmenu(false);
+        closeMenu();
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -138,19 +155,14 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   }, [isOpen, isMobile]);
 
   const currentLangOption = LANGUAGE_OPTIONS.find((l) => l.code === lang) || LANGUAGE_OPTIONS[0];
-  const scaleLabel =
-    scale === 'senior' ? '特大 130%' : scale === 'comfortable' ? '放大 115%' : '標準 100%';
-
-  const closeMenu = () => {
-    setIsOpen(false);
-    setShowLangSubmenu(false);
-    setShowScaleSubmenu(false);
-  };
+  const currentScaleOption =
+    ACCESSIBILITY_OPTIONS.find((o) => o.id === scale) || ACCESSIBILITY_OPTIONS[0];
+  const scaleLabel = `${currentScaleOption.label} ${currentScaleOption.badge}`;
 
   const renderGroupedSections = () => (
     <div className="space-y-4">
       {/* Section 1: Display & Reading Preferences */}
-      <IosInsetGroup header={lang === 'zh' ? '顯示偏好' : 'Display'}>
+      <IosInsetGroup header={isZh ? '顯示偏好' : 'Display'}>
         <IosToggleRow
           icon={
             isDark ? (
@@ -159,14 +171,14 @@ export const AppMenu: React.FC<AppMenuProps> = ({
               <Sun className="w-4 h-4 text-teal-700" />
             )
           }
-          label={lang === 'zh' ? '深色夜間模式' : 'Dark Appearance'}
+          label={isZh ? '深色夜間模式' : 'Dark Appearance'}
           checked={isDark}
           onChange={() => onToggleDarkMode()}
         />
 
         <IosDisclosureRow
           icon={<Languages className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-          label={lang === 'zh' ? '介面語言' : 'Language'}
+          label={isZh ? '介面語言' : 'Language'}
           value={`${currentLangOption.flag} ${currentLangOption.name}`}
           expanded={showLangSubmenu}
           onToggle={() => setShowLangSubmenu((v) => !v)}
@@ -190,21 +202,18 @@ export const AppMenu: React.FC<AppMenuProps> = ({
 
         <IosDisclosureRow
           icon={<Eye className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-          label={lang === 'zh' ? '文字大小' : 'Text Size'}
+          label={isZh ? '文字大小' : 'Text Size'}
           value={scaleLabel}
           expanded={showScaleSubmenu}
           onToggle={() => setShowScaleSubmenu((v) => !v)}
         >
           <div className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800">
-            {[
-              { id: 'normal' as AccessibilityScale, label: '標準 100%' },
-              { id: 'comfortable' as AccessibilityScale, label: '放大 115%' },
-              { id: 'senior' as AccessibilityScale, label: '特大 130%' },
-            ].map((item) => (
+            {ACCESSIBILITY_OPTIONS.map((item) => (
               <IosCheckmarkRow
                 key={item.id}
                 inset
-                label={item.label}
+                label={`${item.label} ${item.badge}`}
+                subtitle={item.description}
                 selected={scale === item.id}
                 onSelect={() => {
                   handleSelectScale(item.id);
@@ -217,7 +226,20 @@ export const AppMenu: React.FC<AppMenuProps> = ({
       </IosInsetGroup>
 
       {/* Section 2: Trip Tools */}
-      <IosInsetGroup header={lang === 'zh' ? '行程工具' : 'Trip Tools'}>
+      <IosInsetGroup header={isZh ? '行程工具' : 'Trip Tools'}>
+        {onOpenGlobalHub && (
+          <IosRow
+            onClick={() => {
+              onOpenGlobalHub();
+              closeMenu();
+            }}
+            icon={<Compass className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+            label={isZh ? '足跡時光庫' : 'Travel Footprint Hub'}
+            subtitle={isZh ? '所有旅程地圖、年鑑統計與全相片畫廊' : 'All trips map, analytics & gallery'}
+            trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+          />
+        )}
+
         {onOpenCollaborate && (
           <IosRow
             onClick={() => {
@@ -225,7 +247,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
               closeMenu();
             }}
             icon={<Users className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-            label={lang === 'zh' ? '成員與協作權限' : 'Trip Members & Roles'}
+            label={isZh ? '成員與協作權限' : 'Trip Members & Roles'}
             trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
           />
         )}
@@ -237,7 +259,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
               closeMenu();
             }}
             icon={<Share2 className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-            label={lang === 'zh' ? '分享行程給親友' : 'Share Trip with Friends'}
+            label={isZh ? '分享行程給親友' : 'Share Trip with Friends'}
             trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
           />
         )}
@@ -265,9 +287,22 @@ export const AppMenu: React.FC<AppMenuProps> = ({
 
       {/* Section 3: System & Maintenance */}
       <IosInsetGroup
-        header={lang === 'zh' ? '系統與維護' : 'System'}
+        header={isZh ? '系統與維護' : 'System'}
         footer={`${t.localPrivacy} · ${APP_VERSION} (${BUILD_DATE})`}
       >
+        {onOpenSettings && (
+          <IosRow
+            onClick={() => {
+              onOpenSettings();
+              closeMenu();
+            }}
+            icon={<Settings className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+            label={isZh ? '系統設定與完整備份' : 'System Settings & Backup'}
+            subtitle={isZh ? '全旅程 JSON 備份、手動雲端同步與版本資訊' : 'Full JSON backup, sync & release notes'}
+            trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+          />
+        )}
+
         {isInstallable && (
           <IosRow
             onClick={async () => {
@@ -275,7 +310,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
               closeMenu();
             }}
             icon={<Smartphone className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-            label={lang === 'zh' ? '安裝至手機主畫面' : 'Install PWA App'}
+            label={isZh ? '安裝至手機主畫面' : 'Install PWA App'}
             trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
           />
         )}
@@ -287,7 +322,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
               setShowIOSGuide(true);
             }}
             icon={<Smartphone className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-            label={lang === 'zh' ? '加到 iPhone 主畫面' : 'Add to iPhone Home Screen'}
+            label={isZh ? '加到 iPhone 主畫面' : 'Add to iPhone Home Screen'}
             trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
           />
         )}
@@ -295,10 +330,10 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         {isInstalled && (
           <IosRow
             icon={<CheckCircle2 className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-            label={lang === 'zh' ? '主畫面 App 模式' : 'Home Screen App Mode'}
+            label={isZh ? '主畫面 App 模式' : 'Home Screen App Mode'}
             trailing={
               <span className="text-xs font-semibold text-teal-700 dark:text-teal-400">
-                {lang === 'zh' ? '離線就緒' : 'Offline Ready'}
+                {isZh ? '離線就緒' : 'Offline Ready'}
               </span>
             }
           />
@@ -310,37 +345,49 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           }}
           disabled={updateState.status === 'checking' || updateState.status === 'updating'}
           icon={
-            <RotateCcw
-              className={`w-4 h-4 text-teal-700 dark:text-teal-400 ${
-                updateState.status === 'checking' || updateState.status === 'updating'
-                  ? 'animate-spin'
-                  : ''
-              }`}
-            />
+            updateState.status === 'error' ? (
+              <AlertCircle className="w-4 h-4 text-amber-500" />
+            ) : updateState.status === 'latest' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            ) : (
+              <RotateCcw
+                className={`w-4 h-4 text-teal-700 dark:text-teal-400 ${
+                  updateState.status === 'checking' || updateState.status === 'updating'
+                    ? 'animate-spin'
+                    : ''
+                }`}
+              />
+            )
           }
           label={
             updateState.status === 'checking'
-              ? lang === 'zh'
+              ? isZh
                 ? '正在檢查更新...'
                 : 'Checking...'
               : updateState.status === 'updating'
-              ? lang === 'zh'
-                ? '正在載入新版...'
-                : 'Loading...'
-              : lang === 'zh'
+              ? isZh
+                ? '正在套用新版...'
+                : 'Updating...'
+              : updateState.status === 'latest'
+              ? updateState.message || (isZh ? '已是最新版本' : 'Up to date')
+              : updateState.status === 'error'
+              ? updateState.message || (isZh ? '檢查更新失敗' : 'Update check failed')
+              : isZh
               ? '檢查系統更新'
               : 'Check for Updates'
           }
           trailing={
-            <span className="text-xs font-semibold text-teal-700 dark:text-teal-400">
-              {lang === 'zh' ? '檢查' : 'Check'}
-            </span>
+            updateState.status === 'idle' ? (
+              <span className="text-xs font-semibold text-teal-700 dark:text-teal-400">
+                {isZh ? '檢查' : 'Check'}
+              </span>
+            ) : null
           }
         />
 
         <IosDisclosureRow
           icon={<HardDrive className="w-4 h-4 text-slate-500" />}
-          label={lang === 'zh' ? '本機空間與快取' : 'Local Storage'}
+          label={isZh ? '本機空間與快取' : 'Local Storage'}
           value={storageInfo.formatted}
           expanded={showAdvanced}
           onToggle={() => setShowAdvanced((v) => !v)}
@@ -348,7 +395,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           <div className="p-3.5 space-y-3 text-xs">
             <div className="flex items-center justify-between gap-2">
               <span className="text-slate-500 dark:text-slate-400">
-                {lang === 'zh' ? '清除離線快取資料' : 'Reset Local Cache'}
+                {isZh ? '清除本機快取資料' : 'Reset Local Cache'}
               </span>
               {showConfirmReset ? (
                 <div className="flex items-center gap-1.5">
@@ -362,32 +409,32 @@ export const AppMenu: React.FC<AppMenuProps> = ({
                         window.location.reload();
                       }
                     }}
-                    className="min-h-[34px] px-3 rounded-lg bg-rose-600 text-white font-bold text-xs cursor-pointer"
+                    className="min-h-[40px] px-3 rounded-xl bg-rose-600 text-white font-bold text-xs cursor-pointer"
                   >
-                    確認重設
+                    {isZh ? '確認重設' : 'Confirm'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowConfirmReset(false)}
-                    className="min-h-[34px] px-2 text-slate-500 font-semibold text-xs cursor-pointer"
+                    className="min-h-[40px] px-2.5 text-slate-500 font-semibold text-xs cursor-pointer"
                   >
-                    取消
+                    {isZh ? '取消' : 'Cancel'}
                   </button>
                 </div>
               ) : (
                 <button
                   type="button"
                   onClick={() => setShowConfirmReset(true)}
-                  className="min-h-[34px] px-2.5 rounded-lg text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 font-bold text-xs cursor-pointer"
+                  className="min-h-[40px] px-3 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 font-bold text-xs cursor-pointer"
                 >
-                  重設快取
+                  {isZh ? '重設快取' : 'Reset'}
                 </button>
               )}
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed pt-2 border-t border-[#E5E2DC]/70 dark:border-slate-800">
-              {lang === 'zh'
-                ? '行程文字解析已由安全代理或本機離線規則自動處理，無需手動設定 API Key。'
-                : 'Itinerary parsing automatically uses the server proxy or local offline rules.'}
+              {isZh
+                ? '行程與記帳資料優先保存在本機 IndexedDB，無網路時仍可完整使用。'
+                : 'Trips & expenses are stored locally in IndexedDB for full offline reliability.'}
             </p>
           </div>
         </IosDisclosureRow>
@@ -397,16 +444,25 @@ export const AppMenu: React.FC<AppMenuProps> = ({
 
   return (
     <div className="relative" ref={menuRef}>
-      {/* Menu Trigger Button */}
+      {/* Menu Trigger Button (>= 44x44pt on mobile) */}
       <button
+        type="button"
         onClick={() => {
-          setIsOpen(!isOpen);
-          setShowLangSubmenu(false);
-          setShowScaleSubmenu(false);
+          if (isOpen) {
+            closeMenu();
+          } else {
+            setIsOpen(true);
+            setShowLangSubmenu(false);
+            setShowScaleSubmenu(false);
+            setShowAdvanced(false);
+            setShowConfirmReset(false);
+          }
         }}
-        className="w-10 h-10 sm:w-9 sm:h-9 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center transition active:scale-95 cursor-pointer"
-        title={lang === 'zh' ? '功能與設定' : 'Menu & Settings'}
-        aria-label="Menu"
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        className="w-11 h-11 sm:w-9 sm:h-9 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center transition active:scale-95 cursor-pointer shrink-0"
+        title={isZh ? '功能與設定' : 'Menu & Settings'}
+        aria-label={isZh ? '功能與設定' : 'Menu & Settings'}
       >
         {isOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
       </button>
@@ -417,27 +473,23 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           onClose={closeMenu}
           zIndexClass="z-[80]"
           variant="grouped"
-          ariaLabel={lang === 'zh' ? '功能與設定' : 'Menu & Settings'}
+          ariaLabel={isZh ? '功能與設定' : 'Menu & Settings'}
         >
           <IosNavBar
-            title={lang === 'zh' ? '功能與設定' : 'Settings'}
+            title={isZh ? '功能與設定' : 'Settings'}
             subtitle={`日和手帳 Hiyori · ${APP_VERSION}`}
             leftLabel=""
-            rightLabel={lang === 'zh' ? '完成' : 'Done'}
+            rightLabel={isZh ? '完成' : 'Done'}
             onRightClick={closeMenu}
           />
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
             {renderGroupedSections()}
-            <div className="mt-4 px-2 flex items-center justify-between text-[11px] text-slate-400">
-              <span className="flex items-center gap-1 text-teal-700 dark:text-teal-400 font-semibold">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                {t.localPrivacy}
-              </span>
+            <div className="mt-4 px-2 flex items-center justify-end text-[11px] text-slate-400">
               <a
                 href="https://github.com/noworneverev/hiyori-trip"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1 hover:underline"
+                className="flex items-center gap-1 hover:underline py-1"
               >
                 <Github className="w-3.5 h-3.5" />
                 <span>GitHub</span>
@@ -450,11 +502,11 @@ export const AppMenu: React.FC<AppMenuProps> = ({
 
       {/* Desktop Popover Menu */}
       {isOpen && !isMobile && (
-        <div className="absolute right-0 top-full mt-2 w-[340px] max-h-[84dvh] flex flex-col overflow-hidden bg-[#FAF9F6] dark:bg-[#0B1120] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 z-50 animate-in fade-in zoom-in-95 duration-150 text-xs">
-          <div className="px-4 py-3 border-b border-[#E5E2DC] dark:border-slate-800 bg-white/80 dark:bg-[#111827]/90 flex items-center justify-between shrink-0">
+        <div className="absolute right-0 top-full mt-2 w-[340px] max-h-[84dvh] flex flex-col overflow-hidden bg-[#FAF9F6] dark:bg-[#090D16] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 z-50 animate-in fade-in zoom-in-95 duration-150 text-xs">
+          <div className="px-4 py-3 border-b border-[#E5E2DC] dark:border-slate-800 bg-white/90 dark:bg-[#111827]/90 flex items-center justify-between shrink-0">
             <div>
               <p className="font-bold text-xs text-slate-900 dark:text-slate-100">
-                {lang === 'zh' ? '功能與設定' : 'Menu & Settings'}
+                {isZh ? '功能與設定' : 'Menu & Settings'}
               </p>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums mt-0.5">
                 日和手帳 Hiyori · {APP_VERSION}
@@ -483,19 +535,23 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           maxWidthClass="sm:max-w-sm"
           zIndexClass="z-[90]"
           variant="grouped"
-          ariaLabel="加到 iPhone 主畫面"
+          ariaLabel={isZh ? '加到 iPhone 主畫面' : 'Add to iPhone Home Screen'}
         >
           <IosNavBar
-            title="加到 iPhone 主畫面"
-            subtitle="以全螢幕 App 離線啟動日和手帳"
+            title={isZh ? '加到 iPhone 主畫面' : 'Add to Home Screen'}
+            subtitle={isZh ? '以全螢幕 App 離線啟動日和手帳' : 'Launch Hiyori as a fullscreen offline App'}
             leftLabel=""
-            rightLabel={lang === 'zh' ? '完成' : 'Done'}
+            rightLabel={isZh ? '完成' : 'Done'}
             onRightClick={() => setShowIOSGuide(false)}
           />
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] space-y-4">
             <IosInsetGroup
-              header="Safari 安裝步驟"
-              footer="加入主畫面後即支援無網址列全螢幕顯示、安全區域貼合與離線隨時翻閱。"
+              header={isZh ? 'Safari 安裝步驟' : 'Safari Install Steps'}
+              footer={
+                isZh
+                  ? '加入主畫面後即支援無網址列全螢幕顯示、安全區域貼合與離線隨時翻閱。'
+                  : 'Enjoy fullscreen native-like display and instant offline access from your home screen.'
+              }
             >
               <IosRow
                 icon={
@@ -505,7 +561,23 @@ export const AppMenu: React.FC<AppMenuProps> = ({
                 }
                 label={
                   <span className="text-xs font-medium text-slate-700 dark:text-slate-200 whitespace-normal leading-relaxed">
-                    點選 Safari 工具列的 <strong className="inline-flex items-center gap-0.5 text-teal-700 dark:text-teal-300"><Share className="w-3.5 h-3.5 inline" /> 分享</strong> 按鈕。
+                    {isZh ? (
+                      <>
+                        點選 Safari 工具列的{' '}
+                        <strong className="inline-flex items-center gap-0.5 text-teal-700 dark:text-teal-300">
+                          <Share className="w-3.5 h-3.5 inline" /> 分享
+                        </strong>{' '}
+                        按鈕。
+                      </>
+                    ) : (
+                      <>
+                        Tap the{' '}
+                        <strong className="inline-flex items-center gap-0.5 text-teal-700 dark:text-teal-300">
+                          <Share className="w-3.5 h-3.5 inline" /> Share
+                        </strong>{' '}
+                        button in Safari.
+                      </>
+                    )}
                   </span>
                 }
               />
@@ -517,7 +589,15 @@ export const AppMenu: React.FC<AppMenuProps> = ({
                 }
                 label={
                   <span className="text-xs font-medium text-slate-700 dark:text-slate-200 whitespace-normal leading-relaxed">
-                    在選單中向上滑動，找到並點擊 <strong>「加入主畫面」</strong>。
+                    {isZh ? (
+                      <>
+                        在選單中向上滑動，找到並點擊 <strong>「加入主畫面」</strong>。
+                      </>
+                    ) : (
+                      <>
+                        Scroll down and tap <strong>Add to Home Screen</strong>.
+                      </>
+                    )}
                   </span>
                 }
               />
@@ -529,7 +609,15 @@ export const AppMenu: React.FC<AppMenuProps> = ({
                 }
                 label={
                   <span className="text-xs font-medium text-slate-700 dark:text-slate-200 whitespace-normal leading-relaxed">
-                    點擊右上角 <strong>「新增」</strong>，即完成安裝！
+                    {isZh ? (
+                      <>
+                        點擊右上角 <strong>「新增」</strong>，即完成安裝！
+                      </>
+                    ) : (
+                      <>
+                        Tap <strong>Add</strong> in the top-right corner.
+                      </>
+                    )}
                   </span>
                 }
               />
@@ -542,16 +630,14 @@ export const AppMenu: React.FC<AppMenuProps> = ({
       {(updateState.status === 'checking' || updateState.status === 'updating') &&
         typeof document !== 'undefined' &&
         createPortal(
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/70 backdrop-blur-xs touch-none overscroll-none px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150">
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/70 backdrop-blur-xs touch-none overscroll-none px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150">
             <div className="bg-white dark:bg-[#111827] rounded-3xl p-6 shadow-2xl border border-[#E5E2DC] dark:border-slate-800 flex flex-col items-center gap-3 text-center max-w-xs animate-in zoom-in-95 duration-150">
               <div className="w-12 h-12 rounded-2xl bg-teal-50 dark:bg-teal-950/80 text-teal-700 dark:text-teal-400 flex items-center justify-center">
                 <RotateCcw className="w-6 h-6 animate-spin" />
               </div>
-              <div>
-                <h4 className="font-bold text-sm text-slate-900 dark:text-white">
-                  {updateState.message || (lang === 'zh' ? '正在更新...' : 'Updating...')}
-                </h4>
-              </div>
+              <h4 className="font-bold text-sm text-slate-900 dark:text-white">
+                {updateState.message || (isZh ? '正在更新...' : 'Updating...')}
+              </h4>
             </div>
           </div>,
           document.body

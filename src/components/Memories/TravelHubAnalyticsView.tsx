@@ -5,8 +5,6 @@ import {
   Cell,
   ComposedChart,
   Line,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -25,7 +23,6 @@ import { MediaImage } from '../UI/MediaImage';
 import {
   CATEGORY_HEX,
   CATEGORY_NAMES,
-  computeTripExpenseInCurrency,
   FlattenedSpotMemory,
   GalleryPhotoItem,
 } from './travelHubTypes';
@@ -142,14 +139,13 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
       });
     }
 
-    // Aggregate expenses per month and per trip in selected displayCurrency
+    // Aggregate expenses per month and per trip in selected displayCurrency (strictly honoring reviewYear!)
     let totalConvertedExpense = 0;
     const tripExpenseMap = new Map<string, number>();
+    const tripYearDaysMap = new Map<string, number>();
 
     matchedTrips.forEach((tr) => {
-      const tripTotal = computeTripExpenseInCurrency(tr, displayCurrency);
-      tripExpenseMap.set(tr.id, tripTotal);
-
+      let tripYearTotal = 0;
       const fallbackCur = tr.currency || 'JPY';
       (tr.expenses || []).forEach((exp) => {
         const amt = Number(exp.amount) || 0;
@@ -164,12 +160,19 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
           displayCurrency,
           tr.customExchangeRates
         );
+        tripYearTotal += converted;
         totalConvertedExpense += converted;
         const mIdx = parseInt(m, 10) - 1;
         if (mIdx >= 0 && mIdx < 12) {
           months[mIdx].expenseTotal += converted;
         }
       });
+      tripExpenseMap.set(tr.id, tripYearTotal);
+
+      const yearDays = (tr.days || []).filter(
+        (d) => reviewYear === 'all' || !d.date || d.date.startsWith(reviewYear)
+      ).length;
+      tripYearDaysMap.set(tr.id, Math.max(1, yearDays || tr.days?.length || 1));
     });
 
     // Category & City aggregators
@@ -277,17 +280,22 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
       .filter((item) => item.value > 0)
       .sort((a, b) => b.value - a.value);
 
-    const standalonePhotoCount = matchedTrips.reduce((acc, tr) => {
-      const spotPhotoSet = new Set<string>();
-      (tr.days || []).forEach((d) =>
-        (d.items || []).forEach((it) => (it.memoryPhotos || []).forEach((p) => spotPhotoSet.add(p)))
-      );
-      const extra = (tr.memories || []).filter((m) => !spotPhotoSet.has(m.imageUrl)).length;
-      return acc + extra;
-    }, 0);
-
-    const totalPhotosCount =
-      matchedSpots.reduce((acc, s) => acc + s.photos.length, 0) + standalonePhotoCount;
+    // Deduplicate all unique photo URLs across matchedSpots + matchedTrips (eliminates 2x double-counting of standalone mem-clusters!)
+    const uniquePhotoKeys = new Set<string>();
+    matchedSpots.forEach((s) => {
+      s.photos.forEach((url) => {
+        if (url) uniquePhotoKeys.add(`${s.tripId}::${url}`);
+      });
+    });
+    matchedTrips.forEach((tr) => {
+      (tr.memories || []).forEach((m) => {
+        if (!m.imageUrl) return;
+        const mDate = m.date || tr.startDate || '';
+        if (reviewYear !== 'all' && mDate && !mDate.startsWith(reviewYear)) return;
+        uniquePhotoKeys.add(`${tr.id}::${m.imageUrl}`);
+      });
+    });
+    const totalPhotosCount = uniquePhotoKeys.size;
 
     const totalDaysCount = uniqueDates.size;
     const avgDailyExpense =
@@ -299,6 +307,7 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
       matchedSpots,
       tripSpotIndex,
       tripExpenseMap,
+      tripYearDaysMap,
       citiesSummary,
       monthlySeries,
       peakMonth,
@@ -505,14 +514,16 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
             )}
           </div>
 
-          <div className="h-[240px] w-full">
+          <div className="h-[240px] w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
                 data={analytics.monthlySeries}
-                margin={{ top: 10, right: 8, left: -16, bottom: 0 }}
-                onClick={(state) => {
-                  if (state && typeof state.activeTooltipIndex === 'number') {
-                    const m = analytics.monthlySeries[state.activeTooltipIndex];
+                margin={{ top: 10, right: 12, left: 0, bottom: 0 }}
+                onClick={(state: any) => {
+                  const rawIdx = state?.activeTooltipIndex;
+                  const idx = rawIdx !== undefined && rawIdx !== null ? Number(rawIdx) : NaN;
+                  if (Number.isInteger(idx) && idx >= 0 && idx < analytics.monthlySeries.length) {
+                    const m = analytics.monthlySeries[idx];
                     if (m && (m.days > 0 || m.spotsCount > 0)) {
                       setSelectedMonthDrill((prev) => (prev === m.month ? null : m.month));
                     }
@@ -522,12 +533,15 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" vertical={false} />
                 <XAxis
                   dataKey="name"
+                  interval="preserveStartEnd"
+                  minTickGap={10}
                   tick={{ fontSize: 11, fill: '#94a3b8' }}
                   axisLine={false}
                   tickLine={false}
                 />
                 <YAxis
                   yAxisId="left"
+                  width={30}
                   allowDecimals={false}
                   tick={{ fontSize: 11, fill: '#94a3b8' }}
                   axisLine={false}
@@ -559,6 +573,13 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
                   dataKey="days"
                   radius={[6, 6, 0, 0]}
                   maxBarSize={28}
+                  isAnimationActive={false}
+                  onClick={(entry: any) => {
+                    const m = entry?.payload || entry;
+                    if (m && typeof m.month === 'number' && (m.days > 0 || m.spotsCount > 0)) {
+                      setSelectedMonthDrill((prev) => (prev === m.month ? null : m.month));
+                    }
+                  }}
                   className="cursor-pointer"
                 >
                   {analytics.monthlySeries.map((entry) => (
@@ -580,6 +601,7 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
                   dataKey="expense"
                   stroke="#f59e0b"
                   strokeWidth={2}
+                  isAnimationActive={false}
                   dot={{ r: 3, fill: '#f59e0b' }}
                   activeDot={{ r: 5 }}
                 />
@@ -644,34 +666,55 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
-              <div className="h-[190px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={analytics.categoryPie}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius={48}
-                      outerRadius={76}
-                      paddingAngle={2}
-                      stroke="none"
-                    >
-                      {analytics.categoryPie.map((entry) => (
-                        <Cell key={entry.key} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: '10px',
-                        border: 'none',
-                        backgroundColor: '#0f172a',
-                        color: '#f8fafc',
-                        fontSize: '12px',
-                      }}
-                      formatter={(val: any) => [`${val} 處`, '數量']}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+              {/* Crisp High-DPI SVG Donut Ring */}
+              <div className="relative flex items-center justify-center h-[190px] w-full">
+                {(() => {
+                  const total = analytics.categoryPie.reduce((sum, item) => sum + item.value, 0);
+                  const r = 64;
+                  const circumference = 2 * Math.PI * r;
+                  let offsetAcc = 0;
+                  return (
+                    <svg viewBox="0 0 180 180" className="w-44 h-44 -rotate-90" role="img" aria-label="行程足跡結構分佈">
+                      <circle
+                        cx="90"
+                        cy="90"
+                        r={r}
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="22"
+                        className="text-slate-100 dark:text-slate-800/80"
+                      />
+                      {analytics.categoryPie.map((entry) => {
+                        const frac = total > 0 ? entry.value / total : 0;
+                        const gap = analytics.categoryPie.length > 1 ? 3 : 0;
+                        const segLen = Math.max(2, frac * circumference - gap);
+                        const dashOffset = -offsetAcc;
+                        offsetAcc += frac * circumference;
+                        return (
+                          <circle
+                            key={entry.key}
+                            cx="90"
+                            cy="90"
+                            r={r}
+                            fill="none"
+                            stroke={entry.color}
+                            strokeWidth="22"
+                            strokeDasharray={`${segLen} ${circumference}`}
+                            strokeDashoffset={dashOffset}
+                          >
+                            <title>{`${entry.name}: ${entry.value} 處 (${entry.percent}%)`}</title>
+                          </circle>
+                        );
+                      })}
+                    </svg>
+                  );
+                })()}
+                <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center text-center">
+                  <span className="text-[10px] font-semibold text-slate-400">足跡點</span>
+                  <span className="text-lg font-black font-mono tabular-nums text-slate-900 dark:text-white leading-tight">
+                    {analytics.matchedSpots.length}
+                  </span>
+                </div>
               </div>
 
               <div className="space-y-2.5">
@@ -781,7 +824,7 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
           {analytics.matchedTrips.map((tr) => {
             const spotStats = analytics.tripSpotIndex.get(tr.id);
             const totalSpent = roundCurrency(analytics.tripExpenseMap.get(tr.id) || 0);
-            const dayLen = Math.max(1, tr.days?.length || 1);
+            const dayLen = analytics.tripYearDaysMap.get(tr.id) || Math.max(1, tr.days?.length || 1);
             const dailySpent = roundCurrency(totalSpent / dayLen);
 
             return (

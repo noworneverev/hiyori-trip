@@ -1,22 +1,46 @@
 import { Trip } from '../types/itinerary';
+import { tryUploadToExternalImageHost } from './cloudImageHost';
 import {
   MediaRecord,
   getMemoryCachedMedia,
   idbDeleteMediaBatch,
   idbGetAllMediaIds,
+  idbGetAllTrips,
   idbGetMedia,
   idbSaveMedia,
   setMemoryCachedMedia,
 } from './indexedDb';
 
 /**
- * Client-side image utility for receipts, travel spot check-in photos, and attachments.
- * Supports MIME/size validation, Retina-crisp adaptive JPEG compression, and media:// reference offloading.
+ * Client-side image utility for receipts, booking vouchers, spot photos, and attachments.
+ * Supports single-decode EXIF orientation handling, white-canvas alpha fill, WebP-first
+ * adaptive compression (< 200KB Base64 for 6,000-10,000+ photos inside Firestore 1GiB free tier),
+ * optional Cloudflare R2 / Cloudinary CDN upload, content-deduplicated media:// offloading,
+ * and authoritative IndexedDB GC.
  */
 
 export const MEDIA_PREFIX = 'media://';
 const MAX_IMAGE_FILE_BYTES = 25 * 1024 * 1024; // 25MB raw upload guard
 const ALLOWED_IMAGE_EXT_REGEX = /\.(jpe?g|png|webp|gif|bmp|avif|heic|heif)$/i;
+const TARGET_BASE64_CHARS = 210000; // ~155 KB binary (~55% smaller than previous 350KB cap)
+
+let cachedWebpSupport: boolean | null = null;
+function supportsCanvasWebp(): boolean {
+  if (cachedWebpSupport !== null) return cachedWebpSupport;
+  if (typeof document === 'undefined') {
+    cachedWebpSupport = false;
+    return false;
+  }
+  try {
+    const c = document.createElement('canvas');
+    c.width = 1;
+    c.height = 1;
+    cachedWebpSupport = c.toDataURL('image/webp', 0.8).startsWith('data:image/webp');
+  } catch {
+    cachedWebpSupport = false;
+  }
+  return cachedWebpSupport;
+}
 
 export type CloudMediaResolverFn = (
   mediaId: string,
@@ -70,76 +94,118 @@ export function validateImageFile(file: File): string | null {
   return null;
 }
 
-export const compressImageFile = async (
+export interface CompressedImageResult {
+  dataUrl: string;
+  width: number;
+  height: number;
+  originalWidth: number;
+  originalHeight: number;
+}
+
+function renderSourceToJpeg(
+  source: ImageBitmap | HTMLImageElement,
+  srcWidth: number,
+  srcHeight: number,
+  maxDimension: number,
+  initialQuality: number
+): CompressedImageResult {
+  let width = Math.max(1, srcWidth);
+  let height = Math.max(1, srcHeight);
+
+  if (width > maxDimension || height > maxDimension) {
+    if (width > height) {
+      height = Math.max(1, Math.round((height * maxDimension) / width));
+      width = maxDimension;
+    } else {
+      width = Math.max(1, Math.round((width * maxDimension) / height));
+      height = maxDimension;
+    }
+  }
+
+  const canvas = document.createElement('canvas');
+  let q = initialQuality;
+  let dataUrl = '';
+  const preferWebp = supportsCanvasWebp();
+
+  try {
+    // Iterative adaptive compression ensures every photo stays crisp (~80-150KB WebP)
+    // and safely fits Firestore free-tier quotas & IndexedDB cleanly
+    for (let attempt = 0; attempt < 4; attempt++) {
+      canvas.width = Math.max(1, width);
+      canvas.height = Math.max(1, height);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) break;
+
+      // White background prevents transparent PNG/WebP from turning solid black
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+
+      if (preferWebp) {
+        const webpUrl = canvas.toDataURL('image/webp', q);
+        const jpegUrl = webpUrl.length > TARGET_BASE64_CHARS ? canvas.toDataURL('image/jpeg', q) : '';
+        dataUrl = jpegUrl && jpegUrl.length < webpUrl.length ? jpegUrl : webpUrl;
+      } else {
+        dataUrl = canvas.toDataURL('image/jpeg', q);
+      }
+
+      if (dataUrl.length <= TARGET_BASE64_CHARS || (width <= 640 && height <= 640)) {
+        break;
+      }
+      width = Math.max(480, Math.round(width * 0.8));
+      height = Math.max(480, Math.round(height * 0.8));
+      q = Math.max(0.55, q - 0.08);
+    }
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
+
+  return {
+    dataUrl,
+    width,
+    height,
+    originalWidth: srcWidth,
+    originalHeight: srcHeight,
+  };
+}
+
+/**
+ * Single-decode image compression returning both the JPEG data URL and original dimensions
+ * (prevents double 48MP bitmap RAM spikes on iOS Safari).
+ */
+export async function compressImageFileWithMeta(
   file: File,
-  maxWidth = 1440,
-  quality = 0.82
-): Promise<string> => {
+  maxWidth = 1200,
+  quality = 0.76
+): Promise<CompressedImageResult> {
   const validationError = validateImageFile(file);
   if (validationError) {
     throw new Error(validationError);
   }
 
-  const renderToJpeg = (
-    source: ImageBitmap | HTMLImageElement,
-    srcWidth: number,
-    srcHeight: number,
-    maxDimension: number,
-    q: number
-  ): string => {
-    let width = srcWidth;
-    let height = srcHeight;
-
-    if (width > maxDimension || height > maxDimension) {
-      if (width > height) {
-        height = Math.round((height * maxDimension) / width);
-        width = maxDimension;
-      } else {
-        width = Math.round((width * maxDimension) / height);
-        height = maxDimension;
-      }
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, width);
-    canvas.height = Math.max(1, height);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return '';
-
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
-
-    let dataUrl = canvas.toDataURL('image/jpeg', q);
-
-    // Keep individual media doc compact (~<= 340KB Base64, well below Firestore 900KB doc limit) while crisp at Retina 1440px
-    if (dataUrl.length > 360000) {
-      const secondWidth = Math.max(1, Math.round(canvas.width * 0.82));
-      const secondHeight = Math.max(1, Math.round(canvas.height * 0.82));
-      canvas.width = secondWidth;
-      canvas.height = secondHeight;
-      const ctx2 = canvas.getContext('2d');
-      if (ctx2) {
-        ctx2.imageSmoothingEnabled = true;
-        ctx2.imageSmoothingQuality = 'high';
-        ctx2.drawImage(source, 0, 0, secondWidth, secondHeight);
-        dataUrl = canvas.toDataURL('image/jpeg', Math.max(0.68, q - 0.1));
-      }
-    }
-
-    canvas.width = 0;
-    canvas.height = 0;
-    return dataUrl;
-  };
-
   if (typeof window !== 'undefined' && 'createImageBitmap' in window) {
+    let bitmap: ImageBitmap | null = null;
     try {
-      const bitmap = await createImageBitmap(file);
-      const dataUrl = renderToJpeg(bitmap, bitmap.width, bitmap.height, maxWidth, quality);
-      bitmap.close();
-      if (dataUrl) return dataUrl;
+      try {
+        bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      } catch {
+        bitmap = await createImageBitmap(file);
+      }
+      const result = renderSourceToJpeg(bitmap, bitmap.width, bitmap.height, maxWidth, quality);
+      if (result.dataUrl) {
+        return result;
+      }
     } catch {
-      // Fallback to URL.createObjectURL
+      // Fallback to HTMLImageElement
+    } finally {
+      if (bitmap) {
+        try {
+          bitmap.close();
+        } catch {}
+      }
     }
   }
 
@@ -149,22 +215,40 @@ export const compressImageFile = async (
 
     img.onerror = () => {
       URL.revokeObjectURL(objectUrl);
-      reject(new Error(`無法讀取圖片「${file.name}」，檔案可能已損毀或不支援該格式（如部分 HEIC 檔）。`));
+      const isHeic = /\.(heic|heif)$/i.test(file.name || '') || /heic|heif/i.test(file.type || '');
+      reject(
+        new Error(
+          isHeic
+            ? `瀏覽器不支援直接解碼 HEIC 檔案「${file.name}」，建議於 iOS Safari 上傳或先轉存為 JPG。`
+            : `無法讀取圖片「${file.name}」，檔案可能已損毀或不支援該格式。`
+        )
+      );
     };
 
     img.onload = () => {
       URL.revokeObjectURL(objectUrl);
-      const dataUrl = renderToJpeg(img, img.width, img.height, maxWidth, quality);
+      const naturalW = img.naturalWidth || img.width;
+      const naturalH = img.naturalHeight || img.height;
+      const result = renderSourceToJpeg(img, naturalW, naturalH, maxWidth, quality);
       img.src = '';
-      if (!dataUrl) {
+      if (!result.dataUrl) {
         reject(new Error(`圖片「${file.name}」處理失敗，請改選其他照片。`));
         return;
       }
-      resolve(dataUrl);
+      resolve(result);
     };
 
     img.src = objectUrl;
   });
+}
+
+export const compressImageFile = async (
+  file: File,
+  maxWidth = 1200,
+  quality = 0.76
+): Promise<string> => {
+  const result = await compressImageFileWithMeta(file, maxWidth, quality);
+  return result.dataUrl;
 };
 
 export async function getImageDimensions(
@@ -172,13 +256,23 @@ export async function getImageDimensions(
 ): Promise<{ width: number; height: number } | null> {
   if (!file) return null;
   if (typeof window !== 'undefined' && 'createImageBitmap' in window) {
+    let bitmap: ImageBitmap | null = null;
     try {
-      const bitmap = await createImageBitmap(file);
+      try {
+        bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      } catch {
+        bitmap = await createImageBitmap(file);
+      }
       const dims = { width: bitmap.width, height: bitmap.height };
-      bitmap.close();
       if (dims.width > 0 && dims.height > 0) return dims;
     } catch {
       // Fallback to Image
+    } finally {
+      if (bitmap) {
+        try {
+          bitmap.close();
+        } catch {}
+      }
     }
   }
   return new Promise((resolve) => {
@@ -199,14 +293,18 @@ export async function getImageDimensions(
   });
 }
 
-/**
- * Store a compressed dataUrl into IndexedDB + RAM cache and return a lightweight media:// reference
- */
 export async function storeImageAsMediaRef(tripId: string, dataUrl: string): Promise<string> {
   if (!isInlineDataImage(dataUrl)) return dataUrl;
+
+  // If user configured Cloudinary or Cloudflare R2 Worker, upload directly to CDN first
+  const hostedUrl = await tryUploadToExternalImageHost(tripId, dataUrl);
+  if (hostedUrl) {
+    return hostedUrl;
+  }
+
   const id = createMediaId();
   const mimeMatch = dataUrl.match(/^data:([^;]+);/);
-  const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const mimeType = mimeMatch ? mimeMatch[1] : 'image/webp';
   const record: MediaRecord = {
     id,
     tripId: tripId || 'global',
@@ -219,9 +317,6 @@ export async function storeImageAsMediaRef(tripId: string, dataUrl: string): Pro
   return `${MEDIA_PREFIX}${id}`;
 }
 
-/**
- * Resolve any src (media://, data:, https:) to a renderable URL using RAM -> IndexedDB -> Cloud Subcollection
- */
 export async function resolveMediaSrc(
   src: string,
   hint?: { tripId?: string; ownerId?: string; collabId?: string }
@@ -243,12 +338,13 @@ export async function resolveMediaSrc(
     try {
       const remoteDataUrl = await registeredCloudMediaResolver(mediaId, hint);
       if (remoteDataUrl) {
+        const mimeMatch = remoteDataUrl.match(/^data:([^;]+);/);
         setMemoryCachedMedia(mediaId, remoteDataUrl);
         await idbSaveMedia({
           id: mediaId,
           tripId: hint?.tripId || 'remote',
           dataUrl: remoteDataUrl,
-          mimeType: 'image/jpeg',
+          mimeType: mimeMatch ? mimeMatch[1] : 'image/jpeg',
           byteSize: remoteDataUrl.length,
           createdAt: Date.now(),
         });
@@ -263,18 +359,23 @@ export async function resolveMediaSrc(
 }
 
 /**
- * Offload any inline Base64 images inside a Trip into IndexedDB + return lightweight media:// Trip + MediaRecords
+ * Offload any inline Base64 images inside a Trip into IndexedDB + deduplicate identical payloads
+ * so JSON re-imports never duplicate spot & memory photos into two separate IDs.
  */
 export async function extractInlineImagesToMediaRefs(
   trip: Trip
 ): Promise<{ trip: Trip; extractedRecords: MediaRecord[] }> {
   const extractedRecords: MediaRecord[] = [];
+  const dedupMap = new Map<string, string>(); // exact dataUrl -> media://id
   let changed = false;
 
   const convertIfInline = async (src?: string): Promise<string | undefined> => {
     if (!src) return src;
     if (!isInlineDataImage(src)) return src;
     changed = true;
+    const existingRef = dedupMap.get(src);
+    if (existingRef) return existingRef;
+
     const id = createMediaId();
     const mimeMatch = src.match(/^data:([^;]+);/);
     const rec: MediaRecord = {
@@ -285,9 +386,11 @@ export async function extractInlineImagesToMediaRefs(
       byteSize: src.length,
       createdAt: Date.now(),
     };
+    const ref = `${MEDIA_PREFIX}${id}`;
+    dedupMap.set(src, ref);
     extractedRecords.push(rec);
     await idbSaveMedia(rec);
-    return `${MEDIA_PREFIX}${id}`;
+    return ref;
   };
 
   const nextDays = await Promise.all(
@@ -338,6 +441,20 @@ export async function extractInlineImagesToMediaRefs(
     })
   );
 
+  const nextBookings = await Promise.all(
+    (trip.bookings || []).map(async (b: any) => {
+      if (!b?.voucherImages || !Array.isArray(b.voucherImages) || b.voucherImages.length === 0) {
+        return b;
+      }
+      const list: string[] = [];
+      for (const img of b.voucherImages) {
+        const converted = await convertIfInline(img);
+        if (converted) list.push(converted);
+      }
+      return { ...b, voucherImages: list };
+    })
+  );
+
   if (!changed) {
     return { trip, extractedRecords: [] };
   }
@@ -348,14 +465,12 @@ export async function extractInlineImagesToMediaRefs(
       days: nextDays,
       memories: nextMemories,
       expenses: nextExpenses,
+      bookings: nextBookings,
     },
     extractedRecords,
   };
 }
 
-/**
- * Hydrate all media:// references in a Trip back into full data URLs for JSON export
- */
 export async function hydrateTripMediaForExport(trip: Trip): Promise<Trip> {
   const hint = { tripId: trip.id, ownerId: trip.ownerId, collabId: trip.collabId };
 
@@ -402,17 +517,27 @@ export async function hydrateTripMediaForExport(trip: Trip): Promise<Trip> {
     })
   );
 
+  const nextBookings = await Promise.all(
+    (trip.bookings || []).map(async (b: any) => {
+      if (!b?.voucherImages || !Array.isArray(b.voucherImages) || b.voucherImages.length === 0) {
+        return b;
+      }
+      const hydrated = await Promise.all(
+        b.voucherImages.map((img: string) => resolveOrKeep(img).then((v) => v || img))
+      );
+      return { ...b, voucherImages: hydrated };
+    })
+  );
+
   return {
     ...trip,
     days: nextDays,
     memories: nextMemories,
     expenses: nextExpenses,
+    bookings: nextBookings,
   };
 }
 
-/**
- * Collect all media:// IDs referenced across a list of trips
- */
 export function collectReferencedMediaIdsFromTrips(trips: Trip[]): Set<string> {
   const referenced = new Set<string>();
   const addRef = (src?: string | null) => {
@@ -433,13 +558,19 @@ export function collectReferencedMediaIdsFromTrips(trips: Trip[]): Set<string> {
       addRef(e.receiptImage);
       (e.receiptImages || []).forEach(addRef);
     });
+    (trip.bookings || []).forEach((b: any) => {
+      if (Array.isArray(b?.voucherImages)) {
+        b.voucherImages.forEach(addRef);
+      }
+    });
   });
 
   return referenced;
 }
 
 /**
- * Remove orphaned IndexedDB media records not referenced by any current trip (or excludeIds)
+ * Authoritative IndexedDB media GC: merges caller's trips with IndexedDB's authoritative trip list
+ * so stale/full localStorage can NEVER cause live receipts or memories to be deleted.
  */
 export async function garbageCollectOrphanedMedia(
   trips: Trip[],
@@ -449,7 +580,19 @@ export async function garbageCollectOrphanedMedia(
     const allIds = await idbGetAllMediaIds();
     if (allIds.length === 0) return 0;
 
-    const referenced = collectReferencedMediaIdsFromTrips(trips);
+    // Combine authoritative IDB trips + caller trips (caller wins per ID) so no trip is ever missed
+    const mergedById = new Map<string, Trip>();
+    try {
+      const idbTrips = await idbGetAllTrips();
+      for (const t of idbTrips) {
+        if (t?.id) mergedById.set(t.id, t);
+      }
+    } catch {}
+    for (const t of trips || []) {
+      if (t?.id) mergedById.set(t.id, t);
+    }
+
+    const referenced = collectReferencedMediaIdsFromTrips(Array.from(mergedById.values()));
     if (excludeIds) {
       for (const id of excludeIds) {
         if (id) referenced.add(extractMediaId(id));
@@ -467,10 +610,6 @@ export async function garbageCollectOrphanedMedia(
   }
 }
 
-/**
- * Clone/rebind media:// references onto a newly assigned trip ID so imported/copied trips
- * own independent IndexedDB media records.
- */
 export async function rebindTripMediaIds(trip: Trip, newTripId: string): Promise<Trip> {
   const hint = { tripId: trip.id, ownerId: trip.ownerId, collabId: trip.collabId };
   const refMap = new Map<string, string>();
@@ -525,11 +664,24 @@ export async function rebindTripMediaIds(trip: Trip, newTripId: string): Promise
     })
   );
 
+  const nextBookings = await Promise.all(
+    (trip.bookings || []).map(async (b: any) => {
+      if (!b?.voucherImages || !Array.isArray(b.voucherImages) || b.voucherImages.length === 0) {
+        return b;
+      }
+      const cloned = await Promise.all(
+        b.voucherImages.map((img: string) => cloneRef(img).then((v) => v || img))
+      );
+      return { ...b, voucherImages: cloned };
+    })
+  );
+
   return {
     ...trip,
     id: newTripId,
     days: nextDays,
     memories: nextMemories,
     expenses: nextExpenses,
+    bookings: nextBookings,
   };
 }

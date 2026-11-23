@@ -82,6 +82,114 @@ export const parseExpenseDescription = (
   };
 };
 
+/**
+ * Safely parse numeric amounts or simple inline arithmetic expressions (e.g. "1,500", "850+320", "1200*2").
+ * Avoids turning "1,500" into "1.5" by treating thousands-grouped commas as thousands separators.
+ */
+export const evaluateExpenseAmount = (raw: string, decimals = 2): number => {
+  if (!raw || typeof raw !== 'string') return 0;
+  // Normalize fullwidth symbols and ×/÷
+  let expr = raw
+    .trim()
+    .replace(/＋/g, '+')
+    .replace(/[－−]/g, '-')
+    .replace(/[×✕＊xX]/g, '*')
+    .replace(/[÷／]/g, '/')
+    .replace(/\s+/g, '');
+
+  if (!expr) return 0;
+
+  // Handle commas safely:
+  // - If decimals === 0 or comma is followed by 3 digits (thousands separator like 1,500), strip commas.
+  // - Otherwise treat a lone decimal comma (e.g. 12,50) as a decimal point.
+  if (decimals === 0) {
+    expr = expr.replace(/,/g, '');
+  } else {
+    expr = expr.replace(/(\d),(?=\d{3}(?:\D|$))/g, '$1').replace(/,/g, '.');
+  }
+
+  // Strip any disallowed characters
+  expr = expr.replace(/[^0-9.+\-*/]/g, '');
+  if (!expr) return 0;
+
+  // Tokenize numbers and + - * / operators
+  const tokens: Array<number | string> = [];
+  let i = 0;
+  while (i < expr.length) {
+    const ch = expr[i];
+    if ('+-*/'.includes(ch)) {
+      // Allow unary minus only at start or right after another operator
+      if (ch === '-' && (tokens.length === 0 || typeof tokens[tokens.length - 1] === 'string')) {
+        let numStr = '-';
+        i++;
+        let seenDot = false;
+        while (i < expr.length && (/[0-9]/.test(expr[i]) || (expr[i] === '.' && !seenDot))) {
+          if (expr[i] === '.') seenDot = true;
+          numStr += expr[i++];
+        }
+        const n = parseFloat(numStr);
+        if (Number.isFinite(n)) tokens.push(n);
+      } else {
+        if (tokens.length > 0 && typeof tokens[tokens.length - 1] === 'number') {
+          tokens.push(ch);
+        }
+        i++;
+      }
+    } else {
+      let numStr = '';
+      let seenDot = false;
+      while (i < expr.length && (/[0-9]/.test(expr[i]) || (expr[i] === '.' && !seenDot))) {
+        if (expr[i] === '.') seenDot = true;
+        numStr += expr[i++];
+      }
+      if (numStr && numStr !== '.') {
+        const n = parseFloat(numStr);
+        if (Number.isFinite(n)) tokens.push(n);
+      } else if (i < expr.length && expr[i] === '.') {
+        i++;
+      }
+    }
+  }
+
+  // Drop trailing incomplete operator (e.g. "850+")
+  while (tokens.length > 0 && typeof tokens[tokens.length - 1] === 'string') {
+    tokens.pop();
+  }
+  if (tokens.length === 0) return 0;
+
+  // Pass 1: * and /
+  const addSub: Array<number | string> = [tokens[0]];
+  for (let idx = 1; idx < tokens.length; idx += 2) {
+    const op = tokens[idx] as string;
+    const rhs = tokens[idx + 1] as number;
+    if (typeof rhs !== 'number') break;
+    if (op === '*' || op === '/') {
+      const lhs = addSub.pop() as number;
+      if (op === '*') {
+        addSub.push(lhs * rhs);
+      } else {
+        addSub.push(rhs === 0 ? lhs : lhs / rhs);
+      }
+    } else {
+      addSub.push(op, rhs);
+    }
+  }
+
+  // Pass 2: + and -
+  let result = addSub[0] as number;
+  for (let idx = 1; idx < addSub.length; idx += 2) {
+    const op = addSub[idx] as string;
+    const rhs = addSub[idx + 1] as number;
+    if (typeof rhs !== 'number') break;
+    if (op === '+') result += rhs;
+    else if (op === '-') result -= rhs;
+  }
+
+  if (!Number.isFinite(result) || result <= 0) return 0;
+  const factor = Math.pow(10, Math.max(0, decimals));
+  return Math.round(result * factor) / factor;
+};
+
 interface TiantianExpenseEditorProps {
   trip: Trip;
   lang: Language;
@@ -104,6 +212,7 @@ interface TiantianExpenseEditorProps {
   saveStatusToast?: string | null;
   focusTrigger?: number;
   hideFooterSaveCancel?: boolean;
+  onPickerActiveChange?: (isSubPickerOpen: boolean) => void;
 }
 
 type PickerPanel = 'none' | 'date' | 'currency' | 'category' | 'account' | 'member' | 'tags';
@@ -130,6 +239,7 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
   saveStatusToast = null,
   focusTrigger = 0,
   hideFooterSaveCancel = false,
+  onPickerActiveChange,
 }) => {
   const [activePicker, setActivePicker] = useState<PickerPanel>('none');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -139,6 +249,7 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
   const [newCatName, setNewCatName] = useState('');
   const [editingCatKey, setEditingCatKey] = useState<string | null>(null);
   const [editingCatVal, setEditingCatVal] = useState('');
+  const [deletingCatKey, setDeletingCatKey] = useState<string | null>(null);
 
   // Tag picker input states
   const [newTagInput, setNewTagInput] = useState('');
@@ -150,8 +261,22 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
   const receiptInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
+    onPickerActiveChange?.(activePicker !== 'none');
+    return () => {
+      onPickerActiveChange?.(false);
+    };
+  }, [activePicker, onPickerActiveChange]);
+
+  useEffect(() => {
     setActivePicker('none');
     setConfirmingDelete(false);
+    setShowNewCatInput(false);
+    setNewCatName('');
+    setEditingCatKey(null);
+    setEditingCatVal('');
+    setDeletingCatKey(null);
+    setNewTagInput('');
+    setNewMemberName('');
     const t = setTimeout(() => {
       amountInputRef.current?.focus({ preventScroll: true });
     }, 120);
@@ -170,21 +295,56 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
     return Array.from(new Set([...DEFAULT_EXPENSE_TAGS, ...customTags, ...(draft.tags || [])]));
   }, [customTags, draft.tags]);
 
-  const parsedAmount = parseFloat(draft.amount) || 0;
-  const convertedPreview = convertAmount(parsedAmount, draft.currency, baseCurrency, trip.customExchangeRates);
   const currencyMeta = CURRENCY_MAP[draft.currency];
+  const currencyDecimals = currencyMeta?.decimals ?? 0;
+  const parsedAmount = evaluateExpenseAmount(draft.amount, currencyDecimals);
+  const hasMathExpression = /[+\-*/×÷＋－＊／]/.test((draft.amount || '').trim().slice(1));
+  const convertedPreview = convertAmount(parsedAmount, draft.currency, baseCurrency, trip.customExchangeRates);
   const catMeta = resolveExpenseCategoryMeta(draft.category, trip);
   const accountMeta = EXPENSE_ACCOUNT_MAP[draft.paymentMethod] || EXPENSE_ACCOUNT_MAP.cash;
   const isSplitMode = !trip.isSoloTrip && Boolean(trip.isSplitEnabled);
 
   const handleAmountChange = (rawVal: string) => {
-    let cleaned = rawVal.replace(/,/g, '.').replace(/[^0-9.]/g, '');
-    const parts = cleaned.split('.');
-    if (parts.length > 2) cleaned = parts[0] + '.' + parts.slice(1).join('');
-    if (['JPY', 'KRW', 'VND'].includes(draft.currency) && cleaned.includes('.')) {
-      cleaned = cleaned.split('.')[0];
+    // Allow digits, commas, dots, and simple arithmetic operators (+ - * / × ÷)
+    let cleaned = rawVal
+      .replace(/＋/g, '+')
+      .replace(/[－−]/g, '-')
+      .replace(/[×✕＊]/g, '*')
+      .replace(/[÷／]/g, '/')
+      .replace(/[^0-9.,+\-*/]/g, '');
+
+    // If zero-decimal currency and no arithmetic operators, strip fractional part cleanly
+    // while keeping thousands commas ignored rather than turned into decimals!
+    if (currencyDecimals === 0 && !/[+\-*/]/.test(cleaned)) {
+      cleaned = cleaned.replace(/,/g, '');
+      if (cleaned.includes('.')) {
+        cleaned = cleaned.split('.')[0];
+      }
     }
     onChangeDraft((prev) => ({ ...prev, amount: cleaned }));
+  };
+
+  const handleAmountBlur = () => {
+    if (!draft.amount.trim()) return;
+    if (hasMathExpression || draft.amount.includes(',')) {
+      const evaluated = evaluateExpenseAmount(draft.amount, currencyDecimals);
+      if (evaluated > 0) {
+        onChangeDraft((prev) => ({ ...prev, amount: String(evaluated) }));
+      }
+    }
+  };
+
+  const handleSelectCurrency = (nextCode: string) => {
+    const nextDecimals = CURRENCY_MAP[nextCode]?.decimals ?? 0;
+    onChangeDraft((prev) => {
+      let nextAmount = prev.amount;
+      if (nextDecimals === 0 && nextAmount.trim()) {
+        const evaluated = evaluateExpenseAmount(nextAmount, 0);
+        nextAmount = evaluated > 0 ? String(evaluated) : nextAmount.replace(/,/g, '').split('.')[0];
+      }
+      return { ...prev, currency: nextCode, amount: nextAmount };
+    });
+    setActivePicker('none');
   };
 
   const handleAddCustomCategory = () => {
@@ -218,6 +378,13 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
       setEditingCatKey(null);
       return;
     }
+    if (
+      DEFAULT_EXPENSE_CATEGORIES[trimmed] ||
+      customCategories.some((c) => c !== oldKey && c.toLowerCase() === trimmed.toLowerCase())
+    ) {
+      setEditingCatKey(null);
+      return;
+    }
     const doRename = () => {
       const updatedCats = customCategories.map((c) => (c === oldKey ? trimmed : c));
       const updatedExpenses = trip.expenses.map((e) =>
@@ -240,14 +407,19 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
 
   const handleDeleteCustomCategory = (catKey: string) => {
     const doDelete = () => {
+      const updatedExpenses = trip.expenses.map((e) =>
+        e.category === catKey ? { ...e, category: 'other' } : e
+      );
       onUpdateTrip({
         ...trip,
         customExpenseCategories: customCategories.filter((c) => c !== catKey),
+        expenses: updatedExpenses,
         updatedAt: Date.now(),
       });
       if (draft.category === catKey) {
         onChangeDraft((prev) => ({ ...prev, category: 'food' }));
       }
+      setDeletingCatKey(null);
     };
     if (requireAuth && !requireAuth(doDelete, '刪除自訂類別')) return;
     doDelete();
@@ -417,10 +589,7 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
                       <span className="text-xs font-mono text-slate-500">{cur.symbol}</span>
                     }
                     selected={draft.currency === cur.code}
-                    onSelect={() => {
-                      onChangeDraft((prev) => ({ ...prev, currency: cur.code }));
-                      setActivePicker('none');
-                    }}
+                    onSelect={() => handleSelectCurrency(cur.code)}
                   />
                 ))}
               </IosInsetGroup>
@@ -546,6 +715,40 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
                       );
                     }
 
+                    if (deletingCatKey === catKey) {
+                      const usageCount = trip.expenses.filter((e) => e.category === catKey).length;
+                      return (
+                        <div key={catKey} className="px-4 py-2.5 min-h-[48px] flex items-center justify-between gap-2 bg-rose-50/80 dark:bg-rose-950/35 text-xs">
+                          <div className="min-w-0">
+                            <span className="font-semibold text-rose-800 dark:text-rose-200 block truncate">
+                              刪除「{displayName}」？
+                            </span>
+                            {usageCount > 0 && (
+                              <span className="text-[10px] text-rose-700/80 dark:text-rose-300/80 block">
+                                {usageCount} 筆消費將歸入「其他雜支」
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCustomCategory(catKey)}
+                              className="min-h-[34px] px-2.5 rounded-lg bg-rose-600 text-white text-xs font-bold cursor-pointer"
+                            >
+                              刪除
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeletingCatKey(null)}
+                              className="min-h-[34px] px-2 rounded-lg text-slate-600 dark:text-slate-300 text-xs font-semibold cursor-pointer"
+                            >
+                              取消
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    }
+
                     return (
                       <div key={catKey} className="flex items-center">
                         <div className="flex-1 min-w-0">
@@ -563,8 +766,9 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
                           <button
                             type="button"
                             onClick={() => {
+                              setDeletingCatKey(null);
                               setEditingCatKey(catKey);
-                              setEditingCatVal(catKey);
+                              setEditingCatVal(displayName);
                             }}
                             className="min-w-[38px] min-h-[38px] flex items-center justify-center rounded-lg text-slate-400 hover:text-teal-700 cursor-pointer"
                             title="改名"
@@ -573,7 +777,10 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDeleteCustomCategory(catKey)}
+                            onClick={() => {
+                              setEditingCatKey(null);
+                              setDeletingCatKey(catKey);
+                            }}
                             className="min-w-[38px] min-h-[38px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 cursor-pointer"
                             title="刪除"
                           >
@@ -697,7 +904,7 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
                                 ...prev,
                                 splitWith:
                                   prev.splitWith.length === splitMembersList.length
-                                    ? ['我']
+                                    ? [splitMembersList[0] || '我']
                                     : splitMembersList,
                               }))
                             }
@@ -901,14 +1108,14 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
                 ref={amountInputRef}
                 type="text"
                 inputMode="decimal"
-                pattern="[0-9]*[.,]?[0-9]*"
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
                 required
                 value={draft.amount}
                 onChange={(e) => handleAmountChange(e.target.value)}
-                placeholder="0"
+                onBlur={handleAmountBlur}
+                placeholder="0（支援 850+320）"
                 className="w-full min-w-0 text-right bg-transparent text-xl sm:text-2xl font-black font-mono tabular-nums text-teal-800 dark:text-teal-300 placeholder:text-slate-300 dark:placeholder:text-slate-600 focus:outline-hidden"
               />
               {draft.amount && (
@@ -927,11 +1134,80 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
             </div>
           </div>
 
-          {parsedAmount > 0 && draft.currency !== baseCurrency && (
-            <div className="flex justify-end">
-              <span className="text-[11px] font-mono tabular-nums font-semibold text-teal-700 dark:text-teal-300">
-                ≈ {formatCurrencyAmount(convertedPreview, baseCurrency)}
-              </span>
+          {(hasMathExpression || (parsedAmount > 0 && draft.currency !== baseCurrency)) && (
+            <div className="flex items-center justify-end gap-2.5 flex-wrap">
+              {hasMathExpression && parsedAmount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleAmountBlur}
+                  className="text-[11px] font-mono tabular-nums font-bold px-2 py-0.5 rounded-lg bg-teal-50 dark:bg-teal-950/60 border border-teal-200/80 dark:border-teal-800 text-teal-800 dark:text-teal-300 cursor-pointer"
+                  title="點擊套用計算結果"
+                >
+                  = {formatCurrencyAmount(parsedAmount, draft.currency)}
+                </button>
+              )}
+              {parsedAmount > 0 && draft.currency !== baseCurrency && (
+                <span className="text-[11px] font-mono tabular-nums font-semibold text-teal-700 dark:text-teal-300">
+                  ≈ {formatCurrencyAmount(convertedPreview, baseCurrency)}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Quick Tax-Free / Tax-Included / Split Calculator Strip */}
+          {canEdit && (
+            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pt-0.5">
+              {(
+                [
+                  {
+                    label: '免稅 -10%',
+                    title: '含 10% 消費稅價格換算為未稅價 (÷1.1)',
+                    apply: (v: number) => v / 1.1,
+                  },
+                  {
+                    label: '免稅 -8%',
+                    title: '含 8% 飲食外帶稅換算為未稅價 (÷1.08)',
+                    apply: (v: number) => v / 1.08,
+                  },
+                  {
+                    label: '含稅 +10%',
+                    title: '未稅價加上 10% 消費稅 (×1.1)',
+                    apply: (v: number) => v * 1.1,
+                  },
+                  {
+                    label: '÷2 均分',
+                    title: '金額除以 2',
+                    apply: (v: number) => v / 2,
+                  },
+                  ...(isSplitMode && splitMembersList.length > 2
+                    ? [
+                        {
+                          label: `÷${splitMembersList.length} 人`,
+                          title: `金額除以 ${splitMembersList.length} 位旅伴`,
+                          apply: (v: number) => v / splitMembersList.length,
+                        },
+                      ]
+                    : []),
+                ] as const
+              ).map((chip) => (
+                <button
+                  key={chip.label}
+                  type="button"
+                  disabled={parsedAmount <= 0}
+                  title={chip.title}
+                  onClick={() => {
+                    if (parsedAmount <= 0) return;
+                    const factor = Math.pow(10, Math.max(0, currencyDecimals));
+                    const nextVal = Math.round(chip.apply(parsedAmount) * factor) / factor;
+                    if (nextVal > 0) {
+                      onChangeDraft((prev) => ({ ...prev, amount: String(nextVal) }));
+                    }
+                  }}
+                  className="min-h-[30px] px-2.5 py-1 rounded-lg bg-white dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600 disabled:opacity-35 text-[11px] font-semibold font-mono tabular-nums text-slate-700 dark:text-slate-200 hover:text-teal-700 dark:hover:text-teal-300 shrink-0 transition cursor-pointer"
+                >
+                  {chip.label}
+                </button>
+              ))}
             </div>
           )}
         </div>

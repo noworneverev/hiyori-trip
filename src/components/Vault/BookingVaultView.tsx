@@ -1,8 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Trip, BookingVoucher, BookingCategory, ItineraryItem } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { copyTextToClipboard } from '../../utils/clipboard';
 import { sanitizeExternalUrl } from '../../utils/url';
+import { compressImageFile, storeImageAsMediaRef, garbageCollectOrphanedMedia } from '../../utils/image';
+import { getStoredTrips } from '../../utils/storage';
+import { MediaImage } from '../UI/MediaImage';
 import {
   IosModalSheet,
   IosNavBar,
@@ -31,6 +34,9 @@ import {
   ExternalLink,
   KeyRound,
   ArrowUpRight,
+  QrCode,
+  Upload,
+  Loader2,
 } from 'lucide-react';
 
 interface BookingVaultViewProps {
@@ -107,6 +113,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     dateLabel?: string;
     location?: string;
     notes?: string;
+    voucherImages?: string[];
   } | null>(null);
 
   // Form states
@@ -122,6 +129,9 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
   const [formDayNumber, setFormDayNumber] = useState<string>('');
   const [formUrl, setFormUrl] = useState('');
   const [formNotes, setFormNotes] = useState('');
+  const [formVoucherImages, setFormVoucherImages] = useState<string[]>([]);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const resetForm = () => {
     setEditingVoucherId(null);
@@ -130,13 +140,15 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     setFormCode('');
     setFormSecondary('');
     setFormProvider('');
-    setFormStartDate(trip.startDate || '');
+    // Leave startDate empty by default so whole-trip vouchers (eSIM, insurance) don't falsely pin to Day 1
+    setFormStartDate('');
     setFormEndDate('');
     setFormTimeLabel('');
     setFormLocation('');
     setFormDayNumber('');
     setFormUrl('');
     setFormNotes('');
+    setFormVoucherImages([]);
     setExpandedFormPicker(null);
   };
 
@@ -167,7 +179,40 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     setFormDayNumber(v.dayNumber ? String(v.dayNumber) : '');
     setFormUrl(v.url || '');
     setFormNotes(v.notes || '');
+    setFormVoucherImages(v.voucherImages || []);
     setShowForm(true);
+  };
+
+  const handleUploadVoucherImages = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const remainingSlots = Math.max(0, 4 - formVoucherImages.length);
+    if (remainingSlots === 0) {
+      e.target.value = '';
+      return;
+    }
+
+    setIsUploadingImage(true);
+    try {
+      const selected = Array.from(files).slice(0, remainingSlots);
+      const uploadedRefs: string[] = [];
+      for (const file of selected) {
+        try {
+          // Keep QR codes sharp at 1280px max width and 0.85 quality
+          const dataUrl = await compressImageFile(file, 1280, 0.85);
+          const ref = await storeImageAsMediaRef(trip.id, dataUrl);
+          uploadedRefs.push(ref);
+        } catch (err) {
+          console.warn('Voucher image compression failed:', err);
+        }
+      }
+      if (uploadedRefs.length > 0) {
+        setFormVoucherImages((prev) => [...prev, ...uploadedRefs].slice(0, 4));
+      }
+    } finally {
+      setIsUploadingImage(false);
+      e.target.value = '';
+    }
   };
 
   const performSaveVoucher = () => {
@@ -179,13 +224,18 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     const parsedDay = formDayNumber ? parseInt(formDayNumber, 10) : undefined;
     const now = Date.now();
     const existingList = trip.bookings || [];
-    const normalizedUrl = formUrl.trim()
-      ? sanitizeExternalUrl(
-          /^https?:\/\//i.test(formUrl.trim()) || formUrl.trim().startsWith('//')
-            ? formUrl.trim()
-            : `https://${formUrl.trim()}`
-        )
+    const rawUrl = formUrl.trim();
+    const normalizedUrl = rawUrl
+      ? sanitizeExternalUrl(/^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`)
       : undefined;
+
+    const cleanStart = formStartDate.trim().slice(0, 30) || undefined;
+    let cleanEnd = formEndDate.trim().slice(0, 30) || undefined;
+    if (cleanStart && cleanEnd && cleanEnd < cleanStart) {
+      cleanEnd = cleanStart;
+    }
+
+    const cleanImages = formVoucherImages.length > 0 ? formVoucherImages : undefined;
 
     if (editingVoucherId) {
       const updated = existingList.map((b) =>
@@ -197,13 +247,14 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
               bookingCode: formCode.trim().slice(0, 100),
               secondaryCode: formSecondary.trim().slice(0, 100) || undefined,
               provider: formProvider.trim().slice(0, 100) || undefined,
-              startDate: formStartDate.trim().slice(0, 30) || undefined,
-              endDate: formEndDate.trim().slice(0, 30) || undefined,
+              startDate: cleanStart,
+              endDate: cleanEnd,
               timeLabel: formTimeLabel.trim().slice(0, 40) || undefined,
               location: formLocation.trim().slice(0, 200) || undefined,
               dayNumber: parsedDay && !isNaN(parsedDay) ? parsedDay : undefined,
               url: normalizedUrl?.slice(0, 500),
               notes: formNotes.trim().slice(0, 500) || undefined,
+              voucherImages: cleanImages,
               updatedAt: now,
             }
           : b
@@ -217,17 +268,18 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
         bookingCode: formCode.trim().slice(0, 100),
         secondaryCode: formSecondary.trim().slice(0, 100) || undefined,
         provider: formProvider.trim().slice(0, 100) || undefined,
-        startDate: formStartDate.trim().slice(0, 30) || undefined,
-        endDate: formEndDate.trim().slice(0, 30) || undefined,
+        startDate: cleanStart,
+        endDate: cleanEnd,
         timeLabel: formTimeLabel.trim().slice(0, 40) || undefined,
         location: formLocation.trim().slice(0, 200) || undefined,
         dayNumber: parsedDay && !isNaN(parsedDay) ? parsedDay : undefined,
         url: normalizedUrl?.slice(0, 500),
         notes: formNotes.trim().slice(0, 500) || undefined,
+        voucherImages: cleanImages,
         createdAt: now,
         updatedAt: now,
       };
-      onUpdateTrip({ ...trip, bookings: [newVoucher, ...existingList].slice(0, 100), updatedAt: now });
+      onUpdateTrip({ ...trip, bookings: [newVoucher, ...existingList], updatedAt: now });
     }
 
     setShowForm(false);
@@ -245,7 +297,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
       return;
     }
     const now = Date.now();
-    onUpdateTrip({
+    const updatedTrip: Trip = {
       ...trip,
       bookings: (trip.bookings || []).filter((b) => b.id !== id),
       deletedItemIds: {
@@ -253,8 +305,12 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
         [id]: now,
       },
       updatedAt: now,
-    });
+    };
+    onUpdateTrip(updatedTrip);
     setPendingDeleteVoucher(null);
+    garbageCollectOrphanedMedia(
+      getStoredTrips().map((stored) => (stored.id === updatedTrip.id ? updatedTrip : stored))
+    ).catch(() => {});
   };
 
   const handleCopy = async (value: string, keyId: string) => {
@@ -341,8 +397,8 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               {isZh
-                ? '集中管理機票、訂房、鐵路票券與網卡代號，同時自動彙整行程內的預約編號，支援一鍵複製與櫃檯出示。'
-                : 'Centralize flight PNRs, hotel confirmations, rail passes, and itinerary booking codes with 1-tap copy.'}
+                ? '集中管理機票、訂房、QR Code 憑證截圖與網卡代號，離線即可放大出示給櫃檯人員掃描。'
+                : 'Centralize PNRs, hotel confirmations, and offline QR screenshots for counter display.'}
             </p>
           </div>
 
@@ -405,13 +461,13 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={isZh ? '搜尋代號、航班或飯店...' : 'Search code, hotel, flight...'}
-              className="w-full min-h-[44px] sm:min-h-[40px] pl-8 pr-8 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 outline-none focus:border-teal-600"
+              className="w-full min-h-[42px] sm:min-h-[38px] pl-8 pr-8 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 outline-none focus:border-teal-600"
             />
             {searchQuery && (
               <button
                 type="button"
                 onClick={() => setSearchQuery('')}
-                className="absolute right-1 top-1/2 -translate-y-1/2 min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                className="absolute right-1 top-1/2 -translate-y-1/2 min-w-[36px] min-h-[36px] flex items-center justify-center text-slate-400 hover:text-slate-600 cursor-pointer"
                 aria-label="Clear search"
               >
                 <X className="w-3.5 h-3.5" />
@@ -436,24 +492,18 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
           <IosNavBar
             title={
               editingVoucherId
-                ? isZh
-                  ? '編輯訂位憑證'
-                  : 'Edit Voucher'
-                : isZh
-                ? '新增訂位憑證'
-                : 'New Voucher'
+                ? isZh ? '編輯訂位憑證' : 'Edit Voucher'
+                : isZh ? '新增訂位憑證' : 'New Voucher'
             }
             leftLabel={isZh ? '取消' : 'Cancel'}
             onLeftClick={() => {
               setShowForm(false);
               resetForm();
             }}
-            rightLabel={
-              editingVoucherId ? (isZh ? '儲存' : 'Save') : isZh ? '加入' : 'Add'
-            }
+            rightLabel={editingVoucherId ? (isZh ? '儲存' : 'Save') : isZh ? '加入' : 'Add'}
             rightType="submit"
             rightFormId="booking-voucher-form"
-            rightDisabled={!formTitle.trim() || !formCode.trim()}
+            rightDisabled={!formTitle.trim() || !formCode.trim() || isUploadingImage}
           />
 
           <form
@@ -552,15 +602,75 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
               </div>
             </IosInsetGroup>
 
+            {/* Offline QR Code / Voucher Screenshot Attachment */}
+            <IosInsetGroup
+              header={isZh ? '離線 QR Code / 憑證截圖（最多 4 張）' : 'Offline QR / Voucher Screenshots (Max 4)'}
+              footer={isZh ? '上傳的登機證、門票 QR Code 或訂房確認截圖會儲存在本機，搭機無網路時也可全螢幕放大出示。' : 'Saved offline for airport & hotel check-in without mobile data.'}
+            >
+              <div className="p-4 space-y-3">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleUploadVoucherImages}
+                  className="hidden"
+                />
+                {formVoucherImages.length > 0 && (
+                  <div className="grid grid-cols-4 gap-2">
+                    {formVoucherImages.map((imgRef, idx) => (
+                      <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-[#E5E2DC] dark:border-slate-700 bg-slate-100 dark:bg-slate-900">
+                        <MediaImage
+                          tripId={trip.id}
+                          ownerId={trip.ownerId}
+                          collabId={trip.collabId}
+                          src={imgRef}
+                          alt={`Voucher ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setFormVoucherImages((prev) => prev.filter((_, i) => i !== idx))}
+                          className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/75 text-white flex items-center justify-center cursor-pointer"
+                          aria-label="移除圖片"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {formVoucherImages.length < 4 && (
+                  <button
+                    type="button"
+                    disabled={isUploadingImage}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full min-h-[44px] rounded-xl border-2 border-dashed border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600 text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50"
+                  >
+                    {isUploadingImage ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-teal-600" />
+                        <span>{isZh ? '處理圖片中...' : 'Processing...'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                        <span>{isZh ? '選擇 QR Code / 憑證截圖' : 'Attach QR / Screenshot'}</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </IosInsetGroup>
+
             <IosInsetGroup header={isZh ? '日期、時段與行程天數' : 'Dates & Trip Day'}>
               <IosDisclosureRow
                 label={isZh ? '關聯天數' : 'Trip Day'}
                 value={
                   formDayNumber
                     ? `Day ${formDayNumber}`
-                    : isZh
-                    ? '全程 / 不指定'
-                    : 'Whole trip'
+                    : isZh ? '全程 / 不指定' : 'Whole trip'
                 }
                 valueAccent={Boolean(formDayNumber)}
                 expanded={expandedFormPicker === 'day'}
@@ -583,9 +693,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                       label={`Day ${d.dayNumber}`}
                       subtitle={d.theme}
                       trailingMeta={
-                        <span className="text-[11px] font-mono tabular-nums text-slate-400">
-                          {d.date}
-                        </span>
+                        <span className="text-[11px] font-mono tabular-nums text-slate-400">{d.date}</span>
                       }
                       selected={formDayNumber === String(d.dayNumber)}
                       onSelect={() => {
@@ -604,7 +712,13 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                 <input
                   type="date"
                   value={formStartDate}
-                  onChange={(e) => setFormStartDate(e.target.value)}
+                  onChange={(e) => {
+                    const nextStart = e.target.value;
+                    setFormStartDate(nextStart);
+                    if (formEndDate && nextStart && formEndDate < nextStart) {
+                      setFormEndDate(nextStart);
+                    }
+                  }}
                   className="bg-transparent text-right text-[16px] sm:text-xs font-mono tabular-nums font-semibold text-slate-900 dark:text-white outline-none"
                 />
               </div>
@@ -615,6 +729,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                 </span>
                 <input
                   type="date"
+                  min={formStartDate || undefined}
                   value={formEndDate}
                   onChange={(e) => setFormEndDate(e.target.value)}
                   className="bg-transparent text-right text-[16px] sm:text-xs font-mono tabular-nums font-semibold text-slate-900 dark:text-white outline-none"
@@ -655,12 +770,14 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                 <label className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
                   {isZh ? '電子憑證 / 訂單連結 (選填)' : 'Booking URL (Optional)'}
                 </label>
+                {/* type="text" + inputMode="url" allows bare domains (e.g. agoda.com/123) without native validation rejection */}
                 <input
-                  type="url"
+                  type="text"
+                  inputMode="url"
                   maxLength={500}
                   value={formUrl}
                   onChange={(e) => setFormUrl(e.target.value)}
-                  placeholder="https://..."
+                  placeholder="https://... 或 agoda.com/..."
                   className="w-full min-h-[34px] bg-transparent text-[16px] sm:text-xs text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
                 />
               </div>
@@ -692,21 +809,17 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
           <div className="space-y-1">
             <h4 className="font-bold text-sm text-slate-900 dark:text-white">
               {unifiedEntries.length === 0
-                ? isZh
-                  ? '尚未建立任何訂位憑證'
-                  : 'No booking vouchers yet'
-                : isZh
-                ? '找不到符合條件的憑證'
-                : 'No matching vouchers found'}
+                ? isZh ? '尚未建立任何訂位憑證' : 'No booking vouchers yet'
+                : isZh ? '找不到符合條件的憑證' : 'No matching vouchers found'}
             </h4>
             <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
               {unifiedEntries.length === 0
                 ? isZh
-                  ? '新增航班訂位代號、飯店確認碼或車票編號，或在行程景點填寫預約代號後皆會自動集中於此。'
-                  : 'Add flights, hotels, rail passes, or fill booking codes on itinerary spots to collect them here.'
+                  ? '新增機票確認碼、飯店憑證或 QR Code 截圖，離線即可放大出示給櫃檯。'
+                  : 'Add flights, hotels, QR screenshots, or itinerary booking codes here.'
                 : isZh
-                ? '請嘗試更換分類篩選或清除搜尋關鍵字。'
-                : 'Try changing the category filter or clearing your search.'}
+                  ? '請嘗試更換分類篩選或清除搜尋關鍵字。'
+                  : 'Try changing the category filter or clearing your search.'}
             </p>
           </div>
           {canEdit && unifiedEntries.length === 0 && (
@@ -742,7 +855,6 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                   key={v.id}
                   className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs flex flex-col justify-between divide-y divide-[#E5E2DC]/75 dark:divide-slate-800 overflow-hidden"
                 >
-                  {/* Top Header & Title */}
                   <div className="px-4 sm:px-5 pt-4 pb-3.5 space-y-1.5">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium flex-wrap min-w-0">
@@ -762,6 +874,15 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                             <span className="font-mono tabular-nums">Day {v.dayNumber}</span>
                           </>
                         )}
+                        {v.voucherImages && v.voucherImages.length > 0 && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="inline-flex items-center gap-0.5 text-teal-700 dark:text-teal-400 font-semibold">
+                              <QrCode className="w-3 h-3" />
+                              <span>{v.voucherImages.length}</span>
+                            </span>
+                          </>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-0.5 -mr-1.5 shrink-0">
@@ -777,10 +898,11 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                               dateLabel: [dateRangeText, v.timeLabel].filter(Boolean).join(' · '),
                               location: v.location,
                               notes: v.notes,
+                              voucherImages: v.voucherImages,
                             })
                           }
                           title={isZh ? '全螢幕出示給櫃檯' : 'Show fullscreen card'}
-                          className="w-11 h-11 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-teal-700 dark:text-slate-400 dark:hover:text-teal-300 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition cursor-pointer"
+                          className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-teal-700 dark:text-slate-400 dark:hover:text-teal-300 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition cursor-pointer"
                         >
                           <Maximize2 className="w-4 h-4" />
                         </button>
@@ -790,7 +912,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                               type="button"
                               onClick={() => openEditForm(v)}
                               title={isZh ? '編輯憑證' : 'Edit voucher'}
-                              className="w-11 h-11 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition cursor-pointer"
+                              className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition cursor-pointer"
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
@@ -798,7 +920,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                               type="button"
                               onClick={() => setPendingDeleteVoucher(v)}
                               title={isZh ? '刪除憑證' : 'Delete voucher'}
-                              className="w-11 h-11 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"
+                              className="w-10 h-10 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition cursor-pointer"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -826,7 +948,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                     <button
                       type="button"
                       onClick={() => handleCopy(v.bookingCode, copyMainId)}
-                      className={`min-h-[44px] sm:min-h-[38px] px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer ${
+                      className={`min-h-[42px] sm:min-h-[38px] px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer ${
                         copiedKey === copyMainId
                           ? 'bg-teal-700 text-white'
                           : 'bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:border-teal-600'
@@ -846,7 +968,46 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                     </button>
                   </div>
 
-                  {/* Secondary Details & Metadata Hairline Section */}
+                  {/* Attached QR / Voucher Screenshot Preview Strip */}
+                  {v.voucherImages && v.voucherImages.length > 0 && (
+                    <div className="px-4 sm:px-5 py-2.5 flex items-center gap-2 overflow-x-auto scrollbar-none">
+                      {v.voucherImages.map((imgRef, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() =>
+                            setCounterCard({
+                              title: v.title,
+                              category: v.category,
+                              bookingCode: v.bookingCode,
+                              secondaryCode: v.secondaryCode,
+                              provider: v.provider,
+                              dateLabel: [dateRangeText, v.timeLabel].filter(Boolean).join(' · '),
+                              location: v.location,
+                              notes: v.notes,
+                              voucherImages: v.voucherImages,
+                            })
+                          }
+                          className="w-14 h-14 rounded-xl overflow-hidden border border-[#E5E2DC] dark:border-slate-700 shrink-0 hover:scale-105 transition cursor-pointer"
+                          title="點擊全螢幕出示截圖 / QR Code"
+                        >
+                          <MediaImage
+                            tripId={trip.id}
+                            ownerId={trip.ownerId}
+                            collabId={trip.collabId}
+                            src={imgRef}
+                            alt={`Voucher ${idx + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                        </button>
+                      ))}
+                      <span className="text-[11px] text-teal-700 dark:text-teal-400 font-semibold ml-1 shrink-0">
+                        點圖放大出示 →
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Secondary Details */}
                   {(v.secondaryCode || dateRangeText || v.timeLabel || v.location || v.notes) && (
                     <div className="px-4 sm:px-5 py-3 space-y-2 text-xs text-slate-500 dark:text-slate-400">
                       {v.secondaryCode && (
@@ -858,7 +1019,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleCopy(v.secondaryCode!, copySecId)}
-                            className="min-h-[36px] px-2 rounded-lg text-[11px] font-semibold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/40 shrink-0 cursor-pointer flex items-center gap-1"
+                            className="min-h-[34px] px-2 rounded-lg text-[11px] font-semibold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/40 shrink-0 cursor-pointer flex items-center gap-1"
                           >
                             {copiedKey === copySecId ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                             <span>{copiedKey === copySecId ? (isZh ? '已複製' : 'Copied') : isZh ? '複製細節' : 'Copy'}</span>
@@ -882,7 +1043,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                           <button
                             type="button"
                             onClick={() => handleCopy(v.location!, copyLocId)}
-                            className="min-h-[36px] px-2 text-[11px] font-semibold text-slate-500 hover:text-teal-700 dark:hover:text-teal-400 shrink-0 cursor-pointer"
+                            className="min-h-[34px] px-2 text-[11px] font-semibold text-slate-500 hover:text-teal-700 shrink-0 cursor-pointer"
                           >
                             {copiedKey === copyLocId ? (isZh ? '已複製' : 'Copied') : isZh ? '複製地址' : 'Copy'}
                           </button>
@@ -973,7 +1134,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                         })
                       }
                       title={isZh ? '全螢幕出示給櫃檯' : 'Show fullscreen card'}
-                      className="w-11 h-11 sm:w-9 sm:h-9 -mr-1.5 rounded-lg flex items-center justify-center text-slate-500 hover:text-teal-700 dark:text-slate-400 dark:hover:text-teal-300 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
+                      className="w-10 h-10 sm:w-9 sm:h-9 -mr-1.5 rounded-lg flex items-center justify-center text-slate-500 hover:text-teal-700 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
                     >
                       <Maximize2 className="w-4 h-4" />
                     </button>
@@ -997,7 +1158,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleCopy(entry.bookingCode, copyId)}
-                    className={`min-h-[44px] sm:min-h-[38px] px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer ${
+                    className={`min-h-[42px] sm:min-h-[38px] px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer ${
                       copiedKey === copyId
                         ? 'bg-teal-700 text-white'
                         : 'bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:border-teal-600'
@@ -1059,7 +1220,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
         />
       )}
 
-      {/* Fullscreen Counter Display iOS Sheet (Airport / Hotel Check-in Card) */}
+      {/* Fullscreen Counter Display iOS Sheet (High-Contrast Code + Offline QR / Screenshots) */}
       {counterCard && (
         <IosModalSheet
           onClose={() => setCounterCard(null)}
@@ -1098,6 +1259,27 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Full-Width High-Contrast QR / Screenshot Showcase for Counter Scanning */}
+            {counterCard.voucherImages && counterCard.voucherImages.length > 0 && (
+              <div className="space-y-3">
+                {counterCard.voucherImages.map((imgRef, idx) => (
+                  <div
+                    key={idx}
+                    className="rounded-2xl overflow-hidden bg-white p-3 border border-[#E5E2DC] shadow-xs"
+                  >
+                    <MediaImage
+                      tripId={trip.id}
+                      ownerId={trip.ownerId}
+                      collabId={trip.collabId}
+                      src={imgRef}
+                      alt={`${counterCard.title} QR ${idx + 1}`}
+                      className="w-full max-h-[60vh] object-contain mx-auto rounded-lg"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
 
             {(counterCard.dateLabel || counterCard.location || counterCard.notes) && (
               <IosInsetGroup>

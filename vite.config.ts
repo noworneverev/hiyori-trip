@@ -1,8 +1,8 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import {defineConfig} from 'vite';
-import {VitePWA} from 'vite-plugin-pwa';
+import { defineConfig } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   return {
@@ -11,14 +11,15 @@ export default defineConfig(() => {
       react(),
       tailwindcss(),
       VitePWA({
-        registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
+        registerType: 'prompt',
+        includeAssets: [],
         manifest: {
           id: './',
           name: '日和手帳 Hiyori - 自由行隨行手帖',
           short_name: '日和手帳',
           lang: 'zh-TW',
-          description: '日和手帳 Hiyori：自由行隨行手帖。支援行程總覽大表、路線地圖導覽、隨行即時天氣、多幣別記帳換算與發票管理、行前清單待辦。',
+          description:
+            '日和手帳 Hiyori：自由行隨行手帖。支援行程總覽大表、路線地圖導覽、隨行即時天氣、多幣別記帳換算與發票管理、行前清單待辦。',
           theme_color: '#FAF9F6',
           background_color: '#FAF9F6',
           display: 'standalone',
@@ -46,14 +47,41 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
-          skipWaiting: true,
-          clientsClaim: true,
           cleanupOutdatedCaches: true,
-          ignoreURLParametersMatching: [/^_v$/],
-          navigateFallbackDenylist: [/^\/__\/auth/, /^\/__\/firebase/],
+          ignoreURLParametersMatching: [/^_v$/, /^_t$/],
+          navigateFallbackDenylist: [/^\/__\/auth/, /^\/__\/firebase/, /^\/api\//],
           maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          globIgnores: ['assets/aistudio/**'],
           runtimeCaching: [
+            {
+              urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+              handler: 'StaleWhileRevalidate',
+              options: {
+                cacheName: 'google-fonts-stylesheets',
+                expiration: {
+                  maxEntries: 20,
+                  maxAgeSeconds: 60 * 60 * 24 * 30,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+            {
+              urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'google-fonts-webfonts',
+                expiration: {
+                  maxEntries: 30,
+                  maxAgeSeconds: 60 * 60 * 24 * 365,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
             {
               urlPattern: /^https:\/\/.*tile\.openstreetmap\.org\/.*/i,
               handler: 'CacheFirst',
@@ -61,7 +89,7 @@ export default defineConfig(() => {
                 cacheName: 'osm-tiles-cache',
                 expiration: {
                   maxEntries: 500,
-                  maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+                  maxAgeSeconds: 60 * 60 * 24 * 30,
                 },
                 cacheableResponse: {
                   statuses: [0, 200],
@@ -71,8 +99,7 @@ export default defineConfig(() => {
           ],
         },
         devOptions: {
-          enabled: true,
-          type: 'module',
+          enabled: false,
         },
       }),
     ],
@@ -82,10 +109,7 @@ export default defineConfig(() => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
   };

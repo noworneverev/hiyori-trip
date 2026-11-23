@@ -1,23 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { Trip, DayPlan } from '../../types/itinerary';
-import { formatDateSlash, formatMonthDaySlash, getDayOfWeek } from '../../utils/date';
+import { formatMonthDaySlash, getDayOfWeek } from '../../utils/date';
+import { isValidCoordinate } from '../../utils/geo';
 import { Language } from '../../utils/i18n';
 import { TripOverviewMap } from '../Map/TripOverviewMap';
 import {
-  Calendar,
   MapPin,
   Train,
   Hotel,
   ChevronDown,
   ChevronUp,
   ArrowRight,
-  Sparkles,
-  Plane,
-  Car,
-  Footprints,
-  CheckCircle2,
   TableProperties,
-  Map as MapIcon,
 } from 'lucide-react';
 
 interface ItineraryOverviewTableProps {
@@ -29,6 +23,10 @@ interface ItineraryOverviewTableProps {
   defaultExpanded?: boolean;
   initialViewMode?: 'table' | 'map';
 }
+
+const LODGING_KEYWORD_REGEX =
+  /(飯店|酒店|旅館|民宿|賓館|青旅|青年旅舍|度假村|渡假村|溫泉宿|商旅|行館|酒店|hotel|hostel|ryokan|inn|resort|lodge|b&b|airbnb)/i;
+const FALSE_LODGING_PLACES_REGEX = /(新宿|原宿|指宿|宿霧|宿迁|宿遷|宿州)/;
 
 export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
   trip,
@@ -43,19 +41,13 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
   const [viewMode, setViewMode] = useState<'table' | 'map'>(initialViewMode);
   const [focusSpotId, setFocusSpotId] = useState<string | undefined>(undefined);
 
+  const isZh = lang === 'zh' || lang === 'zh-CN';
+  const nightsCount = Math.max(0, trip.days.length - 1);
+
   // Total marked spots with valid coordinates
   const totalMarkedSpotsCount = useMemo(() => {
     return trip.days.reduce((acc, d) => {
-      return (
-        acc +
-        d.items.filter(
-          (i) =>
-            typeof i.lat === 'number' &&
-            typeof i.lng === 'number' &&
-            !isNaN(i.lat) &&
-            !isNaN(i.lng)
-        ).length
-      );
+      return acc + d.items.filter((i) => isValidCoordinate(i.lat, i.lng)).length;
     }, 0);
   }, [trip]);
 
@@ -69,7 +61,6 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
         transports.push(item.transportNote);
       }
     });
-    // Check day notes for transport keywords (e.g. 高速巴士, 新幹線, JR, 電車, 自駕)
     if (day.notes) {
       const match = day.notes.match(/(高速巴士|新幹線|JR|特急|CANBUS|乘車套票|計程車|自駕|租車|飛機|航班)[^，。、\n]*/gi);
       if (match) {
@@ -81,15 +72,20 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
     return transports.slice(0, 2);
   };
 
-  // Extract accommodation info for a day
+  // Extract accommodation info for a day without false positives on places like 新宿 / 原宿 / 指宿
   const getDayLodging = (day: DayPlan): string | null => {
-    const hotelItem = day.items.find((i) => i.category === 'hotel' || i.title.includes('飯店') || i.title.includes('酒店') || i.title.includes('旅館') || i.title.includes('賓館') || i.title.includes('宿'));
-    if (hotelItem) return hotelItem.title;
+    const explicitHotel = day.items.find((i) => i.category === 'hotel');
+    if (explicitHotel) return explicitHotel.title;
+
+    const keywordHotel = day.items.find(
+      (i) => LODGING_KEYWORD_REGEX.test(i.title) && !FALSE_LODGING_PLACES_REGEX.test(i.title)
+    );
+    if (keywordHotel) return keywordHotel.title;
 
     if (day.notes) {
-      const match = day.notes.match(/住宿[：:]\s*([^，。\n]+)/);
+      const match = day.notes.match(/(?:住宿|入住|下榻|晚宿)[：:]\s*([^，。\n]+)/);
       if (match && match[1]) return match[1].trim();
-      const match2 = day.notes.match(/(宿[：:]\s*[^，。\n]+)/);
+      const match2 = day.notes.match(/(?:^|[，。\s])宿[：:]\s*([^，。\n]+)/);
       if (match2 && match2[1]) return match2[1].trim();
     }
     return null;
@@ -98,14 +94,24 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
   const handleRowClick = (dayNumber: number) => {
     if (onSelectDay) {
       onSelectDay(dayNumber);
-      // Smooth scroll down to day schedule if in interactive mode
       if (!isPrintMode) {
-        const target = document.getElementById(`day-schedule-section-${dayNumber}`) || document.getElementById('day-schedule-section');
-        if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+        // Wait for TimelineTab to mount Daily view before scrolling cleanly
+        setTimeout(() => {
+          const target =
+            document.getElementById(`day-schedule-section-${dayNumber}`) ||
+            document.getElementById('day-schedule-section');
+          if (target) {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }, 80);
       }
     }
+  };
+
+  const handleJumpDayToMap = (day: DayPlan) => {
+    const firstCoordSpot = day.items.find((it) => isValidCoordinate(it.lat, it.lng));
+    setFocusSpotId(firstCoordSpot?.id);
+    setViewMode('map');
   };
 
   if (isPrintMode) {
@@ -117,7 +123,9 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
             <span>行程總覽大表 (Itinerary At-a-Glance)</span>
           </h2>
           <span className="text-[10px] font-mono text-slate-500">
-            {trip.days.length} Days / {Math.max(1, trip.days.length - 1)} Nights
+            {nightsCount > 0
+              ? `${trip.days.length} Days / ${nightsCount} Nights`
+              : `${trip.days.length} Day`}
           </span>
         </div>
 
@@ -194,7 +202,6 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
     );
   }
 
-  // Interactive In-App View
   return (
     <div className="bg-white dark:bg-[#111827] rounded-2xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xs overflow-hidden transition-all duration-200">
       {/* Header bar */}
@@ -209,103 +216,80 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white tracking-tight">
-                {lang === 'zh' ? '行程總覽大表' : 'Itinerary Master Schedule'}
+                {isZh ? '行程總覽大表' : 'Itinerary Master Schedule'}
               </h2>
               <span className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
-                · {trip.days.length} {lang === 'zh' ? '天' : 'Days'} / {Math.max(1, trip.days.length - 1)} {lang === 'zh' ? '夜' : 'Nights'}
+                ·{' '}
+                {nightsCount > 0
+                  ? `${trip.days.length} ${isZh ? '天' : 'Days'} / ${nightsCount} ${isZh ? '夜' : 'Nights'}`
+                  : isZh
+                    ? '1 天當日行程'
+                    : '1 Day Trip'}
               </span>
-              {selectedDayNumber && (
-                <span className="hidden sm:inline-block text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
-                  · {lang === 'zh' ? `當前檢視：第 ${selectedDayNumber} 天` : `Viewing: Day ${selectedDayNumber}`}
-                </span>
-              )}
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
-              {lang === 'zh'
+              {isZh
                 ? '全程動線與重點景點一覽 · 點選任一日程即可快速切換'
                 : 'At-a-glance trip route & highlights · Tap any day to jump directly'}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsExpanded(true);
-              setViewMode(viewMode === 'map' && isExpanded ? 'table' : 'map');
-            }}
-            className={`min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer ${
-              isExpanded && viewMode === 'map'
-                ? 'bg-teal-700 dark:bg-teal-600 text-white'
-                : 'bg-white dark:bg-[#111827] text-teal-800 dark:text-teal-300 border border-[#E5E2DC] dark:border-slate-700 hover:bg-teal-50/70 dark:hover:bg-teal-950/40'
-            }`}
-            title="開啟全程景點概覽地圖"
-          >
-            <MapIcon className="w-3.5 h-3.5" />
-            <span className="hidden xs:inline">概覽地圖</span>
-            <span className="text-[11px] font-mono tabular-nums opacity-85">({totalMarkedSpotsCount})</span>
-          </button>
-
-          <span className="text-xs font-semibold text-teal-700 dark:text-teal-400 group-hover:underline hidden sm:inline">
-            {isExpanded ? (lang === 'zh' ? '收合總覽' : 'Collapse') : (lang === 'zh' ? '展開大表' : 'Expand')}
-          </span>
-          <button
-            type="button"
-            className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition cursor-pointer"
-            aria-label="Toggle Table"
-          >
-            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
-        </div>
+        <button
+          type="button"
+          className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition cursor-pointer shrink-0"
+          aria-label="Toggle Table"
+        >
+          {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </button>
       </div>
 
       {/* Expanded Content */}
       {isExpanded && (
         <div className="p-3 sm:p-4 animate-in fade-in duration-150 space-y-3">
-          {/* Sub-bar with View Mode Tabs */}
+          {/* Single clean View Mode Segmented Switcher */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-[#E5E2DC] dark:border-slate-800">
-            <div className="inline-flex rounded-xl p-1 bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 text-xs">
+            <div className="inline-flex rounded-xl p-1 bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-800 text-xs self-start">
               <button
                 type="button"
                 onClick={() => setViewMode('table')}
-                className={`min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                className={`min-h-[38px] sm:min-h-[34px] px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
                   viewMode === 'table'
                     ? 'bg-white dark:bg-slate-800 text-teal-700 dark:text-teal-300 shadow-2xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <TableProperties className="w-3.5 h-3.5" />
-                <span>{lang === 'zh' ? '路線大表' : 'Schedule Table'}</span>
+                <span>{isZh ? '路線大表' : 'Schedule Table'}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode('map')}
-                className={`min-h-[44px] sm:min-h-[36px] px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                className={`min-h-[38px] sm:min-h-[34px] px-3 py-1.5 rounded-lg font-bold transition flex items-center gap-1.5 cursor-pointer ${
                   viewMode === 'map'
                     ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <MapPin className="w-3.5 h-3.5" />
-                <span>{lang === 'zh' ? '全程景點概覽地圖' : 'Attractions Map'}</span>
-                <span className="text-[11px] font-mono tabular-nums opacity-80">
+                <span>{isZh ? '全程地圖' : 'Trip Map'}</span>
+                <span className="text-[11px] font-mono tabular-nums opacity-85">
                   ({totalMarkedSpotsCount})
                 </span>
               </button>
             </div>
 
-            <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-              {viewMode === 'table' ? (
-                <span>點選任一日程查看該日詳細規劃 · 點選景點可快速在地圖定位</span>
-              ) : (
-                <span>點擊地圖任意圖標即可查看景點攻略與導航</span>
-              )}
+            <div className="text-[11px] text-slate-500 dark:text-slate-400">
+              {viewMode === 'table'
+                ? isZh
+                  ? '點選日程切換時序 · 點選帶座標的景點可直接在地圖定位'
+                  : 'Tap a day to view schedule · Tap pinned spots to locate on map'
+                : isZh
+                  ? '點擊地圖標記即可快速導航或查看詳情'
+                  : 'Tap any pin to navigate or view details'}
             </div>
           </div>
 
-          {/* VIEW MODE 1: TRIP OVERVIEW MAP */}
           {viewMode === 'map' && (
             <TripOverviewMap
               trip={trip}
@@ -315,7 +299,6 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
             />
           )}
 
-          {/* VIEW MODE 2: TABLE & MOBILE CARDS */}
           {viewMode === 'table' && (
             <>
               {/* Desktop & Tablet Table */}
@@ -337,7 +320,6 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                       const weekday = getDayOfWeek(day.date, lang);
                       const transports = getDayTransport(day);
                       const lodging = getDayLodging(day);
-                      const spotTitles = day.items.map((i) => i.title);
 
                       return (
                         <tr
@@ -349,7 +331,6 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                               : 'hover:bg-[#FAF9F6] dark:hover:bg-slate-900/50 text-slate-700 dark:text-slate-300'
                           }`}
                         >
-                          {/* Day & Date */}
                           <td className="py-3 px-3 align-top font-mono tabular-nums">
                             <div className="flex items-center gap-1.5">
                               <span
@@ -365,14 +346,11 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                                 <span className="block font-bold text-slate-900 dark:text-white">
                                   {formatMonthDaySlash(day.date)}
                                 </span>
-                                <span className="text-[10px] text-slate-400 font-normal">
-                                  ({weekday})
-                                </span>
+                                <span className="text-[10px] text-slate-400 font-normal">({weekday})</span>
                               </div>
                             </div>
                           </td>
 
-                          {/* Theme */}
                           <td className="py-3 px-3 align-top">
                             <span className="font-bold text-slate-900 dark:text-white block group-hover:text-teal-700 dark:group-hover:text-teal-400 transition">
                               {day.theme || `第 ${day.dayNumber} 天`}
@@ -384,16 +362,11 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                             )}
                           </td>
 
-                          {/* Spots Chain */}
                           <td className="py-3 px-3 align-top">
                             {day.items.length > 0 ? (
                               <div className="flex flex-wrap items-center gap-1">
                                 {day.items.map((matchingItem, sIdx) => {
-                                  const hasCoords =
-                                    typeof matchingItem.lat === 'number' &&
-                                    typeof matchingItem.lng === 'number' &&
-                                    !isNaN(matchingItem.lat) &&
-                                    !isNaN(matchingItem.lng);
+                                  const hasCoords = isValidCoordinate(matchingItem.lat, matchingItem.lng);
 
                                   return (
                                     <React.Fragment key={matchingItem.id || sIdx}>
@@ -427,12 +400,11 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                               </div>
                             ) : (
                               <span className="text-slate-400 italic text-[11px]">
-                                {lang === 'zh' ? '尚未安排景點' : 'No spots added'}
+                                {isZh ? '尚未安排景點' : 'No spots added'}
                               </span>
                             )}
                           </td>
 
-                          {/* Transport */}
                           <td className="py-3 px-3 align-top text-[11px]">
                             {transports.length > 0 ? (
                               <div className="flex items-start gap-1 text-slate-600 dark:text-slate-300">
@@ -444,7 +416,6 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                             )}
                           </td>
 
-                          {/* Lodging */}
                           <td className="py-3 px-3 align-top text-[11px]">
                             {lodging ? (
                               <div className="flex items-start gap-1 text-slate-600 dark:text-slate-300">
@@ -456,17 +427,16 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                             )}
                           </td>
 
-                          {/* Action */}
                           <td className="py-3 px-3 align-top text-right">
                             <div className="flex items-center justify-end gap-1">
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setViewMode('map');
+                                  handleJumpDayToMap(day);
                                 }}
                                 className="p-1.5 rounded-lg text-slate-400 hover:text-teal-700 dark:hover:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
-                                title="於概覽地圖檢視"
+                                title="於概覽地圖檢視該日"
                               >
                                 <MapPin className="w-3.5 h-3.5" />
                               </button>
@@ -480,12 +450,8 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                               >
                                 <span>
                                   {isSelected
-                                    ? lang === 'zh'
-                                      ? '檢視中'
-                                      : 'Viewing'
-                                    : lang === 'zh'
-                                    ? '查看'
-                                    : 'View'}
+                                    ? isZh ? '檢視中' : 'Viewing'
+                                    : isZh ? '查看' : 'View'}
                                 </span>
                                 <ArrowRight className="w-3 h-3" />
                               </button>
@@ -539,9 +505,9 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              setViewMode('map');
+                              handleJumpDayToMap(day);
                             }}
-                            className="min-h-[44px] px-2.5 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/50 rounded-lg flex items-center gap-1 text-xs font-semibold cursor-pointer"
+                            className="min-h-[38px] px-2.5 text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/50 rounded-lg flex items-center gap-1 text-xs font-semibold cursor-pointer"
                           >
                             <MapPin className="w-3.5 h-3.5" />
                             <span>地圖</span>
@@ -557,14 +523,12 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
                         {day.theme || `第 ${day.dayNumber} 天`}
                       </h3>
 
-                      {/* Unboxed Typographic Spot Flow */}
                       {spotTitles.length > 0 && (
                         <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mt-1 line-clamp-2">
                           {spotTitles.join(' → ')}
                         </p>
                       )}
 
-                      {/* Unboxed Lodging & Transport Metadata */}
                       {(lodging || transports.length > 0) && (
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 pt-1.5 border-t border-[#E5E2DC]/60 dark:border-slate-800/80 text-[11px] text-slate-500 dark:text-slate-400">
                           {transports.length > 0 && (

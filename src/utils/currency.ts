@@ -26,6 +26,7 @@ export const SUPPORTED_CURRENCIES: CurrencyMeta[] = [
 /**
  * Automatically determine the most sensible default currency for a trip.
  * Respects explicit trip.currency if set, otherwise analyzes destination / title.
+ * Avoids single-character CJK false positives (e.g. 關西->EUR, 美瑛->USD, 星野->SGD, 台中->CNY).
  */
 export function detectTripCurrency(trip?: { currency?: string; destination?: string; title?: string } | null): string {
   if (trip?.currency && trip.currency.trim()) {
@@ -33,18 +34,59 @@ export function detectTripCurrency(trip?: { currency?: string; destination?: str
     if (SUPPORTED_CURRENCIES.some((c) => c.code === cur)) return cur;
   }
   const text = `${trip?.destination || ''} ${trip?.title || ''}`.toLowerCase();
-  if (text.match(/歐|法|德|義|西|荷|奧|捷|瑞典|芬蘭|希臘|paris|france|europe|italy|germany|spain|rome|vienna|amsterdam/i)) return 'EUR';
-  if (text.match(/英|倫敦|uk|london|britain|gbp|scotland/i)) return 'GBP';
-  if (text.match(/瑞士|swiss|zurich|geneva/i)) return 'CHF';
-  if (text.match(/美|紐約|舊金山|洛杉磯|西雅圖|夏威夷|usa|united states|america/i)) return 'USD';
-  if (text.match(/泰|曼谷|清邁|普吉|thailand|bangkok|chiang mai/i)) return 'THB';
-  if (text.match(/韓|首爾|釜山|濟州|弘大|明洞|korea|seoul|busan/i)) return 'KRW';
-  if (text.match(/星|新加坡|singapore/i)) return 'SGD';
-  if (text.match(/越|胡志明|河內|峴港|富國島|vietnam|da nang/i)) return 'VND';
-  if (text.match(/澳|雪梨|墨爾本|布里斯本|australia|sydney|melbourne/i)) return 'AUD';
-  if (text.match(/港|香港|九龍|hong kong/i)) return 'HKD';
-  if (text.match(/中|北京|上海|成都|廣州|china/i)) return 'CNY';
-  if (text.match(/台|台北|高雄|台中|台南|花蓮|宜蘭|taiwan/i)) return 'TWD';
+
+  // Check explicit Japan keywords first so names like 關西 / 法隆寺 / 奧日光 / 美瑛 / 星野 / 越後湯澤 / 神戶港 stay JPY
+  if (/(日本|東京|大阪|京都|北海道|札幌|函館|小樽|富良野|美瑛|沖繩|那霸|福岡|九州|熊本|鹿兒島|長崎|別府|由布院|名古屋|中部|北陸|金澤|高山|白川鄉|立山|輕井澤|箱根|河口湖|富士山|鎌倉|橫濱|日光|東北|仙台|青森|秋田|廣島|岡山|四國|關西|關東|奈良|神戶|宇治|嵐山|琵琶湖|新潟|越後湯澤|星野|japan|tokyo|osaka|kyoto|hokkaido|sapporo|okinawa|fukuoka|kyushu|nagoya|kanazawa|hakone|sendai|hiroshima|kobe|nara|yokohama)/i.test(text)) {
+    return 'JPY';
+  }
+  // Check Taiwan before China so 台中 / 台北 / 台南 / 台東 don't trigger China
+  if (/(台灣|臺灣|台北|臺北|新北|桃園|新竹|苗栗|台中|臺中|彰化|南投|日月潭|清境|嘉義|阿里山|台南|臺南|高雄|墾丁|屏東|宜蘭|花蓮|台東|臺東|澎湖|金門|馬祖|綠島|蘭嶼|taiwan|taipei|taichung|tainan|kaohsiung|hualien|yilan|kenting)/i.test(text)) {
+    return 'TWD';
+  }
+  // Check Hong Kong / Macau before China
+  if (/(香港|九龍|尖沙咀|銅鑼灣|中環|旺角|澳門|hong kong|\bhk\b|kowloon|macau)/i.test(text)) {
+    return 'HKD';
+  }
+  // Switzerland (CHF) before general Europe
+  if (/(瑞士|蘇黎世|日內瓦|琉森|少女峰|策馬特|因特拉肯|swiss|switzerland|zurich|geneva|lucerne|zermatt|interlaken)/i.test(text)) {
+    return 'CHF';
+  }
+  // United Kingdom (GBP) before general Europe
+  if (/(英國|倫敦|愛丁堡|曼徹斯特|牛津|劍橋|蘇格蘭|威爾斯|\buk\b|london|britain|england|scotland|\bgbp\b|edinburgh|manchester)/i.test(text)) {
+    return 'GBP';
+  }
+  // Eurozone countries & major cities
+  if (/(歐洲|法國|巴黎|里昂|尼斯|南法|德國|柏林|慕尼黑|法蘭克福|義大利|意大利|羅馬|米蘭|威尼斯|佛羅倫斯|托斯卡尼|西班牙|馬德里|巴塞隆納|塞維亞|荷蘭|阿姆斯特丹|比利時|布魯塞爾|奧地利|維也納|薩爾斯堡|哈修塔特|葡萄牙|里斯本|波多|希臘|雅典|聖托里尼|愛爾蘭|都柏林|芬蘭|赫爾辛基|羅瓦涅米|歐元|paris|france|europe|italy|germany|spain|rome|milan|venice|florence|barcelona|madrid|vienna|austria|amsterdam|netherlands|belgium|portugal|lisbon|greece|athens|santorini|berlin|munich|finland|helsinki|ireland|dublin)/i.test(text)) {
+    return 'EUR';
+  }
+  // United States (USD)
+  if (/(美國|紐約|舊金山|洛杉磯|西雅圖|波士頓|芝加哥|拉斯維加斯|華盛頓|邁阿密|奧蘭多|夏威夷|檀香山|關島|阿拉斯加|\busa\b|\bu\.s\.a\b|united states|america|new york|san francisco|los angeles|seattle|hawaii|las vegas|boston|chicago|guam)/i.test(text)) {
+    return 'USD';
+  }
+  // South Korea (KRW)
+  if (/(韓國|南韓|首爾|釜山|濟州|大邱|仁川|弘大|明洞|聖水|江南|慶州|korea|seoul|busan|jeju|daegu|incheon)/i.test(text)) {
+    return 'KRW';
+  }
+  // Thailand (THB)
+  if (/(泰國|曼谷|清邁|清萊|普吉|芭達雅|華欣|蘇美島|喀比|thailand|bangkok|chiang mai|phuket|pattaya|krabi|samui)/i.test(text)) {
+    return 'THB';
+  }
+  // Singapore (SGD)
+  if (/(新加坡|聖淘沙|星國|singapore|sentosa)/i.test(text)) {
+    return 'SGD';
+  }
+  // Vietnam (VND)
+  if (/(越南|胡志明|河內|峴港|會安|富國島|芽莊|下龍灣|順化|沙壩|vietnam|ho chi minh|hanoi|da nang|hoi an|phu quoc|nha trang)/i.test(text)) {
+    return 'VND';
+  }
+  // Australia (AUD)
+  if (/(澳洲|澳大利亞|雪梨|悉尼|墨爾本|布里斯本|黃金海岸|伯斯|凱恩斯|阿德雷德|塔斯馬尼亞|australia|sydney|melbourne|brisbane|gold coast|perth|cairns|adelaide|tasmania)/i.test(text)) {
+    return 'AUD';
+  }
+  // China (CNY)
+  if (/(中國|大陸|北京|上海|廣州|深圳|成都|重慶|西安|杭州|蘇州|廈門|青島|張家界|麗江|雲南|西藏|新疆|china|beijing|shanghai|shenzhen|guangzhou|chengdu|chongqing|xian|hangzhou)/i.test(text)) {
+    return 'CNY';
+  }
   return 'JPY';
 }
 
@@ -61,16 +103,41 @@ export interface LiveRatesCache {
   source: string;
 }
 
+// Module-level memory cache to avoid JSON.parse(localStorage) on every expense row render
+let memoryLiveRatesCache: LiveRatesCache | null | undefined = undefined;
+
 /**
- * Retrieve cached daily exchange rates from localStorage
+ * Retrieve cached daily exchange rates (memory-cached, backed by localStorage)
  */
 export function getCachedLiveRates(): LiveRatesCache | null {
+  if (memoryLiveRatesCache !== undefined) {
+    return memoryLiveRatesCache;
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY_LIVE_RATES);
-    if (!raw) return null;
+    if (!raw) {
+      memoryLiveRatesCache = null;
+      return null;
+    }
     const parsed = JSON.parse(raw);
-    if (parsed && parsed.rates) return parsed;
-  } catch {}
+    if (parsed && parsed.rates && typeof parsed.rates === 'object') {
+      // Sanitize any corrupted 0/NaN entries from older cached builds (e.g. VND rounded to 0.00 or 0.01)
+      const sanitizedRates: Record<string, number> = { ...parsed.rates, JPY: 1 };
+      for (const cur of SUPPORTED_CURRENCIES) {
+        if (cur.code === 'JPY') continue;
+        const r = sanitizedRates[cur.code];
+        if (typeof r !== 'number' || !Number.isFinite(r) || r <= 0) {
+          sanitizedRates[cur.code] = cur.defaultRateToJPY;
+        }
+      }
+      const parsedResult: LiveRatesCache = { ...parsed, rates: sanitizedRates };
+      memoryLiveRatesCache = parsedResult;
+      return parsedResult;
+    }
+  } catch {
+    // ignore storage parse failure
+  }
+  memoryLiveRatesCache = null;
   return null;
 }
 
@@ -88,7 +155,10 @@ export async function fetchLiveExchangeRates(force = false): Promise<LiveRatesCa
   }
 
   try {
-    const resp = await fetch('https://open.er-api.com/v6/latest/JPY');
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch('https://open.er-api.com/v6/latest/JPY', { signal: controller.signal });
+    window.clearTimeout(timer);
     if (!resp.ok) throw new Error(`HTTP error ${resp.status}`);
     const data = await resp.json();
 
@@ -100,9 +170,10 @@ export async function fetchLiveExchangeRates(force = false): Promise<LiveRatesCa
       for (const cur of SUPPORTED_CURRENCIES) {
         if (cur.code === 'JPY') continue;
         const rateAgainstJPY = data.rates[cur.code];
-        if (typeof rateAgainstJPY === 'number' && rateAgainstJPY > 0) {
-          // 1 unit of cur.code = 1 / rateAgainstJPY JPY
-          calculatedRates[cur.code] = Number((1 / rateAgainstJPY).toFixed(cur.decimals > 0 ? 3 : 2));
+        if (typeof rateAgainstJPY === 'number' && Number.isFinite(rateAgainstJPY) && rateAgainstJPY > 0) {
+          // Use 6 significant digits so low-unit currencies like VND (~0.00615) & KRW (~0.1085) stay exact
+          const exactRate = Number((1 / rateAgainstJPY).toPrecision(6));
+          calculatedRates[cur.code] = exactRate > 0 ? exactRate : cur.defaultRateToJPY;
         } else {
           calculatedRates[cur.code] = cur.defaultRateToJPY;
         }
@@ -114,7 +185,12 @@ export async function fetchLiveExchangeRates(force = false): Promise<LiveRatesCa
         source: 'Open Exchange Rates (當日即時匯率)',
       };
 
-      localStorage.setItem(STORAGE_KEY_LIVE_RATES, JSON.stringify(result));
+      memoryLiveRatesCache = result;
+      try {
+        localStorage.setItem(STORAGE_KEY_LIVE_RATES, JSON.stringify(result));
+      } catch {
+        // ignore quota errors
+      }
       return result;
     }
   } catch (err) {
@@ -129,11 +205,13 @@ export async function fetchLiveExchangeRates(force = false): Promise<LiveRatesCa
     defaults[c.code] = c.defaultRateToJPY;
   });
 
-  return {
+  const fallbackResult: LiveRatesCache = {
     rates: defaults,
     updatedAt: Date.now(),
     source: '內建基準匯率',
   };
+  memoryLiveRatesCache = fallbackResult;
+  return fallbackResult;
 }
 
 /**
@@ -145,23 +223,26 @@ export function convertAmount(
   toCode: string,
   customRates?: Record<string, number>
 ): number {
-  if (!amount || isNaN(amount)) return 0;
+  if (!amount || !Number.isFinite(amount)) return 0;
   if (fromCode === toCode) return amount;
 
   const cached = getCachedLiveRates();
 
   const getRateToJPY = (code: string) => {
-    if (customRates && typeof customRates[code] === 'number') {
-      return customRates[code];
+    const custom = customRates?.[code];
+    if (typeof custom === 'number' && Number.isFinite(custom) && custom > 0) {
+      return custom;
     }
-    if (cached && typeof cached.rates[code] === 'number') {
-      return cached.rates[code];
+    const live = cached?.rates?.[code];
+    if (typeof live === 'number' && Number.isFinite(live) && live > 0) {
+      return live;
     }
     return CURRENCY_MAP[code]?.defaultRateToJPY || 1;
   };
 
   const fromRate = getRateToJPY(fromCode);
   const toRate = getRateToJPY(toCode);
+  if (fromRate <= 0 || toRate <= 0) return 0;
 
   // Convert from -> JPY -> to
   const amountInJPY = amount * fromRate;

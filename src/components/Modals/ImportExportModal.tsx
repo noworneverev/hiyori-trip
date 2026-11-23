@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Trip } from '../../types/itinerary';
 import {
   parseTextItinerary,
@@ -8,7 +8,7 @@ import {
   exportTripToMarkdown,
   exportTripToCSV,
 } from '../../utils/storage';
-import { universalParseItinerary } from '../../utils/aiClient';
+import { universalParseItinerary, checkAiAvailability, AiBackendMode } from '../../utils/aiClient';
 import { extractInlineImagesToMediaRefs, rebindTripMediaIds } from '../../utils/image';
 import { TRIP_TEMPLATES } from '../../data/presetTrips';
 import {
@@ -16,6 +16,7 @@ import {
   IosNavBar,
   IosInsetGroup,
   IosRow,
+  IosDisclosureRow,
 } from '../UI/IosPrimitives';
 import {
   Upload,
@@ -57,41 +58,80 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   const [destinationHint, setDestinationHint] = useState('');
   const [tripTitleInput, setTripTitleInput] = useState('');
   const [parsedPreviewTrip, setParsedPreviewTrip] = useState<Trip | null>(null);
+  const [parsedMultiTrips, setParsedMultiTrips] = useState<Trip[] | null>(null);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [isConfirmingImport, setIsConfirmingImport] = useState(false);
   const [parseSource, setParseSource] = useState<'server_ai' | 'local_fallback' | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiStatusStep, setAiStatusStep] = useState<string>('');
   const [isExporting, setIsExporting] = useState(false);
+  const [aiMode, setAiMode] = useState<AiBackendMode>('local_only');
+  const [showAdvancedExportFormats, setShowAdvancedExportFormats] = useState(false);
 
-  const handleExportSingleJSON = async () => {
-    setErrorMessage(null);
-    setIsExporting(true);
-    try {
-      await exportTripToJSON(currentTrip);
-    } catch (err: any) {
-      setErrorMessage(`匯出 JSON 失敗: ${err?.message || '未知錯誤'}`);
-    } finally {
-      setIsExporting(false);
-    }
+  useEffect(() => {
+    let active = true;
+    checkAiAvailability().then((mode) => {
+      if (active) setAiMode(mode);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const normalizeImportedTrip = (candidate: any, idx = 0): Trip => {
+    const today = new Date().toISOString().slice(0, 10);
+    const days = Array.isArray(candidate.days) ? candidate.days.slice(0, 60) : [];
+    const safeTitle = String(candidate.title || '匯入旅程').trim().slice(0, 180) || '匯入旅程';
+    const safeDestination =
+      String(candidate.destination || '自訂目的地').trim().slice(0, 120) || '自訂目的地';
+    const startDate =
+      typeof candidate.startDate === 'string' && candidate.startDate.trim()
+        ? candidate.startDate
+        : days[0]?.date || today;
+    const endDate =
+      typeof candidate.endDate === 'string' && candidate.endDate.trim()
+        ? candidate.endDate
+        : days[days.length - 1]?.date || startDate;
+
+    return {
+      ...candidate,
+      id: `imported-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+      title: safeTitle,
+      destination: safeDestination,
+      startDate,
+      endDate,
+      currency: typeof candidate.currency === 'string' && candidate.currency ? candidate.currency : 'JPY',
+      budgetTotal:
+        typeof candidate.budgetTotal === 'number' && Number.isFinite(candidate.budgetTotal) && candidate.budgetTotal >= 0
+          ? candidate.budgetTotal
+          : 50000,
+      notes: typeof candidate.notes === 'string' ? candidate.notes.slice(0, 19000) : '',
+      days,
+      todos: Array.isArray(candidate.todos) ? candidate.todos : [],
+      packingList: Array.isArray(candidate.packingList) ? candidate.packingList : [],
+      expenses: Array.isArray(candidate.expenses) ? candidate.expenses : [],
+      bookings: Array.isArray(candidate.bookings) ? candidate.bookings : [],
+      memories: Array.isArray(candidate.memories) ? candidate.memories : [],
+      emergencyContacts: Array.isArray(candidate.emergencyContacts) ? candidate.emergencyContacts : [],
+      shareId: undefined,
+      collabId: undefined,
+      isCollaborative: false,
+      collaborators: undefined,
+      editorEmails: undefined,
+      viewerEmails: undefined,
+      generalAccess: undefined,
+      ownerId: undefined,
+      ownerEmail: undefined,
+      lastSyncedAt: undefined,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
   };
 
-  const handleExportAllJSON = async () => {
+  const processUploadedFile = (file: File) => {
     setErrorMessage(null);
-    setIsExporting(true);
-    try {
-      await exportAllTripsToJSON(allTrips);
-    } catch (err: any) {
-      setErrorMessage(`整庫備份失敗: ${err?.message || '未知錯誤'}`);
-    } finally {
-      setIsExporting(false);
-    }
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setErrorMessage(null);
+    setParsedMultiTrips(null);
     const reader = new FileReader();
 
     reader.onload = async (event) => {
@@ -101,31 +141,26 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
 
         if (fileName.endsWith('.json')) {
           const rawParsed = JSON.parse(content);
-          let candidate: any = rawParsed;
           if (Array.isArray(rawParsed)) {
-            if (rawParsed.length === 1 && rawParsed[0]?.title && Array.isArray(rawParsed[0]?.days)) {
-              candidate = rawParsed[0];
-            } else {
-              throw new Error('此 JSON 包含多筆旅程，請上傳單一行程 JSON 檔案');
+            const validList = rawParsed.filter(
+              (item) => item && typeof item.title === 'string' && Array.isArray(item.days)
+            );
+            if (validList.length === 0) {
+              throw new Error('JSON 陣列中找不到有效的行程結構');
             }
-          }
-          if (candidate && typeof candidate.title === 'string' && Array.isArray(candidate.days)) {
-            const newId = `imported-${Date.now()}`;
-            const sanitized: Trip = {
-              ...candidate,
-              id: newId,
-              shareId: undefined,
-              collabId: undefined,
-              isCollaborative: false,
-              ownerId: undefined,
-              ownerEmail: undefined,
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-            };
-            const { trip: offloaded } = await extractInlineImagesToMediaRefs(sanitized);
-            const rebound = await rebindTripMediaIds(offloaded, newId);
+            if (validList.length === 1) {
+              setParseSource(null);
+              setParsedPreviewTrip(normalizeImportedTrip(validList[0], 0));
+            } else {
+              // Full multi-trip database backup round-trip support!
+              setParseSource(null);
+              setParsedPreviewTrip(null);
+              setParsedMultiTrips(validList.map((item, idx) => normalizeImportedTrip(item, idx)));
+            }
+          } else if (rawParsed && typeof rawParsed.title === 'string' && Array.isArray(rawParsed.days)) {
+            // Defer IDB media extraction until user actually clicks Confirm Import (prevents IDB media leaks on cancel)
             setParseSource(null);
-            setParsedPreviewTrip(rebound);
+            setParsedPreviewTrip(normalizeImportedTrip(rawParsed, 0));
           } else {
             throw new Error('JSON 格式不符合行程結構');
           }
@@ -146,6 +181,14 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     };
 
     reader.readAsText(file);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset input value immediately so user can re-select the same file after editing
+    e.target.value = '';
+    if (!file) return;
+    processUploadedFile(file);
   };
 
   const handleAiParse = async () => {
@@ -200,10 +243,60 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     }
   };
 
-  const handleConfirmImport = () => {
+  const handleExportSingleJSON = async () => {
+    setErrorMessage(null);
+    setIsExporting(true);
+    try {
+      await exportTripToJSON(currentTrip);
+    } catch (err: any) {
+      setErrorMessage(`匯出 JSON 失敗: ${err?.message || '未知錯誤'}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleExportAllJSON = async () => {
+    setErrorMessage(null);
+    setIsExporting(true);
+    try {
+      await exportAllTripsToJSON(allTrips);
+    } catch (err: any) {
+      setErrorMessage(`整庫備份失敗: ${err?.message || '未知錯誤'}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (isConfirmingImport) return;
+    if (parsedMultiTrips && parsedMultiTrips.length > 0) {
+      setIsConfirmingImport(true);
+      try {
+        for (const tItem of parsedMultiTrips) {
+          const { trip: offloaded } = await extractInlineImagesToMediaRefs(tItem);
+          const rebound = await rebindTripMediaIds(offloaded, tItem.id);
+          await onImportTrip(rebound);
+        }
+        onClose();
+      } catch (err: any) {
+        setErrorMessage(`批次還原失敗: ${err?.message || '未知錯誤'}`);
+      } finally {
+        setIsConfirmingImport(false);
+      }
+      return;
+    }
     if (parsedPreviewTrip) {
-      onImportTrip(parsedPreviewTrip);
-      onClose();
+      setIsConfirmingImport(true);
+      try {
+        const { trip: offloaded } = await extractInlineImagesToMediaRefs(parsedPreviewTrip);
+        const rebound = await rebindTripMediaIds(offloaded, parsedPreviewTrip.id);
+        await onImportTrip(rebound);
+        onClose();
+      } catch (err: any) {
+        setErrorMessage(`匯入失敗: ${err?.message || '未知錯誤'}`);
+      } finally {
+        setIsConfirmingImport(false);
+      }
     }
   };
 
@@ -228,9 +321,12 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   const switchTab = (tab: 'import' | 'presets' | 'export') => {
     setActiveTab(tab);
     setParsedPreviewTrip(null);
+    setParsedMultiTrips(null);
     setParseSource(null);
     setErrorMessage(null);
   };
+
+  const hasPendingImport = Boolean(parsedPreviewTrip || (parsedMultiTrips && parsedMultiTrips.length > 0));
 
   return (
     <IosModalSheet
@@ -244,8 +340,9 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
         title="匯入與匯出"
         leftLabel="關閉"
         onLeftClick={onClose}
-        rightLabel={activeTab === 'import' && parsedPreviewTrip ? '套用匯入' : '完成'}
-        onRightClick={activeTab === 'import' && parsedPreviewTrip ? handleConfirmImport : onClose}
+        rightLabel={activeTab === 'import' && hasPendingImport ? '套用匯入' : '完成'}
+        rightLoading={isConfirmingImport}
+        onRightClick={activeTab === 'import' && hasPendingImport ? handleConfirmImport : onClose}
       />
 
       {/* iOS Segmented Control */}
@@ -304,9 +401,26 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
           <>
             <IosInsetGroup
               header="從檔案匯入"
-              footer="支援 .JSON 完整還原包、.CSV 試算表或旅行社行程 .TXT / .MD。"
+              footer="支援單一或多筆 .JSON 整庫備份包、.CSV 試算表或旅行社行程 .TXT / .MD。"
             >
-              <label className="relative flex items-center gap-3.5 px-4 py-3.5 min-h-[60px] cursor-pointer hover:bg-[#FAF9F6] dark:hover:bg-slate-800/45 transition group">
+              <label
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setIsDraggingFile(true);
+                }}
+                onDragLeave={() => setIsDraggingFile(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setIsDraggingFile(false);
+                  const dropped = e.dataTransfer.files?.[0];
+                  if (dropped) processUploadedFile(dropped);
+                }}
+                className={`relative flex items-center gap-3.5 px-4 py-3.5 min-h-[64px] cursor-pointer transition group ${
+                  isDraggingFile
+                    ? 'bg-teal-50/80 dark:bg-teal-950/50 ring-2 ring-inset ring-teal-500'
+                    : 'hover:bg-[#FAF9F6] dark:hover:bg-slate-800/45'
+                }`}
+              >
                 <input
                   type="file"
                   accept=".json,.csv,.txt,.md"
@@ -375,37 +489,103 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                   className="w-full p-3 rounded-xl border border-[#E5E2DC] dark:border-slate-700 focus:border-teal-600 outline-none font-mono text-[16px] sm:text-xs leading-relaxed bg-[#FAF9F6] dark:bg-slate-900/70 text-slate-800 dark:text-slate-100 placeholder:text-slate-400"
                 />
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mt-3">
-                  <button
-                    type="button"
-                    onClick={handleAiParse}
-                    disabled={!pastedText.trim() || isAiLoading}
-                    className="flex-1 min-h-[44px] px-4 py-2.5 bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 disabled:opacity-45 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs transition active:scale-[0.99] cursor-pointer"
-                  >
-                    {isAiLoading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin text-teal-100" />
-                        <span>{aiStatusStep || '智慧解析中...'}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Bot className="w-4 h-4 text-teal-100" />
-                        <span>智慧行程解析</span>
-                      </>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleLocalRuleParse}
-                    disabled={!pastedText.trim() || isAiLoading}
-                    className="min-h-[44px] px-4 py-2.5 bg-[#FAF9F6] dark:bg-slate-800 hover:bg-[#EFECE5] dark:hover:bg-slate-700 border border-[#E5E2DC] dark:border-slate-700 disabled:opacity-40 text-slate-700 dark:text-slate-200 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                    title="無須連網，純本地規則解析"
-                  >
-                    <Zap className="w-3.5 h-3.5 text-amber-500" />
-                    <span>本機快速解析</span>
-                  </button>
+                  {aiMode !== 'local_only' ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleAiParse}
+                        disabled={!pastedText.trim() || isAiLoading}
+                        className="flex-1 min-h-[44px] px-4 py-2.5 bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 disabled:opacity-45 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs transition active:scale-[0.99] cursor-pointer"
+                      >
+                        {isAiLoading ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin text-teal-100" />
+                            <span>{aiStatusStep || '智慧解析中...'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Bot className="w-4 h-4 text-teal-100" />
+                            <span>{aiMode === 'byok' ? 'AI 行程解析（自訂 Key）' : 'AI 智慧行程解析'}</span>
+                          </>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleLocalRuleParse}
+                        disabled={!pastedText.trim() || isAiLoading}
+                        className="min-h-[44px] px-4 py-2.5 bg-[#FAF9F6] dark:bg-slate-800 hover:bg-[#EFECE5] dark:hover:bg-slate-700 border border-[#E5E2DC] dark:border-slate-700 disabled:opacity-40 text-slate-700 dark:text-slate-200 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        title="無須連網，純本地規則解析"
+                      >
+                        <Zap className="w-3.5 h-3.5 text-amber-500" />
+                        <span>本機快速解析</span>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleLocalRuleParse}
+                      disabled={!pastedText.trim() || isAiLoading}
+                      className="flex-1 min-h-[44px] px-4 py-2.5 bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 disabled:opacity-45 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-xs transition active:scale-[0.99] cursor-pointer"
+                      title="離線或靜態部署自動採用免 Key 本機解析；如需進階 AI 解析可至設定填寫 Gemini API Key"
+                    >
+                      <Zap className="w-4 h-4 text-amber-300" />
+                      <span>智慧規則解析（免 Key 離線可用）</span>
+                    </button>
+                  )}
                 </div>
+                {aiMode === 'local_only' && (
+                  <p className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">
+                    目前為純前端環境，已自動隱藏雲端 AI 伺服器入口；如需使用 Gemini AI 解析，可於「系統設定 → 自訂 Gemini API Key」填入個人金鑰。
+                  </p>
+                )}
               </div>
             </IosInsetGroup>
+
+            {/* Multi-Trip Backup Preview */}
+            {parsedMultiTrips && parsedMultiTrips.length > 0 && (
+              <IosInsetGroup
+                header="整庫 JSON 備份還原預覽"
+                headerRight={
+                  <span className="text-[11px] font-mono tabular-nums font-bold text-teal-700 dark:text-teal-400">
+                    共 {parsedMultiTrips.length} 趟旅程
+                  </span>
+                }
+              >
+                <div className="max-h-56 overflow-y-auto divide-y divide-[#E5E2DC]/65 dark:divide-slate-800/80">
+                  {parsedMultiTrips.map((tr) => (
+                    <div key={tr.id} className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs">
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-900 dark:text-white truncate">{tr.title}</p>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate">
+                          {tr.destination} · {tr.startDate} ~ {tr.endDate}
+                        </p>
+                      </div>
+                      <span className="text-[11px] font-mono text-teal-700 dark:text-teal-400 shrink-0">
+                        {tr.days.length} 天
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="px-4 py-3 flex items-center justify-end gap-2 bg-[#FAF9F6]/70 dark:bg-slate-900/40">
+                  <button
+                    type="button"
+                    onClick={() => setParsedMultiTrips(null)}
+                    className="min-h-[44px] sm:min-h-[40px] px-3.5 py-2 rounded-xl border border-[#E5E2DC] dark:border-slate-700 text-slate-600 dark:text-slate-300 font-semibold text-xs hover:bg-white dark:hover:bg-slate-800 transition cursor-pointer"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isConfirmingImport}
+                    onClick={handleConfirmImport}
+                    className="min-h-[44px] sm:min-h-[40px] px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition cursor-pointer disabled:opacity-50"
+                  >
+                    {isConfirmingImport ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    <span>全部匯入 ({parsedMultiTrips.length})</span>
+                  </button>
+                </div>
+              </IosInsetGroup>
+            )}
 
             {/* Parsed Preview Result */}
             {parsedPreviewTrip && (
@@ -539,7 +719,10 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
               />
             </IosInsetGroup>
 
-            <IosInsetGroup header="單一旅程匯出格式">
+            <IosInsetGroup
+              header="常用匯出與備份"
+              footer="建議定期下載完整 JSON 備份，確保所有照片與跨旅程資料雙重保障。"
+            >
               {onOpenExportPDF && (
                 <IosRow
                   onClick={() => {
@@ -551,8 +734,8 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                       <Printer className="w-4 h-4" />
                     </div>
                   }
-                  label="匯出紙本 A4 PDF 手冊"
-                  subtitle="含日程總表、交通指引與打包清單，適合列印或隨身離線查閱"
+                  label="匯出精美 A4 PDF 手冊"
+                  subtitle="含日程總表、交通指引與聯絡資訊，適合列印或隨身離線查閱"
                   trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
                 />
               )}
@@ -565,52 +748,58 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                     {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                   </div>
                 }
-                label="匯出完整 JSON 還原包"
+                label="備份目前旅程 (.JSON)"
                 subtitle="含所有照片、座標與記帳紀錄，可於任何裝置完整還原"
                 trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
               />
 
               <IosRow
-                onClick={() => exportTripToCSV(currentTrip)}
-                icon={
-                  <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
-                    <Table className="w-4 h-4" />
-                  </div>
-                }
-                label="匯出 Excel / CSV 表格"
-                subtitle="標準 UTF-8 BOM 格式，支援 Excel 與 Google 試算表開啟"
-                trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
-              />
-
-              <IosRow
-                onClick={() => exportTripToMarkdown(currentTrip)}
-                icon={
-                  <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center">
-                    <FileText className="w-4 h-4" />
-                  </div>
-                }
-                label="匯出 Markdown 完整筆記"
-                subtitle="含日程、待辦、行李與緊急聯絡，適合貼至 Notion 或 Obsidian"
-                trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
-              />
-            </IosInsetGroup>
-
-            <IosInsetGroup
-              header="整庫完整備份"
-              footer="建議定期下載整庫 JSON 備份，確保所有照片與跨旅程資料雙重保障。"
-            >
-              <IosRow
                 onClick={handleExportAllJSON}
                 disabled={isExporting}
                 icon={
                   <div className="w-8 h-8 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 flex items-center justify-center">
-                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <HardDrive className="w-4 h-4" />}
                   </div>
                 }
-                label="下載全部旅程總資料庫 (.JSON)"
-                subtitle={`包含本地儲存的全部 ${allTrips.length} 個旅程與相片總資料庫`}
+                label="一鍵備份全部旅程 (.JSON)"
+                subtitle={`一次打包本機全部 ${allTrips.length} 趟旅程與相片資料庫`}
                 trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
               />
+            </IosInsetGroup>
+
+            <IosInsetGroup header="進階格式（選用）">
+              <IosDisclosureRow
+                icon={<FileText className="w-4 h-4 text-slate-500 dark:text-slate-400" />}
+                label="CSV 表格與 Markdown 筆記"
+                value="2 種格式"
+                expanded={showAdvancedExportFormats}
+                onToggle={() => setShowAdvancedExportFormats((v) => !v)}
+              >
+                <div className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800/80">
+                  <IosRow
+                    onClick={() => exportTripToCSV(currentTrip)}
+                    icon={
+                      <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 flex items-center justify-center">
+                        <Table className="w-4 h-4" />
+                      </div>
+                    }
+                    label="匯出 Excel / CSV 表格"
+                    subtitle="標準 UTF-8 格式，適合 Excel 與 Google 試算表開啟"
+                    trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+                  />
+                  <IosRow
+                    onClick={() => exportTripToMarkdown(currentTrip)}
+                    icon={
+                      <div className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center justify-center">
+                        <FileText className="w-4 h-4" />
+                      </div>
+                    }
+                    label="匯出 Markdown 筆記"
+                    subtitle="適合貼至 Notion、Obsidian 或純文字歸檔"
+                    trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
+                  />
+                </div>
+              </IosDisclosureRow>
             </IosInsetGroup>
           </>
         )}

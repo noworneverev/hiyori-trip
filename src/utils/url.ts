@@ -1,19 +1,9 @@
 /**
  * Strict URL protocol allowlist for external user-provided links.
- * Blocks dangerous schemes like javascript:, data:, vbscript:, file:.
+ * Blocks dangerous schemes like javascript:, data:, vbscript:, file:, and rejects relative paths.
  */
 export function isSafeExternalUrl(url?: string): boolean {
-  if (!url || typeof url !== 'string') return false;
-  const trimmed = url.trim();
-  if (!trimmed) return false;
-  try {
-    const parsed = new URL(trimmed, 'https://placeholder.invalid');
-    // Only allow explicit http(s) URLs; reject relative paths without explicit http/https
-    if (trimmed.startsWith('//')) return true;
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
+  return Boolean(sanitizeExternalUrl(url));
 }
 
 export function sanitizeExternalUrl(url?: string): string | undefined {
@@ -21,10 +11,22 @@ export function sanitizeExternalUrl(url?: string): string | undefined {
   const trimmed = url.trim();
   if (!trimmed) return undefined;
   try {
-    const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : trimmed.startsWith('//') ? `https:${trimmed}` : '';
-    if (!candidate) return undefined;
+    let candidate = '';
+    if (/^https?:\/\//i.test(trimmed)) {
+      candidate = trimmed;
+    } else if (trimmed.startsWith('//')) {
+      // Reject protocol-relative tricks like //javascript:alert(1)
+      if (/^\/\/[a-z][a-z0-9+.-]*:/i.test(trimmed)) return undefined;
+      candidate = `https:${trimmed}`;
+    } else {
+      return undefined;
+    }
     const parsed = new URL(candidate);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+    if (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      parsed.hostname &&
+      !parsed.hostname.includes(':')
+    ) {
       return parsed.href;
     }
     return undefined;
@@ -42,18 +44,19 @@ export function sanitizeTelHref(phone?: string): string {
 
 /**
  * Resolves the public share base URL dynamically from the current deployment host.
- * Converts AI Studio 'ais-dev-...' preview URLs into public 'ais-pre-...' links
- * while supporting GitHub Pages subpaths and localhost cleanly.
+ * Preserves port when rewriting ais-dev- preview hosts and strips trailing /index.html.
  */
 export function getPublicShareBaseUrl(): string {
   if (typeof window === 'undefined') return '';
 
   const hostname = window.location.hostname;
-  const cleanPath = window.location.pathname || '/';
+  const portSuffix = window.location.port ? `:${window.location.port}` : '';
+  const rawPath = window.location.pathname || '/';
+  const cleanPath = rawPath.replace(/\/index\.html$/i, '/');
 
   if (hostname.includes('ais-dev-')) {
     const publicHost = hostname.replace('ais-dev-', 'ais-pre-');
-    return `${window.location.protocol}//${publicHost}${cleanPath}`;
+    return `${window.location.protocol}//${publicHost}${portSuffix}${cleanPath}`;
   }
 
   return `${window.location.origin}${cleanPath}`;

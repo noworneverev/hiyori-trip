@@ -2,9 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import html2canvas from 'html2canvas';
 import { Trip } from '../../types/itinerary';
 import { copyTextToClipboard } from '../../utils/clipboard';
-import { formatCurrencyAmount } from '../../utils/currency';
+import { convertAmount, formatCurrencyAmount } from '../../utils/currency';
 import { resolveMediaSrc } from '../../utils/image';
-import { computeTripExpenseInCurrency, GalleryPhotoItem } from './travelHubTypes';
+import { GalleryPhotoItem } from './travelHubTypes';
 import {
   IosModalSheet,
   IosNavBar,
@@ -97,13 +97,28 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
     setSelectedYear(initialYear || 'all');
   }, [initialYear, isOpen]);
 
+  const isDirectImageCandidate = (url?: string): boolean => {
+    if (!url) return false;
+    const lower = url.trim().toLowerCase();
+    if (
+      lower.includes('photos.app.goo.gl') ||
+      lower.includes('photos.google.com/share') ||
+      lower.includes('photos.google.com/album') ||
+      lower.includes('drive.google.com/file')
+    ) {
+      return false;
+    }
+    return true;
+  };
+
   const summary = useMemo(() => {
     const matchedTrips = trips.filter((tr) => {
       if (selectedYear === 'all') return true;
       return (
         tr.startDate?.startsWith(selectedYear) ||
         tr.endDate?.startsWith(selectedYear) ||
-        (tr.days || []).some((d) => d.date?.startsWith(selectedYear))
+        (tr.days || []).some((d) => d.date?.startsWith(selectedYear)) ||
+        (tr.memories || []).some((m) => m.date?.startsWith(selectedYear))
       );
     });
 
@@ -114,21 +129,47 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
 
     matchedTrips.forEach((tr) => {
       if (tr.destination) destinations.add(tr.destination.trim());
-      totalSpend += computeTripExpenseInCurrency(tr, displayCurrency);
+      const fallbackCur = tr.currency || 'JPY';
+      // Filter expenses by selectedYear for accurate annual totals
+      (tr.expenses || []).forEach((exp) => {
+        const amt = Number(exp.amount) || 0;
+        if (amt <= 0) return;
+        const expDate = exp.date || tr.startDate || '';
+        if (selectedYear !== 'all' && expDate && !expDate.startsWith(selectedYear)) return;
+        totalSpend += convertAmount(amt, exp.currency || fallbackCur, displayCurrency, tr.customExchangeRates);
+      });
+
+      const spotIdsInTrip = new Set<string>();
       (tr.days || []).forEach((d) => {
         if (d.date && (selectedYear === 'all' || d.date.startsWith(selectedYear))) {
           uniqueDates.add(d.date);
         }
         (d.items || []).forEach((it) => {
+          spotIdsInTrip.add(it.id);
+          if (selectedYear !== 'all' && d.date && !d.date.startsWith(selectedYear)) return;
           if (it.completed || (it.memoryPhotos && it.memoryPhotos.length > 0)) {
             spotsCount += 1;
           }
         });
       });
+
+      // Also include standalone / memory-mode check-in locations so memory trips don't show 0 處!
+      const standaloneLocationKeys = new Set<string>();
+      (tr.memories || []).forEach((m) => {
+        const mDate = m.date || tr.startDate || '';
+        if (selectedYear !== 'all' && mDate && !mDate.startsWith(selectedYear)) return;
+        if (mDate) uniqueDates.add(mDate);
+        if (!m.spotId || !spotIdsInTrip.has(m.spotId)) {
+          standaloneLocationKeys.add(`${m.location || m.spotTitle || tr.destination || tr.title}::${mDate}`);
+        }
+      });
+      spotsCount += standaloneLocationKeys.size;
     });
 
     const matchingPhotos = photos.filter(
-      (p) => selectedYear === 'all' || (p.date && p.date.startsWith(selectedYear))
+      (p) =>
+        (selectedYear === 'all' || (p.date && p.date.startsWith(selectedYear))) &&
+        isDirectImageCandidate(p.url)
     );
 
     return {
@@ -156,7 +197,7 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
             ownerId: p.ownerId,
             collabId: p.collabId,
           });
-          if (resolved) urls.push(resolved);
+          if (resolved && isDirectImageCandidate(resolved)) urls.push(resolved);
         } catch {
           // Skip broken asset cleanly
         }
@@ -173,17 +214,60 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
   const theme = POSTER_THEMES[themeKey];
   const yearHeadline = selectedYear === 'all' ? 'LIFETIME' : selectedYear;
 
+  const triggerBlobDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  };
+
   const generatePngBlob = async (): Promise<Blob | null> => {
-    if (!posterRef.current) return null;
-    const canvas = await html2canvas(posterRef.current, {
-      scale: 2.5,
-      useCORS: true,
-      backgroundColor: theme.bg,
-      logging: false,
-    });
-    return new Promise((resolve) => {
-      canvas.toBlob((blob) => resolve(blob), 'image/png', 1.0);
-    });
+    const node = posterRef.current;
+    if (!node) return null;
+
+    // Render an isolated offscreen 380px clone so narrow iPhones (<444px) never clip edges
+    // and strip Tailwind v4 stylesheets (oklch/color-mix) inside onclone since poster uses 100% inline hex styles!
+    const host = document.createElement('div');
+    host.style.position = 'fixed';
+    host.style.left = '-99999px';
+    host.style.top = '0';
+    host.style.width = '380px';
+    host.style.pointerEvents = 'none';
+    host.style.zIndex = '-1';
+    const clone = node.cloneNode(true) as HTMLDivElement;
+    clone.style.width = '380px';
+    clone.style.boxSizing = 'border-box';
+    host.appendChild(clone);
+    document.body.appendChild(host);
+
+    try {
+      const canvas = await html2canvas(clone, {
+        scale: 2.5,
+        useCORS: true,
+        allowTaint: false,
+        backgroundColor: theme.bg,
+        width: 380,
+        scrollX: 0,
+        scrollY: 0,
+        logging: false,
+        onclone: (clonedDoc) => {
+          // Remove app stylesheets that contain Tailwind v4 oklch()/color-mix() unsupported by html2canvas
+          clonedDoc.querySelectorAll('style, link[rel="stylesheet"]').forEach((el) => el.remove());
+          const safeStyle = clonedDoc.createElement('style');
+          safeStyle.textContent = '* { box-sizing: border-box; } body { margin: 0; padding: 0; }';
+          clonedDoc.head.appendChild(safeStyle);
+        },
+      });
+      return await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob((blob) => resolve(blob), 'image/png', 1.0);
+      });
+    } finally {
+      document.body.removeChild(host);
+    }
   };
 
   const handleDownloadPng = async () => {
@@ -192,14 +276,7 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
     try {
       const blob = await generatePngBlob();
       if (!blob) throw new Error('PNG build failed');
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `hiyori-footprints-${selectedYear}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      triggerBlobDownload(blob, `hiyori-footprints-${selectedYear}.png`);
       setExportStatus('已下載高解析圖卡');
     } catch (err) {
       console.error('Export PNG failed:', err);
@@ -212,24 +289,31 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
   const handleNativeShare = async () => {
     setIsGenerating(true);
     setExportStatus(null);
+    let generatedBlob: Blob | null = null;
     try {
-      const blob = await generatePngBlob();
-      if (!blob) throw new Error('PNG build failed');
-      const file = new File([blob], `hiyori-footprints-${selectedYear}.png`, {
-        type: 'image/png',
-      });
+      generatedBlob = await generatePngBlob();
+      if (!generatedBlob) throw new Error('PNG build failed');
+      const filename = `hiyori-footprints-${selectedYear}.png`;
+      const file = new File([generatedBlob], filename, { type: 'image/png' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           title: '日和手帳 · 旅行足跡年鑑',
           text: `${motto} — 共走訪 ${summary.cities.length} 座城市、${summary.spotsCount} 個足跡`,
           files: [file],
         });
+        setExportStatus('已開啟系統分享');
       } else {
-        await handleDownloadPng();
+        triggerBlobDownload(generatedBlob, filename);
+        setExportStatus('此裝置不支援直接分享，已自動下載 PNG 圖卡');
       }
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
-        setExportStatus('裝置不支援直接分享，已改為下載圖片');
+        if (generatedBlob) {
+          triggerBlobDownload(generatedBlob, `hiyori-footprints-${selectedYear}.png`);
+          setExportStatus('系統分享未完成，已改為下載高解析圖卡');
+        } else {
+          setExportStatus('圖卡產生失敗，請稍後再試');
+        }
       }
     } finally {
       setIsGenerating(false);
@@ -348,7 +432,7 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
                 「{motto || '把世界走成自己的故事'}」
               </div>
 
-              {/* 2x2 Photo Collage */}
+              {/* 2x2 Photo Collage (background-image cover prevents html2canvas object-fit stretching!) */}
               {resolvedPhotoUrls.length > 0 && (
                 <div
                   style={{
@@ -367,19 +451,12 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
                         height: resolvedPhotoUrls.length <= 2 ? '132px' : '96px',
                         backgroundColor: theme.cardBg,
                         border: `1px solid ${theme.border}`,
+                        backgroundImage: `url("${src.replace(/"/g, '\\"')}")`,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        backgroundRepeat: 'no-repeat',
                       }}
-                    >
-                      <img
-                        src={src}
-                        alt=""
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover',
-                          display: 'block',
-                        }}
-                      />
-                    </div>
+                    />
                   ))}
                 </div>
               )}

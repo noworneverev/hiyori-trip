@@ -595,16 +595,37 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     return map;
   }, [filteredSpots]);
 
+  // Calendar maps (supports multiple trips overlapping on the same date AND memory-mode trips!)
   const tripsByDateMap = useMemo(() => {
-    const map = new Map<string, { trip: Trip; dayNumber: number }>();
+    const map = new Map<string, Array<{ trip: Trip; dayNumber: number }>>();
+    const addEntry = (dateKey: string, trip: Trip, dayNumber: number) => {
+      if (!dateKey || !/^\d{4}-\d{2}-\d{2}/.test(dateKey)) return;
+      const norm = dateKey.slice(0, 10);
+      const list = map.get(norm) || [];
+      if (!list.some((entry) => entry.trip.id === trip.id)) {
+        list.push({ trip, dayNumber });
+        map.set(norm, list);
+      }
+    };
+
     uniqueTrips.forEach((tr) => {
       if (selectedTripFilter !== 'all' && tr.id !== selectedTripFilter) return;
-      (tr.days || []).forEach((d) => {
-        if (d.date) map.set(d.date, { trip: tr, dayNumber: d.dayNumber });
-      });
+      if (selectedDestination !== 'all' && tr.destination?.trim() !== selectedDestination) return;
+      const days = tr.days || [];
+      if (days.length > 0) {
+        days.forEach((d) => {
+          if (d.date) addEntry(d.date, tr, d.dayNumber);
+        });
+      } else {
+        // Memory-only trips with no structured days: surface startDate and photo dates on calendar!
+        if (tr.startDate) addEntry(tr.startDate, tr, 1);
+        (tr.memories || []).forEach((m) => {
+          if (m.date) addEntry(m.date, tr, m.dayNumber || 1);
+        });
+      }
     });
     return map;
-  }, [uniqueTrips, selectedTripFilter]);
+  }, [uniqueTrips, selectedTripFilter, selectedDestination]);
 
   const calendarDays = useMemo(() => {
     const first = new Date(calendarYear, calendarMonth, 1);
@@ -617,7 +638,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       dayNumber: number;
       isCurrentMonth: boolean;
       spots: FlattenedSpotMemory[];
-      tripInfo?: { trip: Trip; dayNumber: number };
+      tripInfos: Array<{ trip: Trip; dayNumber: number }>;
     }[] = [];
 
     for (let i = startDow - 1; i >= 0; i--) {
@@ -629,7 +650,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
         dayNumber: d,
         isCurrentMonth: false,
         spots: spotsByDateMap.get(dateStr) || [],
-        tripInfo: tripsByDateMap.get(dateStr),
+        tripInfos: tripsByDateMap.get(dateStr) || [],
       });
     }
 
@@ -640,7 +661,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
         dayNumber: d,
         isCurrentMonth: true,
         spots: spotsByDateMap.get(dateStr) || [],
-        tripInfo: tripsByDateMap.get(dateStr),
+        tripInfos: tripsByDateMap.get(dateStr) || [],
       });
     }
 
@@ -653,7 +674,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
         dayNumber: dt.getDate(),
         isCurrentMonth: false,
         spots: spotsByDateMap.get(dateStr) || [],
-        tripInfo: tripsByDateMap.get(dateStr),
+        tripInfos: tripsByDateMap.get(dateStr) || [],
       });
     }
 
@@ -663,10 +684,14 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   const selectedDateTripGroups = useMemo(() => {
     if (!selectedCalendarDate) return [];
     const daySpots = spotsByDateMap.get(selectedCalendarDate) || [];
+    const dateTrips = tripsByDateMap.get(selectedCalendarDate) || [];
     const groupMap = new Map<
       string,
       { trip: Trip; dayNumber: number; spots: FlattenedSpotMemory[] }
     >();
+    dateTrips.forEach(({ trip, dayNumber }) => {
+      groupMap.set(trip.id, { trip, dayNumber, spots: [] });
+    });
     daySpots.forEach((s) => {
       if (!groupMap.has(s.tripId)) {
         const found = uniqueTrips.find((t) => t.id === s.tripId);
@@ -676,7 +701,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       if (g && !g.spots.some((x) => x.spotId === s.spotId)) g.spots.push(s);
     });
     return Array.from(groupMap.values());
-  }, [selectedCalendarDate, spotsByDateMap, uniqueTrips]);
+  }, [selectedCalendarDate, spotsByDateMap, tripsByDateMap, uniqueTrips]);
 
   const timelineGrouped = useMemo(() => {
     const tripMap = new Map<string, Map<number, FlattenedSpotMemory[]>>();
@@ -975,7 +1000,9 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                   足跡時光庫
                 </h2>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono tabular-nums truncate">
-                  {uniqueTrips.length} 趟旅程 · {stats.totalSpots} 處足跡 · {filteredGalleryPhotos.length} 張照片
+                  {activeFilterCount > 0
+                    ? `篩選 ${new Set(filteredSpots.map((s) => s.tripId)).size} 趟 · ${filteredSpots.length} 處足跡 · ${filteredGalleryPhotos.length} 張照片`
+                    : `${uniqueTrips.length} 趟旅程 · ${stats.totalSpots} 處足跡 · ${filteredGalleryPhotos.length} 張照片`}
                 </p>
               </div>
             </div>
@@ -1085,8 +1112,8 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
             </aside>
           )}
 
-          {/* Main Scrollable Stage */}
-          <main className="flex-1 min-w-0 overflow-y-auto p-4 sm:p-6 lg:p-7 bg-[#FAF9F6]/60 dark:bg-slate-950/40">
+          {/* Main Scrollable Stage (div region avoids duplicate <main> landmark inside modal) */}
+          <div role="region" aria-label="足跡時光庫內容" className="flex-1 min-w-0 overflow-y-auto p-4 sm:p-6 lg:p-7 bg-[#FAF9F6]/60 dark:bg-slate-950/40">
             <div className="max-w-5xl mx-auto">
               {viewMode === 'map' && (
                 <TravelHubMapView
@@ -1192,7 +1219,9 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
 
                     <div className="grid grid-cols-7 divide-x divide-y divide-slate-100 dark:divide-slate-800/80">
                       {calendarDays.map((cell, idx) => {
-                        const hasTrip = Boolean(cell.tripInfo);
+                        const primaryTrip = cell.tripInfos[0];
+                        const extraTripsCount = Math.max(0, cell.tripInfos.length - 1);
+                        const hasTrip = cell.tripInfos.length > 0;
                         const isSelected = selectedCalendarDate === cell.dateStr;
                         const spotCount = cell.spots.length;
                         const hasPhotos = cell.spots.some((s) => s.photos.length > 0);
@@ -1230,13 +1259,14 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                               )}
                             </div>
 
-                            {hasTrip && cell.tripInfo && (
+                            {hasTrip && primaryTrip && (
                               <div className="mt-1 space-y-0.5 overflow-hidden">
                                 <div className="text-[10px] font-bold text-teal-900 dark:text-teal-200 truncate leading-tight">
-                                  {cell.tripInfo.trip.destination || cell.tripInfo.trip.title}
+                                  {primaryTrip.trip.destination || primaryTrip.trip.title}
+                                  {extraTripsCount > 0 ? ` +${extraTripsCount}` : ''}
                                 </div>
                                 <div className="text-[9px] text-teal-700 dark:text-teal-400 font-mono tabular-nums">
-                                  D{cell.tripInfo.dayNumber}
+                                  D{primaryTrip.dayNumber}
                                   {spotCount > 0 ? ` · ${spotCount}點` : ''}
                                 </div>
                               </div>
@@ -1553,7 +1583,7 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
                 />
               )}
             </div>
-          </main>
+          </div>
         </div>
 
         {/* Mobile One-Handed Bottom Action Bar (<= 15% sticky height, >= 44px touch targets) */}

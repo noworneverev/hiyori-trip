@@ -42,7 +42,15 @@ export interface PackingItem {
 }
 
 export type PaymentMethod = 'cash' | 'card' | 'ic_card' | 'mobile';
-export type ExpenseCategory = 'food' | 'transport' | 'tickets' | 'shopping' | 'souvenir' | 'stay' | 'other' | string;
+export type ExpenseCategory =
+  | 'food'
+  | 'transport'
+  | 'tickets'
+  | 'shopping'
+  | 'souvenir'
+  | 'stay'
+  | 'other'
+  | (string & {});
 
 export interface ExpenseItem {
   id: string;
@@ -136,6 +144,7 @@ export interface BookingVoucher {
   dayNumber?: number;
   url?: string;
   notes?: string;
+  voucherImages?: string[];
   createdAt: number;
   updatedAt?: number;
 }
@@ -185,6 +194,7 @@ export interface Trip {
   isSoloTrip?: boolean;
   isSplitEnabled?: boolean;
   splitMembers?: string[];
+  settledTransfers?: Record<string, { settled: boolean; settledAt?: number }>;
   initialCashAmount?: number;
   initialCashCurrency?: string;
   tripMode?: 'planner' | 'memory';

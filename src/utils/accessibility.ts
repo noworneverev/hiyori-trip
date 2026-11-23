@@ -1,9 +1,9 @@
 /**
  * Accessibility Utility: Typography & Display Scaling Engine
- * Supports 3 text scale tiers:
+ * Supports 3 text scale tiers aligned strictly with src/index.css:
  * - normal (100%): Standard layout
- * - comfortable (115%): Enlarged text for comfortable reading
- * - senior (130%): Extra large text with enhanced contrast
+ * - comfortable (110%): Enlarged text for comfortable reading
+ * - senior (122%): Extra large text with enhanced contrast
  */
 
 export type AccessibilityScale = 'normal' | 'comfortable' | 'senior';
@@ -27,24 +27,21 @@ export const ACCESSIBILITY_OPTIONS: AccessibilityOption[] = [
   {
     id: 'comfortable',
     label: '放大',
-    badge: '115%',
+    badge: '110%',
     description: '字體適度放大，閱讀輕鬆',
-    multiplier: 1.15,
+    multiplier: 1.1,
   },
   {
     id: 'senior',
     label: '特大',
-    badge: '130%',
+    badge: '122%',
     description: '特大字體與高對比顯示',
-    multiplier: 1.3,
+    multiplier: 1.22,
   },
 ];
 
 const STORAGE_KEY = 'hiyori_accessibility_scale_v1';
 
-/**
- * Retrieve saved accessibility scale from LocalStorage
- */
 export function getSavedAccessibilityScale(): AccessibilityScale {
   if (typeof window === 'undefined') return 'normal';
   try {
@@ -58,9 +55,6 @@ export function getSavedAccessibilityScale(): AccessibilityScale {
   return 'normal';
 }
 
-/**
- * Apply accessibility scale to document root and persist preference
- */
 export function applyAccessibilityScale(scale: AccessibilityScale): void {
   if (typeof document === 'undefined') return;
 
@@ -70,14 +64,11 @@ export function applyAccessibilityScale(scale: AccessibilityScale): void {
     console.warn('Failed to save accessibility scale:', e);
   }
 
-  // Set attribute on <html> root element for CSS selectors
   document.documentElement.setAttribute('data-text-scale', scale);
 
-  // Set CSS custom properties for fluid typography
   const option = ACCESSIBILITY_OPTIONS.find((o) => o.id === scale) || ACCESSIBILITY_OPTIONS[0];
   document.documentElement.style.setProperty('--app-font-multiplier', String(option.multiplier));
 
-  // Dispatch custom event for React components that need to re-render or adjust layout
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('accessibility_scale_changed', { detail: { scale } })
@@ -85,9 +76,6 @@ export function applyAccessibilityScale(scale: AccessibilityScale): void {
   }
 }
 
-/**
- * Initialize accessibility scale on app startup
- */
 export function initAccessibilityScale(): AccessibilityScale {
   const scale = getSavedAccessibilityScale();
   applyAccessibilityScale(scale);

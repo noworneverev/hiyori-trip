@@ -20,6 +20,13 @@ import {
 } from '../../utils/accessibility';
 import { performAppUpdate, UpdateState } from '../../utils/pwaUpdater';
 import {
+  CloudImageHostConfig,
+  CloudImageProvider,
+  getCloudImageHostConfig,
+  saveCloudImageHostConfig,
+} from '../../utils/cloudImageHost';
+import { getUserGeminiApiKey, saveUserGeminiApiKey } from '../../utils/aiClient';
+import {
   IosModalSheet,
   IosNavBar,
   IosInsetGroup,
@@ -42,6 +49,9 @@ import {
   Eye,
   RotateCcw,
   ChevronRight,
+  Image as ImageIcon,
+  KeyRound,
+  Check,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -59,16 +69,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSimulateConflict,
   onClose,
 }) => {
-  const t = TRANSLATIONS[lang];
+  const t = TRANSLATIONS[lang] || TRANSLATIONS.zh;
+  const isZh = lang === 'zh' || lang === 'zh-CN';
   const [currentUser, setCurrentUser] = useState<User | null>(() => auth.currentUser);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncDone, setSyncDone] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [scale, setScale] = useState<AccessibilityScale>(getSavedAccessibilityScale);
   const [isScaleExpanded, setIsScaleExpanded] = useState(false);
   const [updateState, setUpdateState] = useState<UpdateState>({ status: 'idle' });
   const [storageInfo, setStorageInfo] = useState(getStorageUsage);
   const [showConfirmReset, setShowConfirmReset] = useState(false);
+
+  // Cloud Image Host (Default WebP / Cloudinary / Cloudflare R2) & BYOK Gemini Key
+  const [isImageHostExpanded, setIsImageHostExpanded] = useState(false);
+  const [imageHostConfig, setImageHostConfig] = useState<CloudImageHostConfig>(() => getCloudImageHostConfig());
+  const [imageHostSaved, setImageHostSaved] = useState(false);
+  const [isByokExpanded, setIsByokExpanded] = useState(false);
+  const [byokKeyInput, setByokKeyInput] = useState<string>(() => getUserGeminiApiKey());
+  const [byokSaved, setByokSaved] = useState(false);
+
+  const handleSaveImageHost = () => {
+    saveCloudImageHostConfig(imageHostConfig);
+    setImageHostSaved(true);
+    setTimeout(() => setImageHostSaved(false), 2200);
+  };
+
+  const handleSaveByokKey = () => {
+    saveUserGeminiApiKey(byokKeyInput);
+    setByokSaved(true);
+    setTimeout(() => setByokSaved(false), 2200);
+  };
+
+  const imageHostLabel =
+    imageHostConfig.provider === 'cloudinary'
+      ? 'Cloudinary'
+      : imageHostConfig.provider === 'r2'
+      ? 'Cloudflare R2'
+      : isZh
+      ? '預設輕量 WebP'
+      : 'Default WebP';
 
   useEffect(() => {
     let active = true;
@@ -77,6 +119,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     });
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
+      if (user) setIsLoggingIn(false);
     });
     return () => {
       active = false;
@@ -85,15 +128,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, []);
 
   const handleManualSync = async () => {
-    if (!currentUser) return;
+    if (!currentUser || isSyncing) return;
     setIsSyncing(true);
+    setSyncError(null);
     try {
       const localDeletedIds = new Set(getDeletedTripIds());
-      const cloudTombstones = await fetchUserTombstones(currentUser.uid);
+      const cloudTombstones = (await fetchUserTombstones(currentUser.uid)) || {};
       const TOMBSTONE_SKEW_MS = 15 * 60 * 1000;
 
       const validTrips = trips.filter((trip) => {
         if (localDeletedIds.has(trip.id)) return false;
+        if (trip.id.startsWith('imported-share_')) return false;
+        if (trip.isCollaborative && trip.ownerId && trip.ownerId !== currentUser.uid) return false;
         const deletedAt = cloudTombstones[trip.id];
         if (typeof deletedAt === 'number' && deletedAt + TOMBSTONE_SKEW_MS >= (trip.updatedAt || 0)) {
           return false;
@@ -102,9 +148,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       });
 
       const syncedMap: Record<string, number> = {};
+      let failCount = 0;
       for (const trip of validTrips) {
-        const saved = await saveTripToCloud(currentUser.uid, trip);
-        syncedMap[trip.id] = Math.max(Date.now(), saved.lastSyncedAt || trip.updatedAt || 0);
+        try {
+          const saved = await saveTripToCloud(currentUser.uid, trip);
+          syncedMap[trip.id] = Math.max(Date.now(), saved.lastSyncedAt || trip.updatedAt || 0);
+        } catch (err) {
+          failCount++;
+          console.warn('Manual sync failed for trip:', trip.id, err);
+        }
       }
       if (Object.keys(syncedMap).length > 0) {
         const stored = getStoredTrips();
@@ -114,10 +166,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )
         );
       }
-      setSyncDone(true);
-      setTimeout(() => setSyncDone(false), 3000);
+      if (failCount > 0) {
+        setSyncError(
+          isZh ? `有 ${failCount} 筆旅程同步失敗，請檢查網路後再試` : `${failCount} trip(s) failed to sync`
+        );
+      } else {
+        setSyncDone(true);
+        setTimeout(() => setSyncDone(false), 3000);
+      }
     } catch (err) {
       console.error('Manual sync failed:', err);
+      setSyncError(isZh ? '雲端同步失敗，請檢查網路連線' : 'Manual cloud sync failed');
     } finally {
       setIsSyncing(false);
     }
@@ -129,8 +188,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     onClose();
   };
 
-  const currentScaleLabel =
-    scale === 'senior' ? '特大 130%' : scale === 'comfortable' ? '放大 115%' : '標準 100%';
+  const activeScaleOpt =
+    ACCESSIBILITY_OPTIONS.find((o) => o.id === scale) || ACCESSIBILITY_OPTIONS[0];
+  const currentScaleLabel = `${activeScaleOpt.label} ${activeScaleOpt.badge}`;
 
   return (
     <IosModalSheet onClose={onClose} zIndexClass="z-[85]" variant="grouped" ariaLabel={t.settings}>
@@ -173,14 +233,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               />
               <IosRow
                 icon={<RefreshCw className={`w-4 h-4 text-teal-700 dark:text-teal-400 ${isSyncing ? 'animate-spin' : ''}`} />}
-                label={syncDone ? (lang === 'zh' ? '已同步至雲端' : 'Synced to Cloud') : t.syncNow}
+                label={syncDone ? (isZh ? '已同步至雲端' : 'Synced to Cloud') : t.syncNow}
                 onClick={handleManualSync}
                 disabled={isSyncing}
                 trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
               />
+              {syncError && (
+                <div className="px-4 py-2.5 text-[11px] font-medium text-rose-600 dark:text-rose-400 bg-rose-50/60 dark:bg-rose-950/20">
+                  {syncError}
+                </div>
+              )}
               <IosRow
                 icon={<LogOut className="w-4 h-4 text-rose-600 dark:text-rose-400" />}
-                label={lang === 'zh' ? '登出 Google 帳號' : 'Sign Out'}
+                label={isZh ? '登出 Google 帳號' : 'Sign Out'}
                 destructive
                 onClick={() => logoutFirebase()}
               />
@@ -189,7 +254,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <>
               <IosRow
                 icon={<Cloud className="w-4 h-4 text-amber-600 dark:text-amber-400" />}
-                label={lang === 'zh' ? '目前狀態' : 'Status'}
+                label={isZh ? '目前狀態' : 'Status'}
                 trailing={
                   <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
                     {t.guestOffline}
@@ -205,12 +270,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
                   </svg>
                 }
-                label={<span className="text-teal-700 dark:text-teal-400">{t.googleLogin}</span>}
+                disabled={isLoggingIn}
+                label={
+                  <span className="text-teal-700 dark:text-teal-400">
+                    {isLoggingIn ? (isZh ? '正在登入...' : 'Signing in...') : t.googleLogin}
+                  </span>
+                }
                 onClick={async () => {
+                  if (isLoggingIn) return;
+                  setIsLoggingIn(true);
                   setAuthError(null);
-                  const res = await loginWithGoogleDetailed();
-                  if (!res.user && !res.redirected && !res.cancelled && res.errorMessage) {
-                    setAuthError(res.errorMessage);
+                  try {
+                    const res = await loginWithGoogleDetailed();
+                    if (!res.redirected) setIsLoggingIn(false);
+                    if (!res.user && !res.redirected && !res.cancelled && res.errorMessage) {
+                      setAuthError(res.errorMessage);
+                    }
+                  } catch {
+                    setIsLoggingIn(false);
                   }
                 }}
                 trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
@@ -221,15 +298,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               )}
             </>
-          )}
-
-          {onSimulateConflict && (
-            <IosRow
-              icon={<RefreshCw className="w-4 h-4 text-slate-500 dark:text-slate-400" />}
-              label={lang === 'zh' ? '預覽版本衝突解決視窗' : 'Preview Conflict Modal'}
-              onClick={onSimulateConflict}
-              trailing={<ChevronRight className="w-4 h-4 text-slate-400" />}
-            />
           )}
         </IosInsetGroup>
 
@@ -325,6 +393,144 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
         </IosInsetGroup>
 
+        {/* Section 3.5: Cloud Image Host & Optional BYOK AI */}
+        <IosInsetGroup
+          header={isZh ? '雲端圖床與 AI 進階設定' : 'Image Hosting & AI (Optional)'}
+          footer={
+            isZh
+              ? '圖片預設以輕量 WebP（~80–150 KB）離線快取並同步；若有大量相簿或公開多人協作，可選接免費 Cloudinary 或 Cloudflare R2。自訂 Gemini Key 僅存於本機，讓純靜態部署（如 GitHub Pages）也能使用 AI 解析。'
+              : 'Photos default to compact WebP (~80–150 KB). Optionally connect Cloudinary or Cloudflare R2, or add your own Gemini API key (stored locally only) for static deployments.'
+          }
+        >
+          <IosDisclosureRow
+            icon={<ImageIcon className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+            label={isZh ? '圖片上傳圖床' : 'Image Host'}
+            value={imageHostLabel}
+            valueAccent={imageHostConfig.provider !== 'default'}
+            expanded={isImageHostExpanded}
+            onToggle={() => setIsImageHostExpanded((v) => !v)}
+          >
+            <div className="p-3.5 space-y-3 bg-[#FAF9F6]/70 dark:bg-slate-900/40">
+              <div className="grid grid-cols-3 p-1 rounded-xl bg-[#EFECE5] dark:bg-slate-800 gap-1">
+                {(
+                  [
+                    { id: 'default' as CloudImageProvider, label: isZh ? '預設 WebP' : 'Default' },
+                    { id: 'cloudinary' as CloudImageProvider, label: 'Cloudinary' },
+                    { id: 'r2' as CloudImageProvider, label: 'CF R2' },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setImageHostConfig((prev) => ({ ...prev, provider: opt.id }))}
+                    className={`min-h-[34px] rounded-lg text-xs font-bold transition cursor-pointer ${
+                      imageHostConfig.provider === opt.id
+                        ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 shadow-2xs'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {imageHostConfig.provider === 'cloudinary' && (
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={imageHostConfig.cloudinaryCloudName}
+                    onChange={(e) =>
+                      setImageHostConfig((prev) => ({ ...prev, cloudinaryCloudName: e.target.value }))
+                    }
+                    placeholder="Cloud Name（例：demo）"
+                    className="w-full min-h-[40px] px-3 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs font-mono outline-none focus:border-teal-600"
+                  />
+                  <input
+                    type="text"
+                    value={imageHostConfig.cloudinaryUploadPreset}
+                    onChange={(e) =>
+                      setImageHostConfig((prev) => ({ ...prev, cloudinaryUploadPreset: e.target.value }))
+                    }
+                    placeholder="Unsigned Upload Preset（例：hiyori_unsigned）"
+                    className="w-full min-h-[40px] px-3 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs font-mono outline-none focus:border-teal-600"
+                  />
+                </div>
+              )}
+
+              {imageHostConfig.provider === 'r2' && (
+                <div className="space-y-2">
+                  <input
+                    type="url"
+                    value={imageHostConfig.r2UploadEndpoint}
+                    onChange={(e) =>
+                      setImageHostConfig((prev) => ({ ...prev, r2UploadEndpoint: e.target.value }))
+                    }
+                    placeholder="Worker 上傳端點（https://upload.your-domain.workers.dev）"
+                    className="w-full min-h-[40px] px-3 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs font-mono outline-none focus:border-teal-600"
+                  />
+                  <input
+                    type="password"
+                    value={imageHostConfig.r2AuthToken}
+                    onChange={(e) =>
+                      setImageHostConfig((prev) => ({ ...prev, r2AuthToken: e.target.value }))
+                    }
+                    placeholder="選填 Bearer Token"
+                    className="w-full min-h-[40px] px-3 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs font-mono outline-none focus:border-teal-600"
+                  />
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={handleSaveImageHost}
+                className="w-full min-h-[40px] rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
+                {imageHostSaved ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>{isZh ? '已儲存圖床設定' : 'Image host saved'}</span>
+                  </>
+                ) : (
+                  <span>{isZh ? '套用圖床設定' : 'Save Image Host'}</span>
+                )}
+              </button>
+            </div>
+          </IosDisclosureRow>
+
+          <IosDisclosureRow
+            icon={<KeyRound className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+            label={isZh ? '自訂 Gemini API Key' : 'Custom Gemini API Key'}
+            value={byokKeyInput.trim() ? (isZh ? '已設定' : 'Configured') : isZh ? '選填' : 'Optional'}
+            valueAccent={Boolean(byokKeyInput.trim())}
+            expanded={isByokExpanded}
+            onToggle={() => setIsByokExpanded((v) => !v)}
+          >
+            <div className="p-3.5 space-y-2.5 bg-[#FAF9F6]/70 dark:bg-slate-900/40">
+              <input
+                type="password"
+                value={byokKeyInput}
+                onChange={(e) => setByokKeyInput(e.target.value)}
+                placeholder="AIzaSy...（留空則清除）"
+                className="w-full min-h-[40px] px-3 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs font-mono outline-none focus:border-teal-600"
+              />
+              <button
+                type="button"
+                onClick={handleSaveByokKey}
+                className="w-full min-h-[40px] rounded-xl bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
+                {byokSaved ? (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>{isZh ? '已更新本機金鑰' : 'API key updated'}</span>
+                  </>
+                ) : (
+                  <span>{isZh ? '儲存於本機瀏覽器' : 'Save Locally'}</span>
+                )}
+              </button>
+            </div>
+          </IosDisclosureRow>
+        </IosInsetGroup>
+
         {/* Section 4: System & About */}
         <IosInsetGroup
           header={lang === 'zh' ? '關於日和手帳' : 'About Hiyori'}
@@ -353,15 +559,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }
             label={
               updateState.status === 'checking'
-                ? lang === 'zh'
+                ? isZh
                   ? '正在檢查更新...'
                   : 'Checking...'
                 : updateState.status === 'updating'
-                ? lang === 'zh'
+                ? isZh
                   ? '載入最新版本...'
                   : 'Updating...'
-                : lang === 'zh'
-                ? '檢查更新 / 重新整理'
+                : updateState.status === 'latest'
+                ? updateState.message || (isZh ? '已是最新版本' : 'Up to date')
+                : updateState.status === 'error'
+                ? updateState.message || (isZh ? '檢查更新失敗' : 'Check failed')
+                : isZh
+                ? '檢查系統更新'
                 : 'Check for Updates'
             }
             onClick={async () => {

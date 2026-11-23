@@ -26,7 +26,10 @@ export interface SplitCalculationResult {
 }
 
 /**
- * Calculates group splitting balances and minimal debt transfers
+ * Calculates group splitting balances and minimal debt transfers.
+ * Uses integer-unit largest-remainder allocation per expense so sum(netBalance) === 0 strictly,
+ * deduplicates splitWith participants, and preserves historical/removed members so nobody's payments
+ * are silently reassigned to someone else.
  */
 export const calculateTripSplits = (
   trip: Trip,
@@ -37,90 +40,132 @@ export const calculateTripSplits = (
   const rates = customExchangeRates || trip.customExchangeRates;
   const decimals = CURRENCY_MAP[baseCur]?.decimals ?? 0;
   const factor = Math.pow(10, decimals);
-  const roundCur = (val: number) => Math.round(val * factor) / factor;
-  const minStep = 1 / factor;
+  const toUnits = (val: number) => Math.round(val * factor);
+  const fromUnits = (units: number) => Number((units / factor).toFixed(decimals));
 
-  const rawMembers = trip.splitMembers && trip.splitMembers.length > 0
+  const rawActiveMembers = trip.splitMembers && trip.splitMembers.length > 0
     ? trip.splitMembers
-    : ['我', '同行夥伴'];
-  const members = Array.from(new Set(rawMembers.map((m) => m.trim()).filter(Boolean)));
-  if (members.length === 0) members.push('我');
+    : ['我', '同行旅伴'];
+  const activeMembers = Array.from(new Set(rawActiveMembers.map((m) => m.trim()).filter(Boolean)));
+  if (activeMembers.length === 0) activeMembers.push('我');
 
-  const summaries: Record<string, SplitMemberSummary> = {};
+  // Start with active members, then preserve any historical members referenced in expenses
+  const members: string[] = [...activeMembers];
+  const memberSet = new Set<string>(members);
+
+  const ensureMember = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    if (!memberSet.has(trimmed)) {
+      memberSet.add(trimmed);
+      members.push(trimmed);
+    }
+  };
+
+  (trip.expenses || []).forEach((exp) => {
+    if (exp.paidBy && exp.paidBy.trim()) {
+      ensureMember(exp.paidBy);
+    }
+    if (Array.isArray(exp.splitWith)) {
+      exp.splitWith.forEach((m) => {
+        if (m && m.trim()) ensureMember(m);
+      });
+    }
+  });
+
+  // Track everything in integer minor currency units to guarantee zero floating-point drift
+  const unitSummaries: Record<string, {
+    totalPaid: number;
+    groupPaid: number;
+    totalShare: number;
+    personalExpense: number;
+  }> = {};
+
   members.forEach((m) => {
-    summaries[m] = {
-      name: m,
+    unitSummaries[m] = {
       totalPaid: 0,
       groupPaid: 0,
       totalShare: 0,
       personalExpense: 0,
-      netBalance: 0,
     };
   });
 
-  let totalGroupExpense = 0;
-  let totalPersonalExpense = 0;
+  let totalGroupUnits = 0;
+  let totalPersonalUnits = 0;
 
   (trip.expenses || []).forEach((exp) => {
     const cost = convertAmount(exp.amount, exp.currency, baseCur, rates);
-    if (!cost || isNaN(cost)) return;
+    const costUnits = toUnits(cost);
+    if (!costUnits || !Number.isFinite(costUnits) || costUnits <= 0) return;
+
+    const rawPayer = exp.paidBy?.trim();
+    const payer = rawPayer && unitSummaries[rawPayer] ? rawPayer : activeMembers[0];
 
     if (exp.isPersonal) {
-      totalPersonalExpense += cost;
-      const payer = exp.paidBy && summaries[exp.paidBy] ? exp.paidBy : members[0];
-      if (summaries[payer]) {
-        summaries[payer].totalPaid += cost;
-        summaries[payer].personalExpense += cost;
+      totalPersonalUnits += costUnits;
+      if (unitSummaries[payer]) {
+        unitSummaries[payer].totalPaid += costUnits;
+        unitSummaries[payer].personalExpense += costUnits;
       }
       return;
     }
 
-    totalGroupExpense += cost;
-    const payer = exp.paidBy && summaries[exp.paidBy] ? exp.paidBy : members[0];
-    if (summaries[payer]) {
-      summaries[payer].totalPaid += cost;
-      summaries[payer].groupPaid += cost;
+    totalGroupUnits += costUnits;
+    if (unitSummaries[payer]) {
+      unitSummaries[payer].totalPaid += costUnits;
+      unitSummaries[payer].groupPaid += costUnits;
     }
 
-    let participants = (exp.splitWith && exp.splitWith.length > 0)
-      ? exp.splitWith.map((m) => m.trim()).filter((m) => summaries[m] !== undefined)
-      : members;
+    // Deduplicate participants cleanly; if omitted, split among activeMembers
+    const rawParticipants = Array.isArray(exp.splitWith) && exp.splitWith.length > 0
+      ? Array.from(new Set(exp.splitWith.map((m) => m.trim()).filter((m) => Boolean(m && unitSummaries[m]))))
+      : activeMembers;
 
-    if (participants.length === 0) {
-      participants = members;
+    const participants = rawParticipants.length > 0 ? rawParticipants : activeMembers;
+
+    // Largest-remainder exact integer distribution (guarantees sum(shares) === costUnits)
+    const count = participants.length;
+    const baseShare = Math.floor(costUnits / count);
+    const remainder = costUnits - baseShare * count;
+
+    // Rotate remainder distribution deterministically by expense id hash so one person doesn't absorb every extra ¥1
+    let seed = 0;
+    for (let i = 0; i < (exp.id || '').length; i++) {
+      seed = (seed * 31 + exp.id.charCodeAt(i)) % count;
     }
 
-    const sharePerPerson = cost / participants.length;
-    participants.forEach((p) => {
-      if (summaries[p]) {
-        summaries[p].totalShare += sharePerPerson;
-      }
+    participants.forEach((p, idx) => {
+      const shiftedIdx = (idx + count - seed) % count;
+      const share = baseShare + (shiftedIdx < remainder ? 1 : 0);
+      unitSummaries[p].totalShare += share;
     });
   });
 
-  members.forEach((m) => {
-    summaries[m].totalPaid = roundCur(summaries[m].totalPaid);
-    summaries[m].groupPaid = roundCur(summaries[m].groupPaid);
-    summaries[m].totalShare = roundCur(summaries[m].totalShare);
-    summaries[m].personalExpense = roundCur(summaries[m].personalExpense);
-    summaries[m].netBalance = roundCur(summaries[m].groupPaid - summaries[m].totalShare);
-  });
-
-  // Calculate minimal cash transfers preserving currency precision
-  const debtors: { name: string; amount: number }[] = [];
-  const creditors: { name: string; amount: number }[] = [];
+  const summaries: Record<string, SplitMemberSummary> = {};
+  const debtors: { name: string; units: number }[] = [];
+  const creditors: { name: string; units: number }[] = [];
 
   members.forEach((m) => {
-    const net = roundCur(summaries[m].netBalance);
-    if (net <= -minStep) {
-      debtors.push({ name: m, amount: roundCur(-net) });
-    } else if (net >= minStep) {
-      creditors.push({ name: m, amount: net });
+    const u = unitSummaries[m];
+    const netUnits = u.groupPaid - u.totalShare;
+    summaries[m] = {
+      name: m,
+      totalPaid: fromUnits(u.totalPaid),
+      groupPaid: fromUnits(u.groupPaid),
+      totalShare: fromUnits(u.totalShare),
+      personalExpense: fromUnits(u.personalExpense),
+      netBalance: fromUnits(netUnits),
+    };
+
+    if (netUnits < 0) {
+      debtors.push({ name: m, units: -netUnits });
+    } else if (netUnits > 0) {
+      creditors.push({ name: m, units: netUnits });
     }
   });
 
-  debtors.sort((a, b) => b.amount - a.amount);
-  creditors.sort((a, b) => b.amount - a.amount);
+  debtors.sort((a, b) => b.units - a.units);
+  creditors.sort((a, b) => b.units - a.units);
 
   const transfers: DebtTransfer[] = [];
   let dIdx = 0;
@@ -129,28 +174,28 @@ export const calculateTripSplits = (
   while (dIdx < debtors.length && cIdx < creditors.length) {
     const debtor = debtors[dIdx];
     const creditor = creditors[cIdx];
-    const settleAmt = roundCur(Math.min(debtor.amount, creditor.amount));
+    const settleUnits = Math.min(debtor.units, creditor.units);
 
-    if (settleAmt >= minStep) {
+    if (settleUnits > 0) {
       transfers.push({
         from: debtor.name,
         to: creditor.name,
-        amount: settleAmt,
+        amount: fromUnits(settleUnits),
       });
 
-      debtor.amount = roundCur(debtor.amount - settleAmt);
-      creditor.amount = roundCur(creditor.amount - settleAmt);
+      debtor.units -= settleUnits;
+      creditor.units -= settleUnits;
     }
 
-    if (debtor.amount < minStep) dIdx++;
-    if (creditor.amount < minStep) cIdx++;
+    if (debtor.units <= 0) dIdx++;
+    if (creditor.units <= 0) cIdx++;
   }
 
   return {
     members,
     targetCurrency: baseCur,
-    totalGroupExpense: roundCur(totalGroupExpense),
-    totalPersonalExpense: roundCur(totalPersonalExpense),
+    totalGroupExpense: fromUnits(totalGroupUnits),
+    totalPersonalExpense: fromUnits(totalPersonalUnits),
     summaries,
     transfers,
   };

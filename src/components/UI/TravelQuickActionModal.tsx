@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Trip, ExpenseItem } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { getTodayLocal } from '../../utils/date';
@@ -6,11 +7,13 @@ import { compressImageFile, resolveMediaSrc, storeImageAsMediaRef, extractMediaI
 import { idbDeleteMedia } from '../../utils/indexedDb';
 import { MediaImage } from './MediaImage';
 import { IosModalSheet, IosNavBar } from './IosPrimitives';
-import { convertAmount, detectTripCurrency } from '../../utils/currency';
+import { useModalLayer } from '../../hooks/useModalHistory';
+import { convertAmount, CURRENCY_MAP, detectTripCurrency } from '../../utils/currency';
 import {
   TiantianExpenseEditor,
   TiantianExpenseDraft,
   parseExpenseDescription,
+  evaluateExpenseAmount,
 } from '../Expenses/TiantianExpenseEditor';
 import { resolveExpenseCategoryMeta } from '../Expenses/expenseMeta';
 import { RemindersTodoList } from '../Todos/RemindersTodoList';
@@ -64,23 +67,50 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [saveStatusToast, setSaveStatusToast] = useState<string | null>(null);
   const [focusTrigger, setFocusTrigger] = useState(0);
+  const [isSubPickerOpen, setIsSubPickerOpen] = useState(false);
 
   const draftReceiptsRef = useRef<string[]>([]);
   const persistedReceiptsRef = useRef<Set<string>>(new Set());
+  const saveToastTimerRef = useRef<number | null>(null);
+  const prevTripIdRef = useRef<string>(trip.id);
 
   useEffect(() => {
     draftReceiptsRef.current = draft.receiptImages;
   }, [draft.receiptImages]);
 
   useEffect(() => {
-    setDraft((prev) => ({
-      ...prev,
-      splitWith: splitMembersList,
-    }));
-  }, [splitMembersList]);
+    return () => {
+      if (saveToastTimerRef.current) {
+        window.clearTimeout(saveToastTimerRef.current);
+      }
+    };
+  }, []);
+
+  const splitMembersKey = splitMembersList.join('|');
+  useEffect(() => {
+    const tripChanged = prevTripIdRef.current !== trip.id;
+    prevTripIdRef.current = trip.id;
+    setDraft((prev) => {
+      if (tripChanged) {
+        return {
+          ...prev,
+          currency: trip.currency || detectTripCurrency(trip),
+          splitWith: splitMembersList,
+        };
+      }
+      // Keep user's explicit splitWith selection intact; only prune removed members or populate if empty
+      const valid = prev.splitWith.filter((m) => splitMembersList.includes(m));
+      if (valid.length === prev.splitWith.length && valid.length > 0) return prev;
+      return {
+        ...prev,
+        splitWith: valid.length > 0 ? valid : splitMembersList,
+      };
+    });
+  }, [trip.id, splitMembersKey]);
 
   useEffect(() => {
     setDraft((prev) => ({ ...prev, date: getLocalTodayDate() }));
+    setIsSubPickerOpen(false);
   }, [initialTab]);
 
   const handleClose = () => {
@@ -143,7 +173,8 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       onShowToast?.('目前為僅檢視權限');
       return;
     }
-    const parsedAmount = parseFloat(draft.amount);
+    const decimals = CURRENCY_MAP[draft.currency]?.decimals ?? 0;
+    const parsedAmount = evaluateExpenseAmount(draft.amount, decimals);
     if (!parsedAmount || isNaN(parsedAmount) || parsedAmount <= 0) return;
 
     const catMeta = resolveExpenseCategoryMeta(draft.category, trip);
@@ -157,7 +188,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     draft.receiptImages.forEach((ref) => persistedReceiptsRef.current.add(ref));
 
     const newExpense: ExpenseItem = {
-      id: `exp-${Date.now()}`,
+      id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       title: finalTitle,
       amount: parsedAmount,
       currency: draft.currency,
@@ -165,16 +196,16 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       paymentMethod: draft.paymentMethod,
       date: draft.date,
       dayNumber: matchedDay ? matchedDay.dayNumber : undefined,
-      convertedAmount: convertAmount(parsedAmount, draft.currency, trip.currency || 'TWD', trip.customExchangeRates),
+      convertedAmount: convertAmount(parsedAmount, draft.currency, trip.currency || defaultTripCurrency, trip.customExchangeRates),
       notes: finalNotes,
       tags: draft.tags.length > 0 ? draft.tags : undefined,
       receiptImages: draft.receiptImages.length > 0 ? draft.receiptImages : undefined,
       receiptImage: draft.receiptImages.length > 0 ? draft.receiptImages[0] : undefined,
-      paidBy: isSplitMode ? (draft.paidBy || '我') : undefined,
+      paidBy: isSplitMode ? (draft.paidBy || splitMembersList[0] || '我') : undefined,
       splitWith: isSplitMode && !draft.isPersonal
         ? (draft.splitWith.length > 0 ? draft.splitWith : splitMembersList)
         : undefined,
-      isPersonal: !isSplitMode ? true : draft.isPersonal,
+      isPersonal: isSplitMode ? draft.isPersonal : false,
     };
 
     onUpdateTrip({
@@ -188,7 +219,8 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
 
     if (continueAdding) {
       setSaveStatusToast(`已儲存「${newExpense.title}」(${draft.currency} ${parsedAmount.toLocaleString()})，可繼續記下一筆`);
-      setTimeout(() => setSaveStatusToast(null), 3200);
+      if (saveToastTimerRef.current) window.clearTimeout(saveToastTimerRef.current);
+      saveToastTimerRef.current = window.setTimeout(() => setSaveStatusToast(null), 3200);
       setDraft((prev) => ({
         ...prev,
         amount: '',
@@ -220,17 +252,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
     document.body.removeChild(link);
   };
 
-  useEffect(() => {
-    if (!previewImage) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        setPreviewImage(null);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [previewImage]);
+  useModalLayer(Boolean(previewImage), () => setPreviewImage(null));
 
   return (
     <>
@@ -242,49 +264,53 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
         disableBackdropClose={Boolean(previewImage)}
         ariaLabel="旅途隨身手帖"
       >
-        <IosNavBar
-          title="旅途隨身手帖"
-          leftLabel="關閉"
-          onLeftClick={handleClose}
-          rightLabel={activeTab === 'todos' ? '完成' : undefined}
-          onRightClick={activeTab === 'todos' ? handleClose : undefined}
-        />
+        {!(activeTab === 'expense' && isSubPickerOpen) && (
+          <>
+            <IosNavBar
+              title="旅途隨身手帖"
+              leftLabel="關閉"
+              onLeftClick={handleClose}
+              rightLabel={activeTab === 'todos' ? '完成' : undefined}
+              onRightClick={activeTab === 'todos' ? handleClose : undefined}
+            />
 
-        {/* iOS Segmented Control */}
-        <div className="px-4 py-2.5 border-b border-[#E5E2DC]/80 dark:border-slate-800 bg-[#FAF9F6] dark:bg-[#0B1120] shrink-0">
-          <div className="grid grid-cols-2 p-1 rounded-xl bg-[#EFECE5] dark:bg-slate-800/90 gap-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab('expense')}
-              className={`min-h-[38px] sm:min-h-[34px] px-2.5 rounded-lg font-semibold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                activeTab === 'expense'
-                  ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-              <span>一秒記帳</span>
-            </button>
+            {/* iOS Segmented Control */}
+            <div className="px-4 py-2.5 border-b border-[#E5E2DC]/80 dark:border-slate-800 bg-[#FAF9F6] dark:bg-[#0B1120] shrink-0">
+              <div className="grid grid-cols-2 p-1 rounded-xl bg-[#EFECE5] dark:bg-slate-800/90 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('expense')}
+                  className={`min-h-[38px] sm:min-h-[34px] px-2.5 rounded-lg font-semibold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    activeTab === 'expense'
+                      ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                  <span>一秒記帳</span>
+                </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('todos')}
-              className={`min-h-[38px] sm:min-h-[34px] px-2.5 rounded-lg font-semibold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                activeTab === 'todos'
-                  ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              <CheckSquare className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-              <span>
-                行程待辦{' '}
-                {pendingTodos.length > 0 && (
-                  <span className="font-mono tabular-nums">({pendingTodos.length})</span>
-                )}
-              </span>
-            </button>
-          </div>
-        </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('todos')}
+                  className={`min-h-[38px] sm:min-h-[34px] px-2.5 rounded-lg font-semibold text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                    activeTab === 'todos'
+                      ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <CheckSquare className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                  <span>
+                    行程待辦{' '}
+                    {pendingTodos.length > 0 && (
+                      <span className="font-mono tabular-nums">({pendingTodos.length})</span>
+                    )}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* TAB 1: TIANTIAN-STYLE FAST EXPENSE */}
         {activeTab === 'expense' && (
@@ -306,6 +332,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
             receiptError={receiptError}
             saveStatusToast={saveStatusToast}
             focusTrigger={focusTrigger}
+            onPickerActiveChange={setIsSubPickerOpen}
           />
         )}
 
@@ -324,10 +351,10 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
         )}
       </IosModalSheet>
 
-      {/* Fullscreen Receipt Image Lightbox */}
-      {previewImage && (
+      {/* Fullscreen Receipt Image Lightbox (portaled above sheets) */}
+      {previewImage && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 z-[95] bg-black/90 backdrop-blur-xs flex flex-col items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150"
+          className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-xs flex flex-col items-center justify-center px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150"
           onClick={() => setPreviewImage(null)}
         >
           <div className="relative max-w-2xl max-h-full flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
@@ -337,7 +364,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               ownerId={trip.ownerId}
               collabId={trip.collabId}
               alt="發票收據大圖"
-              className="max-h-[78vh] w-auto max-w-full rounded-2xl object-contain shadow-2xl border border-white/20"
+              className="max-h-[78dvh] w-auto max-w-full rounded-2xl object-contain shadow-2xl border border-white/20"
             />
             <div className="mt-3 flex items-center gap-3">
               <button
@@ -356,7 +383,8 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

@@ -2,12 +2,12 @@
  * Application Version and Release Metadata
  * Displayed across the App Menu, Settings, and Update Engine
  */
-export const APP_VERSION = 'v1.9.6';
-export const BUILD_DATE = '2026.11.19';
-export const BUILD_ID = `build-${BUILD_DATE.replace(/\./g, '')}-v196`;
+export const APP_VERSION = 'v2.0.0';
+export const BUILD_DATE = '2026.11.23';
+export const BUILD_ID = `build-${BUILD_DATE.replace(/\./g, '')}-v200`;
 
 export const RELEASE_HIGHLIGHTS = [
-  '全面依照 iOS 原生 Human Interface Guidelines 重構設定、新增、編輯彈窗與行內展開群組表單，維持日和暖白紙感美學',
-  'iPhone PWA 深度最佳化：動態島與瀏海 Safe Area 精準閃避（Toast 提示、Timeline 黏性日程篩選列、更新通知與離線橫幅）、暖白/深邃夜色啟動畫面無縫銜接',
-  '強化 iOS 主畫面獨立執行體驗：切換回前景自動檢查新版 Service Worker、防止離線誤清快取，並於選單內建 Safari 加入主畫面指引',
+  '全面商業級重構 iOS 原生 PWA 體驗：行程支援長按／拖曳排序、相鄰景點兩點路線規劃、Google Maps 連結一鍵貼上匯入與旅程三階段智慧情境條',
+  '記帳收斂為「明細／統計／分帳」三大分段視圖，新增分帳結算已還清勾選與免稅／含稅快速試算；準備頁極簡化為「待辦與隨記／預約憑證」',
+  '圖片升級為輕量 WebP 壓縮並支援選配 Cloudinary／Cloudflare R2 圖床，靜態部署支援本機自訂 Gemini API Key（BYOK）與離線優先零衝突同步',
 ];

@@ -6,6 +6,7 @@ import {
   IosNavBar,
   IosInsetGroup,
   IosCheckmarkRow,
+  IosToggleRow,
 } from '../UI/IosPrimitives';
 
 interface ExpenseFilterDrawerProps {
@@ -15,6 +16,10 @@ interface ExpenseFilterDrawerProps {
   onSelectDateFilter: (filter: string) => void;
   selectedCategoryFilter: string;
   onSelectCategoryFilter: (filter: string) => void;
+  cashOnly?: boolean;
+  onToggleCashOnly?: (next: boolean) => void;
+  withReceipt?: boolean;
+  onToggleWithReceipt?: (next: boolean) => void;
   defaultCategories: Record<string, { label: string; Icon: React.ComponentType<{ className?: string }>; color?: string; bg?: string }>;
   customCategories: string[];
   customCategoryLabels?: Record<string, string>;
@@ -33,6 +38,10 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
   onSelectDateFilter,
   selectedCategoryFilter,
   onSelectCategoryFilter,
+  cashOnly = false,
+  onToggleCashOnly,
+  withReceipt = false,
+  onToggleWithReceipt,
   defaultCategories,
   customCategories,
   customCategoryLabels = {},
@@ -45,7 +54,11 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const isFiltered = selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all';
+  const isFiltered =
+    selectedDateFilter !== 'all' ||
+    selectedCategoryFilter !== 'all' ||
+    cashOnly ||
+    withReceipt;
 
   return (
     <IosModalSheet
@@ -65,8 +78,32 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
       />
 
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 sm:p-5 space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+        {/* Section 0: Composable Toggle Filters */}
+        {(onToggleCashOnly || onToggleWithReceipt) && (
+          <IosInsetGroup
+            header={lang === 'zh' ? '附加條件（可與日期與類別同時套用）' : 'Additional Conditions'}
+          >
+            {onToggleCashOnly && (
+              <IosToggleRow
+                icon={<Coins className="w-4 h-4 text-amber-500" />}
+                label={lang === 'zh' ? '僅看現金支付' : 'Cash Only'}
+                checked={cashOnly}
+                onChange={onToggleCashOnly}
+              />
+            )}
+            {onToggleWithReceipt && (
+              <IosToggleRow
+                icon={<Receipt className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+                label={lang === 'zh' ? '僅看附發票憑證' : 'With Receipts'}
+                checked={withReceipt}
+                onChange={onToggleWithReceipt}
+              />
+            )}
+          </IosInsetGroup>
+        )}
+
         {/* Section 1: Date & Period */}
-        <IosInsetGroup header={lang === 'zh' ? '日期與付款條件' : 'Date & Payment'}>
+        <IosInsetGroup header={lang === 'zh' ? '日期區間' : 'Date & Period'}>
           <IosCheckmarkRow
             icon={<Calendar className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
             label={lang === 'zh' ? '全部日期' : 'All Dates'}
@@ -92,12 +129,14 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
               onSelect={() => onSelectDateFilter('pre')}
             />
           )}
-          <IosCheckmarkRow
-            icon={<Coins className="w-4 h-4 text-amber-500" />}
-            label={lang === 'zh' ? '僅看現金支付' : 'Cash Only'}
-            selected={selectedDateFilter === 'cash_only'}
-            onSelect={() => onSelectDateFilter('cash_only')}
-          />
+          {!onToggleCashOnly && (
+            <IosCheckmarkRow
+              icon={<Coins className="w-4 h-4 text-amber-500" />}
+              label={lang === 'zh' ? '僅看現金支付' : 'Cash Only'}
+              selected={selectedDateFilter === 'cash_only'}
+              onSelect={() => onSelectDateFilter('cash_only')}
+            />
+          )}
           {tripDays.map((d) => (
             <IosCheckmarkRow
               key={d.id}
@@ -121,12 +160,14 @@ export const ExpenseFilterDrawer: React.FC<ExpenseFilterDrawerProps> = ({
             selected={selectedCategoryFilter === 'all'}
             onSelect={() => onSelectCategoryFilter('all')}
           />
-          <IosCheckmarkRow
-            icon={<Receipt className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-            label={lang === 'zh' ? '僅看附發票憑證' : 'With Receipts'}
-            selected={selectedCategoryFilter === 'with_receipt'}
-            onSelect={() => onSelectCategoryFilter('with_receipt')}
-          />
+          {!onToggleWithReceipt && (
+            <IosCheckmarkRow
+              icon={<Receipt className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
+              label={lang === 'zh' ? '僅看附發票憑證' : 'With Receipts'}
+              selected={selectedCategoryFilter === 'with_receipt'}
+              onSelect={() => onSelectCategoryFilter('with_receipt')}
+            />
+          )}
           {Object.entries(defaultCategories).map(([catKey, meta]) => (
             <IosCheckmarkRow
               key={catKey}

@@ -1,5 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import { useModalLayer } from '../../hooks/useModalHistory';
 import { Trip, TripMemoryItem, ItineraryItem } from '../../types/itinerary';
 import { formatDateSlash, formatMonthDaySlash, getDayOfWeek } from '../../utils/date';
 import { Language } from '../../utils/i18n';
@@ -10,6 +12,7 @@ import { sanitizeExternalUrl } from '../../utils/url';
 import { extractMediaId, garbageCollectOrphanedMedia, isMediaRef } from '../../utils/image';
 import { idbDeleteMedia } from '../../utils/indexedDb';
 import { getStoredTrips } from '../../utils/storage';
+import { enqueueTripSave, getPendingQueue } from '../../utils/syncManager';
 import {
   auth,
   connectGoogleDrive,
@@ -17,6 +20,7 @@ import {
   hasDriveAccessToken,
   loginWithGoogle,
   saveTripToCloud,
+  syncCollaborativeTrip,
 } from '../../utils/firebase';
 import {
   deleteDriveFile,
@@ -96,6 +100,35 @@ const PRESET_MOODS = [
   { icon: '✈️', label: '隨行啟程' },
 ];
 
+const isLikelyDirectImageUrl = (url?: string): boolean => {
+  if (!url) return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  if (
+    trimmed.startsWith('data:image/') ||
+    trimmed.startsWith('blob:') ||
+    trimmed.startsWith('idb://') ||
+    trimmed.startsWith('media:')
+  ) {
+    return true;
+  }
+  const lower = trimmed.toLowerCase();
+  if (
+    lower.includes('photos.app.goo.gl') ||
+    lower.includes('photos.google.com/share') ||
+    lower.includes('photos.google.com/album') ||
+    lower.includes('drive.google.com/file') ||
+    lower.includes('drive.google.com/drive')
+  ) {
+    return false;
+  }
+  return (
+    /\.(jpe?g|png|webp|gif|avif|heic|heif)(\?|#|$)/i.test(lower) ||
+    lower.includes('lh3.googleusercontent.com') ||
+    lower.includes('firebasestorage.googleapis.com')
+  );
+};
+
 export interface PendingMemoryUpload {
   mediaRef: string;
   takenDate: string;
@@ -142,8 +175,23 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const [pendingDriveDeleteMem, setPendingDriveDeleteMem] = useState<TripMemoryItem | null>(null);
   const [isDeletingDriveFile, setIsDeletingDriveFile] = useState(false);
   const [driveDeleteError, setDriveDeleteError] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState<boolean>(() =>
+    typeof navigator === 'undefined' ? true : navigator.onLine
+  );
+  const [hasPendingSyncForTrip, setHasPendingSyncForTrip] = useState<boolean>(() =>
+    getPendingQueue().some((q) => q.trip?.id === trip.id || q.tripId === trip.id)
+  );
+  // Memory metadata edit modal state
+  const [editingMemory, setEditingMemory] = useState<TripMemoryItem | null>(null);
+  const [editCaption, setEditCaption] = useState('');
+  const [editMood, setEditMood] = useState('✨');
+  const [editLocation, setEditLocation] = useState('');
+  const [editDayNumber, setEditDayNumber] = useState<number | 'all'>('all');
+  const [editDate, setEditDate] = useState('');
+  const [editGoogleUrl, setEditGoogleUrl] = useState('');
+  const [editPicker, setEditPicker] = useState<'none' | 'day' | 'mood'>('none');
 
-  // Sync default tab when switching between planner trips and memory-only trips
+  // Sync default tab & reset upload state when switching trips
   useEffect(() => {
     if (initialSpotId) {
       setViewMode('itinerary');
@@ -153,10 +201,21 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       setViewMode('itinerary');
     }
     setSelectedDayFilter('all');
+    setCustomDayNumber('all');
+    setCustomDate('');
+    setEditingMemory(null);
+    setHasPendingSyncForTrip(
+      getPendingQueue().some((q) => q.trip?.id === trip.id || q.tripId === trip.id)
+    );
   }, [trip.id, trip.tripMode, initialSpotId]);
 
-  // Monitor Firebase Auth State & Drive token changes
+  // Monitor online status, Firebase Auth State & Drive token changes
   useEffect(() => {
+    const onOnline = () => setIsOnline(true);
+    const onOffline = () => setIsOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setDriveConnected(hasDriveAccessToken());
@@ -164,24 +223,33 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     const syncDrive = () => setDriveConnected(hasDriveAccessToken());
     window.addEventListener('hiyori_drive_auth_changed', syncDrive);
     return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
       unsubscribe();
       window.removeEventListener('hiyori_drive_auth_changed', syncDrive);
     };
   }, []);
 
-  // Listen to Global Cloud Sync Events
+  // Listen to Global Cloud Sync Events & refresh pending queue check
   useEffect(() => {
+    const refreshPending = () => {
+      setHasPendingSyncForTrip(
+        getPendingQueue().some((q) => q.trip?.id === trip.id || q.tripId === trip.id)
+      );
+    };
     const handleSyncEvent = (e: any) => {
       const status = e.detail?.status;
       if (status === 'syncing') {
         setIsGlobalSyncing(true);
       } else {
         setIsGlobalSyncing(false);
+        refreshPending();
       }
     };
+    refreshPending();
     window.addEventListener('cloud_sync_status', handleSyncEvent);
     return () => window.removeEventListener('cloud_sync_status', handleSyncEvent);
-  }, []);
+  }, [trip.id, trip.updatedAt]);
 
   const performForceSyncMemory = async (mem: TripMemoryItem) => {
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -208,11 +276,23 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     setToastMessage(lang === 'zh' ? '正在強制同步至雲端資料庫...' : 'Force syncing to cloud...');
     setSaveSuccessToast(true);
 
+    const tripToSync: Trip = {
+      ...trip,
+      updatedAt: Date.now(),
+    };
+
     try {
-      await saveTripToCloud(auth.currentUser.uid, {
-        ...trip,
-        updatedAt: Date.now(),
-      });
+      await saveTripToCloud(auth.currentUser.uid, tripToSync);
+      if (trip.isCollaborative && trip.collabId) {
+        await syncCollaborativeTrip(
+          trip.collabId,
+          tripToSync,
+          auth.currentUser.displayName || auth.currentUser.email || '旅伴'
+        );
+      }
+      setHasPendingSyncForTrip(
+        getPendingQueue().some((q) => q.trip?.id === trip.id || q.tripId === trip.id)
+      );
       setToastMessage(
         lang === 'zh'
           ? `✅ 已成功同步【${mem.spotTitle || mem.caption || '回憶照片'}】至雲端資料庫！`
@@ -222,6 +302,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       setTimeout(() => setSaveSuccessToast(false), 3000);
     } catch (err) {
       console.error('Failed to force sync memory:', err);
+      enqueueTripSave(auth.currentUser.uid, tripToSync);
+      setHasPendingSyncForTrip(true);
       setToastMessage(
         lang === 'zh'
           ? '⚠️ 雲端同步失敗，已加入離線待傳佇列'
@@ -244,16 +326,17 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     await performForceSyncMemory(mem);
   };
 
-  // Render Google Photos style sync status badge for each photo card corner (Color-Blind Friendly)
+  // Render honest Google Photos style sync status badge (hidden when printing!)
   const renderSyncBadge = (mem: TripMemoryItem, className = '') => {
     const isThisSyncing = syncingMemIds.has(mem.id) || isGlobalSyncing;
-    const isCloudSynced = Boolean(currentUser) && !isThisSyncing;
+    const isPendingOrOffline = Boolean(currentUser) && (!isOnline || hasPendingSyncForTrip);
+    const isCloudSynced = Boolean(currentUser) && isOnline && !hasPendingSyncForTrip && !isThisSyncing;
 
     // Status attributes designed for color-blind accessibility (Shape + Icon + Motion + Label)
     let IconComponent = CloudUpload;
     let iconClass = 'text-white/95 stroke-[2.2]';
-    let label = lang === 'zh' ? '上傳備份' : 'Backup';
-    let statusTitle = lang === 'zh' ? '僅存於本機 (點擊立即備份至雲端資料庫)' : 'Stored locally (tap to backup)';
+    let label = lang === 'zh' ? '僅本機' : 'Local';
+    let statusTitle = lang === 'zh' ? '僅存於本機 (點擊登入並備份至雲端)' : 'Stored locally (tap to backup)';
     let badgeBorder = 'border-white/30 bg-slate-900/80 hover:bg-slate-900 text-white';
 
     if (isThisSyncing) {
@@ -262,6 +345,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       label = lang === 'zh' ? '備份中...' : 'Syncing...';
       statusTitle = lang === 'zh' ? '正在備份同步至雲端資料庫...' : 'Syncing to cloud...';
       badgeBorder = 'border-amber-400/50 bg-slate-900/90 text-amber-200';
+    } else if (isPendingOrOffline) {
+      IconComponent = CloudUpload;
+      iconClass = 'text-amber-300 stroke-[2.2]';
+      label = lang === 'zh' ? (!isOnline ? '離線待傳' : '待同步') : 'Pending';
+      statusTitle = lang === 'zh' ? '尚未完成雲端同步，點擊立即重試' : 'Pending cloud sync (tap to retry)';
+      badgeBorder = 'border-amber-400/50 bg-slate-900/85 hover:bg-slate-900 text-amber-200';
     } else if (isCloudSynced) {
       IconComponent = CloudCheck;
       iconClass = 'text-emerald-300 stroke-[2.2]';
@@ -276,7 +365,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         onClick={(e) => handleForceSyncMemory(mem, e)}
         title={statusTitle}
         aria-label={statusTitle}
-        className={`px-2 py-1 rounded-full backdrop-blur-md border shadow-xs transition-all flex items-center gap-1 cursor-pointer active:scale-95 group/sync ${badgeBorder} ${className}`}
+        className={`no-print px-2 py-1 rounded-full backdrop-blur-md border shadow-xs transition-all flex items-center gap-1 cursor-pointer active:scale-95 group/sync ${badgeBorder} ${className}`}
       >
         <IconComponent className={`w-3.5 h-3.5 shrink-0 ${iconClass}`} />
         <span className="text-[10px] font-bold tracking-tight whitespace-nowrap">
@@ -286,27 +375,18 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     );
   };
 
-  // Lock background scroll when lightbox is open (upload modal & delete sheet use IosPrimitives scroll lock)
+  // Lock background scroll & push history layer when lightbox is open
   useBodyScrollLock(Boolean(lightboxMemory));
-
-  // Escape key handler for Lightbox
-  useEffect(() => {
-    if (!lightboxMemory) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setLightboxMemory(null);
-        setConfirmDeleteMemId(null);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [lightboxMemory]);
+  useModalLayer(Boolean(lightboxMemory), () => {
+    setLightboxMemory(null);
+    setConfirmDeleteMemId(null);
+  });
 
   // Form State for uploading new memory photo
   const [uploadSpotId, setUploadSpotId] = useState<string>(initialSpotId || '');
   const [isCustomSpot, setIsCustomSpot] = useState<boolean>(!initialSpotId);
   const [customLocationName, setCustomLocationName] = useState<string>('');
-  const [customDayNumber, setCustomDayNumber] = useState<number | 'all'>(() => trip.days[0]?.dayNumber || 1);
+  const [customDayNumber, setCustomDayNumber] = useState<number | 'all'>('all');
   const [customDate, setCustomDate] = useState<string>('');
   const [uploadCaption, setUploadCaption] = useState('');
   const [uploadMood, setUploadMood] = useState('✨');
@@ -338,6 +418,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     setUploadGooglePhotosUrl('');
     setIsCustomSpot(false);
     setCustomLocationName('');
+    setCustomDayNumber('all');
+    setCustomDate('');
     setConfirmDeleteSpotPhoto(null);
     setActiveUploadPicker('none');
     setShowUploadModal(false);
@@ -410,8 +492,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               });
             }
           });
-        } else if (item.googlePhotosUrl) {
-          // Spot has googlePhotosUrl without local photos
+        } else if (item.googlePhotosUrl && isLikelyDirectImageUrl(item.googlePhotosUrl)) {
+          // Only synthesize a photo card if the URL is an actual direct image (not an HTML album share page)
           const exists = items.some((m) => m.spotId === item.id);
           if (!exists) {
             items.push({
@@ -567,6 +649,23 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   const [isDownloadingDriveOriginal, setIsDownloadingDriveOriginal] = useState(false);
   const [driveOriginalError, setDriveOriginalError] = useState<string | null>(null);
 
+  // Keyboard arrow navigation inside Lightbox
+  useEffect(() => {
+    if (!lightboxMemory) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (editingMemory || isEditingLightboxUrl) return;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        handlePrevLightbox();
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        handleNextLightbox();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [lightboxMemory, editingMemory, isEditingLightboxUrl, currentLightboxIndex, lightboxPlaylist]);
+
   useEffect(() => {
     setIsEditingLightboxUrl(false);
     setLightboxEditUrl(lightboxMemory?.googlePhotosUrl || '');
@@ -622,6 +721,77 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     };
   }, [lightboxMemory?.id, lightboxMemory?.driveFileId, driveConnected]);
 
+  const handleOpenEditMemory = (mem: TripMemoryItem, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!canEdit) return;
+    setEditingMemory(mem);
+    setEditCaption(mem.caption || '');
+    setEditMood(mem.mood || '✨');
+    setEditLocation(mem.location || mem.spotTitle || '');
+    setEditDayNumber(mem.dayNumber && trip.days.some((d) => d.dayNumber === mem.dayNumber) ? mem.dayNumber : 'all');
+    setEditDate(mem.date || '');
+    setEditGoogleUrl(mem.googlePhotosUrl || '');
+    setEditPicker('none');
+  };
+
+  const handleSaveEditedMemory = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEdit || !editingMemory) return;
+    const safeUrl = sanitizeExternalUrl(editGoogleUrl) || undefined;
+    const nextDayNum = editDayNumber === 'all' ? undefined : Number(editDayNumber);
+    const matchedDay = nextDayNum ? trip.days.find((d) => d.dayNumber === nextDayNum) : undefined;
+    const nextDate = editDate || matchedDay?.date || editingMemory.date;
+    const nextCaption = editCaption.trim() || editingMemory.spotTitle || editingMemory.location || '旅途回憶';
+    const nextLocation = editLocation.trim() || editingMemory.location || trip.destination;
+
+    const updatedFields: Partial<TripMemoryItem> = {
+      caption: nextCaption,
+      mood: editMood,
+      location: nextLocation,
+      spotTitle: editingMemory.spotId ? editingMemory.spotTitle : nextLocation,
+      dayNumber: nextDayNum,
+      date: nextDate,
+      googlePhotosUrl: safeUrl,
+    };
+
+    const existsInMemories = (trip.memories || []).some((m) => m.id === editingMemory.id);
+    const updatedMemories = existsInMemories
+      ? (trip.memories || []).map((m) => (m.id === editingMemory.id ? { ...m, ...updatedFields } : m))
+      : [{ ...editingMemory, ...updatedFields, id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` }, ...(trip.memories || [])];
+
+    let updatedDays = trip.days;
+    if (editingMemory.spotId) {
+      updatedDays = trip.days.map((d) => ({
+        ...d,
+        items: d.items.map((item) =>
+          item.id === editingMemory.spotId
+            ? {
+                ...item,
+                memoryNotes: nextCaption,
+                memoryMood: editMood,
+                googlePhotosUrl: safeUrl ?? item.googlePhotosUrl,
+              }
+            : item
+        ),
+      }));
+    }
+
+    onUpdateTrip({
+      ...trip,
+      days: updatedDays,
+      memories: updatedMemories,
+      updatedAt: Date.now(),
+    });
+
+    if (lightboxMemory?.id === editingMemory.id) {
+      setLightboxMemory({ ...lightboxMemory, ...updatedFields });
+    }
+    setEditingMemory(null);
+    setToastMessage('✅ 已更新回憶文字與標籤資訊');
+    setSaveSuccessToast(true);
+    setTimeout(() => setSaveSuccessToast(false), 2400);
+  };
+
   const handleSaveLightboxGoogleUrl = () => {
     if (!canEdit || !lightboxMemory) return;
     if (
@@ -642,28 +812,27 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     };
     setLightboxMemory(updatedMem);
 
-    // 2. Update trip.memories
+    // 2. Update ONLY this specific memory in trip.memories (never clobber sibling spot photos!)
     const updatedMemories = (trip.memories || []).map((m) =>
-      m.id === lightboxMemory.id || (lightboxMemory.spotId && m.spotId === lightboxMemory.spotId)
+      m.id === lightboxMemory.id
         ? { ...m, googlePhotosUrl: finalUrl || undefined }
         : m
     );
 
-    // 3. Update spot in trip.days if spotId is present
+    // 3. Only update spot.googlePhotosUrl if this was the sole memory for that spot
     let updatedDays = trip.days;
     if (lightboxMemory.spotId) {
-      updatedDays = trip.days.map((d) => ({
-        ...d,
-        items: d.items.map((item) => {
-          if (item.id === lightboxMemory.spotId) {
-            return {
-              ...item,
-              googlePhotosUrl: finalUrl || undefined,
-            };
-          }
-          return item;
-        }),
-      }));
+      const siblingCount = allMemories.filter((m) => m.spotId === lightboxMemory.spotId).length;
+      if (siblingCount <= 1) {
+        updatedDays = trip.days.map((d) => ({
+          ...d,
+          items: d.items.map((item) =>
+            item.id === lightboxMemory.spotId
+              ? { ...item, googlePhotosUrl: finalUrl || undefined }
+              : item
+          ),
+        }));
+      }
     }
 
     onUpdateTrip({
@@ -674,22 +843,29 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     });
 
     setIsEditingLightboxUrl(false);
+    setToastMessage('✅ 已儲存原圖連結');
     setSaveSuccessToast(true);
     setTimeout(() => setSaveSuccessToast(false), 2500);
   };
 
-  // Touch swipe within Lightbox
-  const lightboxTouchStartX = useRef<number | null>(null);
+  // Touch swipe within Lightbox (single-touch + horizontal-dominance guard)
+  const lightboxTouchStartRef = useRef<{ x: number; y: number } | null>(null);
   const handleLightboxTouchStart = (e: React.TouchEvent) => {
     e.stopPropagation();
-    lightboxTouchStartX.current = e.touches[0].clientX;
+    if (e.touches.length !== 1) {
+      lightboxTouchStartRef.current = null;
+      return;
+    }
+    lightboxTouchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
   };
   const handleLightboxTouchEnd = (e: React.TouchEvent) => {
     e.stopPropagation();
-    if (lightboxTouchStartX.current === null) return;
-    const deltaX = e.changedTouches[0].clientX - lightboxTouchStartX.current;
-    lightboxTouchStartX.current = null;
-    if (Math.abs(deltaX) > 40) {
+    const start = lightboxTouchStartRef.current;
+    lightboxTouchStartRef.current = null;
+    if (!start || e.changedTouches.length !== 1) return;
+    const deltaX = e.changedTouches[0].clientX - start.x;
+    const deltaY = e.changedTouches[0].clientY - start.y;
+    if (Math.abs(deltaX) > 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.4) {
       if (deltaX < 0) {
         handleNextLightbox();
       } else {
@@ -698,7 +874,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     }
   };
 
-  // Handle Photo File selection (up to 3 per itinerary spot, or 24 per custom/memory batch with EXIF extraction)
+  // Handle Photo File selection (per-file error resilience, duplicate skip, multi-day EXIF auto-sort)
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
@@ -724,48 +900,81 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     setUploadLimitWarning(null);
 
     try {
-      const filesToProcess = files.slice(0, availableSlots);
-      if (files.length > availableSlots) {
-        setUploadLimitWarning(
-          `${isCustomSpot ? '單次批次上限' : '景點照片上限'}為 ${batchMax} 張，已為您自動選取前 ${availableSlots} 張。`
+      // Skip exact duplicate files already queued in this batch (name + size + lastModified)
+      const existingFileSigs = new Set(
+        uploadImagePreviews
+          .map((p) => (p.rawFile ? `${p.rawFile.name}|${p.rawFile.size}|${p.rawFile.lastModified}` : ''))
+          .filter(Boolean)
+      );
+      const dedupedFiles = files.filter((f) => {
+        const sig = `${f.name}|${f.size}|${f.lastModified}`;
+        if (existingFileSigs.has(sig)) return false;
+        existingFileSigs.add(sig);
+        return true;
+      });
+
+      const filesToProcess = dedupedFiles.slice(0, availableSlots);
+      const warnings: string[] = [];
+      if (dedupedFiles.length < files.length) {
+        warnings.push(`已略過 ${files.length - dedupedFiles.length} 張重複挑選的相片`);
+      }
+      if (dedupedFiles.length > availableSlots) {
+        warnings.push(
+          `${isCustomSpot ? '單次批次上限' : '景點照片上限'}為 ${batchMax} 張，已選取前 ${availableSlots} 張`
         );
       }
 
       setUploadBatchProgress({ done: 0, total: filesToProcess.length });
       const processedList: PendingMemoryUpload[] = [];
+      const failedNames: string[] = [];
+
       for (let i = 0; i < filesToProcess.length; i++) {
-        const processed = await processPhotoWithExif(filesToProcess[i], trip.id);
-        processedList.push({
-          mediaRef: processed.mediaRef,
-          takenDate: processed.takenDate,
-          hasExifDate: processed.hasExifDate,
-          lat: processed.lat,
-          lng: processed.lng,
-          hasGps: processed.hasGps,
-          rawFile: processed.rawFile,
-          originalBytes: processed.originalBytes,
-          originalWidth: processed.originalWidth,
-          originalHeight: processed.originalHeight,
-          originalMimeType: processed.originalMimeType,
-        });
+        const file = filesToProcess[i];
+        try {
+          const processed = await processPhotoWithExif(file, trip.id);
+          processedList.push({
+            mediaRef: processed.mediaRef,
+            takenDate: processed.takenDate,
+            hasExifDate: processed.hasExifDate,
+            lat: processed.lat,
+            lng: processed.lng,
+            hasGps: processed.hasGps,
+            rawFile: processed.rawFile,
+            originalBytes: processed.originalBytes,
+            originalWidth: processed.originalWidth,
+            originalHeight: processed.originalHeight,
+            originalMimeType: processed.originalMimeType,
+          });
+        } catch (fileErr) {
+          console.warn(`Skipped photo "${file.name}":`, fileErr);
+          failedNames.push(file.name);
+        }
         setUploadBatchProgress({ done: i + 1, total: filesToProcess.length });
       }
 
-      // Auto-fill customDate from earliest EXIF date if empty
-      if (isCustomSpot && !customDate) {
-        const exifDates = processedList
-          .filter((p) => p.hasExifDate && p.takenDate)
-          .map((p) => p.takenDate)
-          .sort();
-        if (exifDates.length > 0) {
-          setCustomDate(exifDates[0]);
+      if (failedNames.length > 0) {
+        warnings.push(
+          `${failedNames.length} 張相片格式不支援或超過 25MB 已略過（${failedNames.slice(0, 2).join('、')}${failedNames.length > 2 ? '…' : ''}）`
+        );
+      }
+
+      // Only prefill customDate if ALL EXIF photos in this batch share ONE date;
+      // otherwise leave customDate blank so each photo preserves its own EXIF date & auto-matches its Day!
+      if (isCustomSpot && !customDate && processedList.length > 0) {
+        const uniqueExifDates = Array.from(
+          new Set(processedList.filter((p) => p.hasExifDate && p.takenDate).map((p) => p.takenDate))
+        );
+        if (uniqueExifDates.length === 1) {
+          setCustomDate(uniqueExifDates[0]);
         }
       }
 
-      setUploadImagePreviews((prev) => [...prev, ...processedList].slice(0, maxAllowed));
-    } catch (err) {
-      console.error('Failed to process photo:', err);
-      setUploadLimitWarning(err instanceof Error ? err.message : '照片處理失敗，請確認格式或檔案大小（25MB 以內）後重試');
+      if (processedList.length > 0) {
+        setUploadImagePreviews((prev) => [...prev, ...processedList].slice(0, maxAllowed));
+      }
+      if (warnings.length > 0) {
+        setUploadLimitWarning(warnings.join('；'));
+      }
     } finally {
       setIsProcessingImage(false);
       setUploadBatchProgress(null);
@@ -906,6 +1115,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     let nextDriveFolderId = trip.driveFolderId;
 
     let didSave = false;
+    let driveUploadedCount = 0;
+    let driveAttemptedCount = 0;
+    let driveFailedCount = 0;
     setIsSavingMemory(true);
     try {
       if (hasNewPhotos) {
@@ -920,6 +1132,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           .filter((idx) => idx >= 0);
 
         if (driveToken && rawIndexes.length > 0) {
+          driveAttemptedCount = rawIndexes.length;
           setDriveUploadProgress({ done: 0, total: rawIndexes.length });
           for (let step = 0; step < rawIndexes.length; step++) {
             const idx = rawIndexes[step];
@@ -937,10 +1150,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 });
                 nextDriveFolderId = uploaded.driveFolderId;
                 driveUploads.set(idx, uploaded);
+                driveUploadedCount++;
               } catch (err) {
                 console.warn('Google Drive original photo upload skipped:', err);
+                driveFailedCount++;
                 if (err instanceof DriveAuthExpiredError) {
                   setDriveConnected(false);
+                  driveFailedCount += rawIndexes.length - step - 1;
                   break;
                 }
               }
@@ -983,23 +1199,21 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           };
         });
         updatedMemories = [...newMemories, ...updatedMemories];
-    } else if (hasGoogleUrl && safeGoogleUrl) {
-      // User only updated/added googlePhotosUrl without uploading files
-      if (!isCustom && uploadSpotId) {
-        // Check if memories already exist for this spot
+      } else if (!isCustom && uploadSpotId) {
+        // User updated caption, mood, or Google Photos link on an existing itinerary spot (no new files)
         const spotMems = updatedMemories.filter((m) => m.spotId === uploadSpotId);
         if (spotMems.length > 0) {
           updatedMemories = updatedMemories.map((m) =>
             m.spotId === uploadSpotId
               ? {
                   ...m,
-                  googlePhotosUrl: safeGoogleUrl || undefined,
+                  googlePhotosUrl: safeGoogleUrl || m.googlePhotosUrl,
                   caption: uploadCaption.trim() || m.caption,
                   mood: uploadMood || m.mood,
                 }
               : m
           );
-        } else {
+        } else if (hasGoogleUrl && safeGoogleUrl && isLikelyDirectImageUrl(safeGoogleUrl)) {
           updatedMemories.unshift({
             id: `mem-gphoto-${now}`,
             imageUrl: safeGoogleUrl,
@@ -1014,8 +1228,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             createdAt: now,
           });
         }
-      } else {
-        // Custom snap with Google Photos URL
+      } else if (hasGoogleUrl && safeGoogleUrl && isLikelyDirectImageUrl(safeGoogleUrl)) {
+        // Custom snap with direct image URL
         updatedMemories.unshift({
           id: `mem-custom-gphoto-${now}`,
           imageUrl: safeGoogleUrl,
@@ -1028,50 +1242,49 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
           createdAt: now,
         });
       }
-    }
 
-    // Also update spot in trip.days if not custom
-    let updatedDays = trip.days;
-    if (!isCustom && uploadSpotId) {
-      updatedDays = trip.days.map((d) => ({
-        ...d,
-        items: d.items.map((item) => {
-          if (item.id === uploadSpotId) {
-            const existing = item.memoryPhotos || [];
-            const newMediaRefs = uploadImagePreviews.map((p) => p.mediaRef);
-            const merged = hasNewPhotos
-              ? [...existing, ...newMediaRefs].slice(0, 3)
-              : existing;
-            return {
-              ...item,
-              completed: true,
-              memoryPhotos: merged.length > 0 ? merged : undefined,
-              memoryNotes: uploadCaption.trim() || item.memoryNotes,
-              memoryMood: uploadMood,
-              googlePhotosUrl: safeGoogleUrl || item.googlePhotosUrl || undefined,
-            };
-          }
-          return item;
-        }),
-      }));
-    }
-
-    // Backfill centroid destinationLat / destinationLng if missing and uploaded photos have GPS
-    let nextDestLat = trip.destinationLat;
-    let nextDestLng = trip.destinationLng;
-    if ((typeof nextDestLat !== 'number' || typeof nextDestLng !== 'number') && hasNewPhotos) {
-      const gpsList = uploadImagePreviews.filter(
-        (p) => typeof p.lat === 'number' && typeof p.lng === 'number'
-      );
-      if (gpsList.length > 0) {
-        nextDestLat =
-          Math.round((gpsList.reduce((acc, p) => acc + (p.lat || 0), 0) / gpsList.length) * 1000000) /
-          1000000;
-        nextDestLng =
-          Math.round((gpsList.reduce((acc, p) => acc + (p.lng || 0), 0) / gpsList.length) * 1000000) /
-          1000000;
+      // Also update spot in trip.days if not custom
+      let updatedDays = trip.days;
+      if (!isCustom && uploadSpotId) {
+        updatedDays = trip.days.map((d) => ({
+          ...d,
+          items: d.items.map((item) => {
+            if (item.id === uploadSpotId) {
+              const existing = item.memoryPhotos || [];
+              const newMediaRefs = uploadImagePreviews.map((p) => p.mediaRef);
+              const merged = hasNewPhotos
+                ? [...existing, ...newMediaRefs].slice(0, 3)
+                : existing;
+              return {
+                ...item,
+                completed: true,
+                memoryPhotos: merged.length > 0 ? merged : undefined,
+                memoryNotes: uploadCaption.trim() || item.memoryNotes,
+                memoryMood: uploadMood,
+                googlePhotosUrl: safeGoogleUrl || item.googlePhotosUrl || undefined,
+              };
+            }
+            return item;
+          }),
+        }));
       }
-    }
+
+      // Backfill centroid destinationLat / destinationLng if missing and uploaded photos have GPS
+      let nextDestLat = trip.destinationLat;
+      let nextDestLng = trip.destinationLng;
+      if ((typeof nextDestLat !== 'number' || typeof nextDestLng !== 'number') && hasNewPhotos) {
+        const gpsList = uploadImagePreviews.filter(
+          (p) => typeof p.lat === 'number' && typeof p.lng === 'number'
+        );
+        if (gpsList.length > 0) {
+          nextDestLat =
+            Math.round((gpsList.reduce((acc, p) => acc + (p.lat || 0), 0) / gpsList.length) * 1000000) /
+            1000000;
+          nextDestLng =
+            Math.round((gpsList.reduce((acc, p) => acc + (p.lng || 0), 0) / gpsList.length) * 1000000) /
+            1000000;
+        }
+      }
 
       await onUpdateTrip({
         ...trip,
@@ -1084,20 +1297,24 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       });
       didSave = true;
 
-      if (auth.currentUser) {
+      if (driveAttemptedCount > 0 && driveFailedCount > 0) {
         setToastMessage(
-          nextDriveFolderId && uploadImagePreviews.some((p) => p.rawFile) && hasDriveAccessToken()
-            ? '📸 回憶照片與 Google Drive 原圖皆已備份完成！'
-            : '📸 回憶照片已成功同步至雲端資料庫！'
+          `📸 相片已儲存！Google Drive 原圖完成 ${driveUploadedCount}/${driveAttemptedCount} 張（${driveFailedCount} 張待重試）`
         );
+      } else if (driveAttemptedCount > 0 && driveUploadedCount === driveAttemptedCount) {
+        setToastMessage('📸 回憶照片與 Google Drive 原圖皆已備份完成！');
+      } else if (auth.currentUser && isOnline) {
+        setToastMessage('📸 回憶照片已成功儲存並排入雲端同步！');
+      } else if (auth.currentUser && !isOnline) {
+        setToastMessage('📴 離線模式：照片已安全儲存在本機，連網後將自動同步');
       } else {
-        setToastMessage('💾 照片已儲存至本機！建議登入 Google 帳號以啟用雲端同步');
+        setToastMessage('💾 照片已儲存至本機！登入 Google 帳號可跨裝置雲端備份');
       }
       setSaveSuccessToast(true);
-      setTimeout(() => setSaveSuccessToast(false), 3500);
+      setTimeout(() => setSaveSuccessToast(false), 3800);
     } catch (err) {
       console.error('Failed to save memory:', err);
-      setToastMessage('⚠️ 雲端連線異常，照片已安全暫存本機並加入離線佇列');
+      setToastMessage('⚠️ 儲存過程中發生異常，請確認後重試');
       setSaveSuccessToast(true);
       setTimeout(() => setSaveSuccessToast(false), 3500);
     } finally {
@@ -1118,19 +1335,25 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
       deletedItemIds[memId] = now;
     }
 
-    // Also cleanup spot reference if present
+    // Also cleanup spot reference (including legacy spot-mem-gphoto-* virtual cards!)
     let updatedDays = trip.days;
-    if (targetMem?.spotId && targetMem?.imageUrl) {
+    if (targetMem?.spotId) {
       updatedDays = trip.days.map((d) => ({
         ...d,
         items: d.items.map((item) => {
-          if (item.id === targetMem.spotId && item.memoryPhotos) {
-            return {
-              ...item,
-              memoryPhotos: item.memoryPhotos.filter((p) => p !== targetMem.imageUrl),
-            };
-          }
-          return item;
+          if (item.id !== targetMem.spotId) return item;
+          const nextPhotos =
+            targetMem.imageUrl && item.memoryPhotos
+              ? item.memoryPhotos.filter((p) => p !== targetMem.imageUrl)
+              : item.memoryPhotos;
+          const clearGphoto =
+            memId.startsWith('spot-mem-gphoto-') ||
+            (targetMem.imageUrl && item.googlePhotosUrl === targetMem.imageUrl);
+          return {
+            ...item,
+            memoryPhotos: nextPhotos && nextPhotos.length > 0 ? nextPhotos : undefined,
+            googlePhotosUrl: clearGphoto ? undefined : item.googlePhotosUrl,
+          };
         }),
       }));
     }
@@ -1239,6 +1462,14 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             margin-bottom: 20px;
             box-shadow: none !important;
             border: 1px solid #d1d5db !important;
+            background: #ffffff !important;
+            color: #1e293b !important;
+            transform: none !important;
+          }
+          .polaroid-card h4,
+          .polaroid-card p,
+          .polaroid-card span {
+            color: #1e293b !important;
           }
         }
       `}</style>
@@ -1354,7 +1585,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               <button
                 type="button"
                 onClick={handlePrintPolaroids}
-                className="min-h-[44px] sm:min-h-[40px] px-3.5 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs transition active:scale-95 cursor-pointer"
+                className="min-h-[44px] sm:min-h-[40px] px-3.5 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 hover:bg-teal-50 dark:hover:bg-slate-700 text-teal-800 dark:text-teal-300 border border-[#E5E2DC] dark:border-slate-700 text-xs font-bold flex items-center gap-1.5 shadow-2xs transition active:scale-95 cursor-pointer"
                 title="以 A4 或相片紙沖印拍立得卡片"
               >
                 <Printer className="w-3.5 h-3.5" />
@@ -1584,8 +1815,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             </div>
           </div>
 
-          {/* Unassigned / All-trip Custom Snapshots (自由漫遊隨拍) */}
-          {unassignedMemories.length > 0 && (
+          {/* Unassigned / All-trip Custom Snapshots (honors selectedDayFilter) */}
+          {unassignedMemories.length > 0 && (selectedDayFilter === 'all' || selectedDayFilter === 'custom') && (
             <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-5 shadow-2xs space-y-3">
               <div className="flex items-center justify-between pb-2 border-b border-[#E5E2DC] dark:border-slate-800">
                 <div className="flex items-center gap-2">
@@ -1686,8 +1917,13 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             </div>
           )}
 
-          {/* Days Loop */}
-          {trip.days.map((day) => {
+          {/* Days Loop (honors selectedDayFilter) */}
+          {(selectedDayFilter === 'all'
+            ? trip.days
+            : selectedDayFilter === 'custom'
+            ? []
+            : trip.days.filter((d) => d.dayNumber === selectedDayFilter)
+          ).map((day) => {
             const daySpots = day.items || [];
             const dayMemories = allMemories.filter((m) => m.dayNumber === day.dayNumber);
             const customDayMemories = dayMemories.filter((m) => !daySpots.some((s) => s.id === m.spotId));
@@ -2232,14 +2468,26 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       </button>
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDeleteMemId(mem.id)}
-                      className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
-                      title="刪除此照片"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) => handleOpenEditMemory(mem, e)}
+                        className="min-w-[40px] min-h-[40px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-lg text-slate-400 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
+                        title="編輯回憶文字與標籤"
+                        aria-label="編輯回憶"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteMemId(mem.id)}
+                        className="min-w-[40px] min-h-[40px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                        title="刪除此照片"
+                        aria-label="刪除此照片"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -2385,9 +2633,9 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             title={lang === 'zh' ? '新增回憶照片' : 'Add Memory Photo'}
             subtitle={lang === 'zh' ? '關聯行程景點與心得隨筆' : 'Link spot & notes'}
             leftLabel="取消"
-            leftDisabled={isSavingMemory}
+            leftDisabled={isSavingMemory || isProcessingImage}
             onLeftClick={() => {
-              if (!isSavingMemory) closeUploadModalAndCleanup();
+              if (!isSavingMemory && !isProcessingImage) closeUploadModalAndCleanup();
             }}
             rightLabel={
               isSavingMemory
@@ -2823,7 +3071,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   <IosDisclosureRow
                     label="歸屬日程天數"
                     value={(() => {
-                      if (customDayNumber === 'all') return '全行程通則';
+                      if (customDayNumber === 'all') return '自動依照片日期 / 全行程';
                       const matchedDay = trip.days.find((d) => d.dayNumber === customDayNumber);
                       return matchedDay
                         ? `Day ${matchedDay.dayNumber} (${formatMonthDaySlash(matchedDay.date)})`
@@ -2835,7 +3083,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                   >
                     <div className="max-h-52 overflow-y-auto divide-y divide-[#E5E2DC]/65 dark:divide-slate-800/70">
                       <IosCheckmarkRow
-                        label="全行程通則"
+                        label="自動依照片日期 / 全行程"
+                        subtitle="多天批次上傳時自動對應行程天數"
                         selected={customDayNumber === 'all'}
                         onSelect={() => {
                           setCustomDayNumber('all');
@@ -2939,7 +3188,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 </div>
                 <input
                   id="mem-gphoto-url"
-                  type="url"
+                  type="text"
+                  inputMode="url"
                   value={uploadGooglePhotosUrl}
                   onChange={(e) => setUploadGooglePhotosUrl(e.target.value)}
                   placeholder="https://photos.app.goo.gl/..."
@@ -2951,10 +3201,10 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         </IosModalSheet>
       )}
 
-      {/* ================= 4. FULLSCREEN LIGHTBOX PREVIEW ================= */}
-      {lightboxMemory && (
+      {/* ================= 4. FULLSCREEN LIGHTBOX PREVIEW (Portaled) ================= */}
+      {lightboxMemory && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center px-2 sm:p-6 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] bg-black/95 backdrop-blur-md animate-in fade-in duration-150"
+          className="fixed inset-0 z-[95] flex items-center justify-center px-2 sm:p-6 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] bg-black/95 backdrop-blur-md animate-in fade-in duration-150"
           onClick={() => setLightboxMemory(null)}
           onTouchStart={(e) => e.stopPropagation()}
           onTouchEnd={(e) => e.stopPropagation()}
@@ -2972,12 +3222,12 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               {canShowUploadAction && (
                 <button
                   type="button"
-                  onClick={() => setIsEditingLightboxUrl(!isEditingLightboxUrl)}
+                  onClick={() => handleOpenEditMemory(lightboxMemory)}
                   className="min-h-[40px] px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/90 text-teal-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-white/20 shadow-sm cursor-pointer"
-                  title="編輯此照片的 Google 相簿連結"
+                  title="編輯照片文字、心情、地點與日期"
                 >
                   <Edit2 className="w-3 h-3" />
-                  <span className="hidden sm:inline">{isEditingLightboxUrl ? '收合編輯' : '修改原圖連結'}</span>
+                  <span className="hidden sm:inline">編輯資訊</span>
                 </button>
               )}
               {sanitizeExternalUrl(lightboxMemory.googlePhotosUrl || trip.googlePhotosAlbumUrl) && (
@@ -3253,12 +3503,16 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       if (!lightboxMemory.driveFileId) return;
                       setIsDownloadingDriveOriginal(true);
                       try {
-                        const ext =
-                          lightboxMemory.originalMimeType === 'image/png'
-                            ? 'png'
-                            : lightboxMemory.originalMimeType === 'image/webp'
-                            ? 'webp'
-                            : 'jpg';
+                        const mime = (lightboxMemory.originalMimeType || '').toLowerCase();
+                        const ext = mime.includes('png')
+                          ? 'png'
+                          : mime.includes('webp')
+                          ? 'webp'
+                          : mime.includes('heic') || mime.includes('heif')
+                          ? 'heic'
+                          : mime.includes('gif')
+                          ? 'gif'
+                          : 'jpg';
                         const safeName = `${lightboxMemory.date || 'hiyori'}_${lightboxMemory.spotTitle || 'photo'}.${ext}`.replace(
                           /[\\/:*?"<>|]/g,
                           '_'
@@ -3304,7 +3558,154 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ================= 4.5 EDIT MEMORY METADATA MODAL ================= */}
+      {editingMemory && canEdit && (
+        <IosModalSheet
+          variant="grouped"
+          maxWidthClass="sm:max-w-lg"
+          zIndexClass="z-[105]"
+          onClose={() => setEditingMemory(null)}
+          ariaLabel="編輯回憶相片資訊"
+        >
+          <IosNavBar
+            title="編輯回憶資訊"
+            leftLabel="取消"
+            onLeftClick={() => setEditingMemory(null)}
+            rightLabel="儲存"
+            rightType="submit"
+            rightFormId="memory-edit-form"
+          />
+          <form
+            id="memory-edit-form"
+            onSubmit={handleSaveEditedMemory}
+            className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 space-y-5 text-xs pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]"
+          >
+            <IosInsetGroup header="地點與時間">
+              <div className="px-4 py-2.5 flex items-center justify-between gap-3 min-h-[48px]">
+                <label htmlFor="edit-mem-loc" className="text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0">
+                  地點名稱
+                </label>
+                <input
+                  id="edit-mem-loc"
+                  type="text"
+                  value={editLocation}
+                  onChange={(e) => setEditLocation(e.target.value)}
+                  placeholder="輸入地點名稱"
+                  className="flex-1 min-w-0 text-right bg-transparent text-[16px] sm:text-xs font-medium text-slate-900 dark:text-white outline-none placeholder:text-slate-400"
+                />
+              </div>
+
+              <IosDisclosureRow
+                label="歸屬日程"
+                value={
+                  editDayNumber === 'all'
+                    ? '自由漫遊（不綁定天數）'
+                    : (() => {
+                        const matched = trip.days.find((d) => d.dayNumber === editDayNumber);
+                        return matched ? `Day ${matched.dayNumber} (${formatMonthDaySlash(matched.date)})` : `Day ${editDayNumber}`;
+                      })()
+                }
+                valueAccent={editDayNumber !== 'all'}
+                expanded={editPicker === 'day'}
+                onToggle={() => setEditPicker((p) => (p === 'day' ? 'none' : 'day'))}
+              >
+                <div className="max-h-48 overflow-y-auto divide-y divide-[#E5E2DC]/65 dark:divide-slate-800/70">
+                  <IosCheckmarkRow
+                    label="自由漫遊（不綁定天數）"
+                    selected={editDayNumber === 'all'}
+                    onSelect={() => {
+                      setEditDayNumber('all');
+                      setEditPicker('none');
+                    }}
+                  />
+                  {trip.days.map((d) => (
+                    <IosCheckmarkRow
+                      key={d.dayNumber}
+                      label={`Day ${d.dayNumber} (${formatMonthDaySlash(d.date)})`}
+                      selected={editDayNumber === d.dayNumber}
+                      onSelect={() => {
+                        setEditDayNumber(d.dayNumber);
+                        setEditDate(d.date);
+                        setEditPicker('none');
+                      }}
+                    />
+                  ))}
+                </div>
+              </IosDisclosureRow>
+
+              <div className="px-4 py-2.5 flex items-center justify-between gap-3 min-h-[48px]">
+                <label htmlFor="edit-mem-date" className="text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0">
+                  拍攝日期
+                </label>
+                <input
+                  id="edit-mem-date"
+                  type="date"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                  className="bg-transparent text-right text-[16px] sm:text-xs font-mono tabular-nums text-slate-900 dark:text-white outline-none"
+                />
+              </div>
+            </IosInsetGroup>
+
+            <IosInsetGroup header="心情、隨筆與相簿連結">
+              <IosDisclosureRow
+                label="心情氛圍"
+                value={`${editMood} ${PRESET_MOODS.find((m) => m.icon === editMood)?.label || ''}`}
+                valueAccent
+                expanded={editPicker === 'mood'}
+                onToggle={() => setEditPicker((p) => (p === 'mood' ? 'none' : 'mood'))}
+              >
+                <div className="max-h-48 overflow-y-auto divide-y divide-[#E5E2DC]/65 dark:divide-slate-800/70">
+                  {PRESET_MOODS.map((m) => (
+                    <IosCheckmarkRow
+                      key={m.label}
+                      icon={<span className="text-base">{m.icon}</span>}
+                      label={m.label}
+                      selected={editMood === m.icon}
+                      onSelect={() => {
+                        setEditMood(m.icon);
+                        setEditPicker('none');
+                      }}
+                    />
+                  ))}
+                </div>
+              </IosDisclosureRow>
+
+              <div className="px-4 py-3 space-y-1.5">
+                <label htmlFor="edit-mem-caption" className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  心得隨筆
+                </label>
+                <textarea
+                  id="edit-mem-caption"
+                  rows={3}
+                  value={editCaption}
+                  onChange={(e) => setEditCaption(e.target.value)}
+                  placeholder="寫下當時心情或旅途紀錄..."
+                  className="w-full bg-transparent text-[16px] sm:text-xs text-slate-900 dark:text-white outline-none resize-none placeholder:text-slate-400 leading-relaxed"
+                />
+              </div>
+
+              <div className="px-4 py-3 space-y-1.5">
+                <label htmlFor="edit-mem-gurl" className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  Google 相簿原圖連結（選填）
+                </label>
+                <input
+                  id="edit-mem-gurl"
+                  type="text"
+                  inputMode="url"
+                  value={editGoogleUrl}
+                  onChange={(e) => setEditGoogleUrl(e.target.value)}
+                  placeholder="https://photos.app.goo.gl/..."
+                  className="w-full bg-transparent text-[16px] sm:text-xs text-slate-900 dark:text-white outline-none placeholder:text-slate-400"
+                />
+              </div>
+            </IosInsetGroup>
+          </form>
+        </IosModalSheet>
       )}
 
       {/* ================= 5. EXPLICIT GOOGLE DRIVE DELETE CONFIRMATION (iOS Action Sheet) ================= */}

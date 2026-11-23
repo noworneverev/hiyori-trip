@@ -16,8 +16,12 @@ const LEGACY_STORAGE_KEY_TRIPS = 'wayfarer_trips_data_v1';
 const STORAGE_KEY_CURRENT_ID = 'hiyori_current_trip_id_v1';
 const LEGACY_STORAGE_KEY_CURRENT_ID = 'wayfarer_current_trip_id_v1';
 const STORAGE_KEY_PRESET_SEEDED = 'hiyori_preset_seeded_v1';
+const STORAGE_KEY_DELETED_IDS = 'hiyori_deleted_trip_ids_v1';
+const LEGACY_STORAGE_KEY_DELETED_IDS = 'wayfarer_deleted_trip_ids_v1';
 
 let localTripsRevision = 0;
+// Authoritative in-memory store synced with IndexedDB so 5MB localStorage quota overflow never returns stale snapshots
+let authoritativeTripsCache: Trip[] | null = null;
 
 function normalizeAndCleanTrips(rawTrips: Trip[]): Trip[] {
   const deletedIds = new Set(getDeletedTripIds());
@@ -73,11 +77,17 @@ function normalizeAndCleanTrips(rawTrips: Trip[]): Trip[] {
     };
   }
 
-  localStorage.setItem(STORAGE_KEY_PRESET_SEEDED, '1');
+  try {
+    localStorage.setItem(STORAGE_KEY_PRESET_SEEDED, '1');
+  } catch {}
   return cleaned;
 }
 
 export function getStoredTrips(): Trip[] {
+  if (authoritativeTripsCache !== null) {
+    return authoritativeTripsCache;
+  }
+
   try {
     let raw = localStorage.getItem(STORAGE_KEY_TRIPS);
     if (!raw) {
@@ -85,26 +95,29 @@ export function getStoredTrips(): Trip[] {
     }
     if (!raw) {
       if (localStorage.getItem(STORAGE_KEY_PRESET_SEEDED) === '1') {
+        authoritativeTripsCache = [];
         return [];
       }
-      localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(PRESET_TRIPS));
-      localStorage.setItem(STORAGE_KEY_CURRENT_ID, PRESET_TRIPS[0].id);
-      localStorage.setItem(STORAGE_KEY_PRESET_SEEDED, '1');
+      authoritativeTripsCache = PRESET_TRIPS;
+      try {
+        localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(PRESET_TRIPS));
+        localStorage.setItem(STORAGE_KEY_CURRENT_ID, PRESET_TRIPS[0].id);
+        localStorage.setItem(STORAGE_KEY_PRESET_SEEDED, '1');
+      } catch {}
       return PRESET_TRIPS;
     }
     const trips = JSON.parse(raw);
     if (Array.isArray(trips)) {
       if (trips.length === 0) {
-        return localStorage.getItem(STORAGE_KEY_PRESET_SEEDED) === '1' ? [] : PRESET_TRIPS;
+        const res = localStorage.getItem(STORAGE_KEY_PRESET_SEEDED) === '1' ? [] : PRESET_TRIPS;
+        authoritativeTripsCache = res;
+        return res;
       }
       const cleaned = normalizeAndCleanTrips(trips);
-      try {
-        localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(cleaned));
-      } catch {
-        // QuotaExceededError safe ignore — IndexedDB holds full data
-      }
+      authoritativeTripsCache = cleaned;
       return cleaned;
     }
+    authoritativeTripsCache = PRESET_TRIPS;
     return PRESET_TRIPS;
   } catch (err) {
     console.error('Error loading trips from local storage:', err);
@@ -112,8 +125,23 @@ export function getStoredTrips(): Trip[] {
   }
 }
 
+export async function getStoredTripsAsync(): Promise<Trip[]> {
+  if (authoritativeTripsCache !== null) {
+    return authoritativeTripsCache;
+  }
+  try {
+    const idbTrips = await idbGetAllTrips();
+    if (idbTrips.length > 0) {
+      const cleaned = normalizeAndCleanTrips(idbTrips);
+      authoritativeTripsCache = cleaned;
+      return cleaned;
+    }
+  } catch {}
+  return getStoredTrips();
+}
+
 /**
- * Hydrate trips and media cache from IndexedDB on startup, migrating legacy localStorage inline photos.
+ * Hydrate trips and bounded media cache from IndexedDB on startup, migrating legacy localStorage inline photos.
  */
 export async function hydrateStorageFromIndexedDB(): Promise<Trip[]> {
   const startRevision = localTripsRevision;
@@ -125,7 +153,6 @@ export async function hydrateStorageFromIndexedDB(): Promise<Trip[]> {
     }
     if (idbTrips && idbTrips.length > 0) {
       const cleaned = normalizeAndCleanTrips(idbTrips);
-      // Ensure any stray inline images are offloaded to IndexedDB media store
       const migrated: Trip[] = [];
       for (const t of cleaned) {
         const { trip: lightweight } = await extractInlineImagesToMediaRefs(t);
@@ -136,16 +163,14 @@ export async function hydrateStorageFromIndexedDB(): Promise<Trip[]> {
       }
       const deletedSet = new Set(getDeletedTripIds());
       const finalMigrated = migrated.filter((t) => !deletedSet.has(t.id));
+      authoritativeTripsCache = finalMigrated;
       await idbSaveAllTrips(finalMigrated);
       try {
         localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(finalMigrated));
-      } catch {
-        // Ignore if localStorage exceeds quota
-      }
+      } catch {}
       return finalMigrated;
     }
 
-    // First migration from localStorage -> IndexedDB
     const localTrips = getStoredTrips();
     const migrated: Trip[] = [];
     for (const t of localTrips) {
@@ -157,12 +182,11 @@ export async function hydrateStorageFromIndexedDB(): Promise<Trip[]> {
     }
     const deletedSet = new Set(getDeletedTripIds());
     const finalMigrated = migrated.filter((t) => !deletedSet.has(t.id));
+    authoritativeTripsCache = finalMigrated;
     await idbSaveAllTrips(finalMigrated);
     try {
       localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(finalMigrated));
-    } catch {
-      // Ignore
-    }
+    } catch {}
     return finalMigrated;
   } catch (err) {
     console.warn('[Storage] IndexedDB hydration fallback:', err);
@@ -182,8 +206,9 @@ export function saveTrips(trips: Trip[]): void {
     }
   });
   const deduped = Array.from(uniqueMap.values());
+  authoritativeTripsCache = deduped;
 
-  // 1. Primary durable persistence in IndexedDB (async, 100MB+ capacity)
+  // 1. Primary durable persistence in IndexedDB (serialized queue, 100MB+ capacity)
   idbSaveAllTrips(deduped).catch((err) => {
     console.warn('[Storage] IndexedDB save warning:', err);
   });
@@ -200,11 +225,10 @@ export function saveTrips(trips: Trip[]): void {
   }
 }
 
-/**
- * Clear cloud-synced and account-owned cached trips on explicit sign-out so re-login
- * always reconciles cleanly from Firestore without resurrecting stale or deleted trips.
- */
-export function clearAccountTripsOnLogout(signedOutUid?: string, pendingQueuedTripIds: string[] = []): Trip[] {
+export function clearAccountTripsOnLogout(
+  signedOutUid?: string,
+  pendingQueuedTripIds: string[] = []
+): Trip[] {
   localTripsRevision++;
   const pendingSet = new Set(pendingQueuedTripIds);
   const current = getStoredTrips();
@@ -221,9 +245,9 @@ export function clearAccountTripsOnLogout(signedOutUid?: string, pendingQueuedTr
   try {
     localStorage.setItem(STORAGE_KEY_PRESET_SEEDED, '1');
     localStorage.removeItem(STORAGE_KEY_CURRENT_ID);
-  } catch {
-    // Ignore
-  }
+    // Clear account-specific deleted IDs on logout so switching accounts on the same device never hides Account B's trips
+    localStorage.removeItem(STORAGE_KEY_DELETED_IDS);
+  } catch {}
 
   saveTrips(retained);
   if (typeof window !== 'undefined') {
@@ -238,6 +262,7 @@ export function clearAccountTripsOnLogout(signedOutUid?: string, pendingQueuedTr
 
 export async function resetAllLocalData(): Promise<void> {
   localTripsRevision++;
+  authoritativeTripsCache = null;
   await idbClearAll();
   localStorage.clear();
 }
@@ -250,25 +275,23 @@ export function getCurrentTripId(): string {
     if (id) return id;
     const trips = getStoredTrips();
     if (trips.length > 0) return trips[0].id;
-  } catch {
-    // fallback
-  }
+  } catch {}
   return localStorage.getItem(STORAGE_KEY_PRESET_SEEDED) === '1' ? '' : PRESET_TRIPS[0].id;
 }
 
 export function setCurrentTripId(id: string): void {
-  localStorage.setItem(STORAGE_KEY_CURRENT_ID, id);
+  try {
+    localStorage.setItem(STORAGE_KEY_CURRENT_ID, id);
+  } catch {}
 }
-
-const STORAGE_KEY_DELETED_IDS = 'hiyori_deleted_trip_ids_v1';
-const LEGACY_STORAGE_KEY_DELETED_IDS = 'wayfarer_deleted_trip_ids_v1';
 
 export function getDeletedTripIds(): string[] {
   try {
     const raw =
       localStorage.getItem(STORAGE_KEY_DELETED_IDS) ||
       localStorage.getItem(LEGACY_STORAGE_KEY_DELETED_IDS);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -282,9 +305,7 @@ export function recordDeletedTripId(tripId: string): void {
       current.push(tripId);
       localStorage.setItem(STORAGE_KEY_DELETED_IDS, JSON.stringify(current.slice(-100)));
     }
-  } catch {
-    // Ignore
-  }
+  } catch {}
 }
 
 export function clearDeletedTripId(tripId: string): void {
@@ -292,14 +313,13 @@ export function clearDeletedTripId(tripId: string): void {
   try {
     const current = getDeletedTripIds().filter((id) => id !== tripId);
     localStorage.setItem(STORAGE_KEY_DELETED_IDS, JSON.stringify(current));
-  } catch {
-    // Ignore
-  }
+  } catch {}
 }
 
 export function getStorageUsage(): { bytes: number; formatted: string; count: number } {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_TRIPS) || '';
+    const trips = getStoredTrips();
+    const raw = JSON.stringify(trips);
     const bytes = new Blob([raw]).size;
     const formatted =
       bytes < 1024
@@ -307,7 +327,6 @@ export function getStorageUsage(): { bytes: number; formatted: string; count: nu
         : bytes < 1024 * 1024
         ? `${(bytes / 1024).toFixed(1)} KB`
         : `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-    const trips = getStoredTrips();
     return { bytes, formatted, count: trips.length };
   } catch {
     return { bytes: 0, formatted: '0 KB', count: 0 };
@@ -346,27 +365,23 @@ function triggerBlobDownload(blob: Blob, filename: string): void {
   const downloadAnchor = document.createElement('a');
   downloadAnchor.href = url;
   downloadAnchor.download = filename;
+  downloadAnchor.rel = 'noopener';
   document.body.appendChild(downloadAnchor);
   downloadAnchor.click();
   downloadAnchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  // Generous 30s timeout so large multi-MB photo backups never abort on mobile browsers
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-/**
- * Download a trip as self-contained JSON backup (using Blob + hydrated media:// photos)
- */
 export async function exportTripToJSON(trip: Trip): Promise<void> {
   const hydrated = await hydrateTripMediaForExport(trip);
   const blob = new Blob([JSON.stringify(hydrated, null, 2)], {
     type: 'application/json;charset=utf-8',
   });
-  const safeTitle = trip.title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_');
+  const safeTitle = (trip.title || 'trip').replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_');
   triggerBlobDownload(blob, `${safeTitle}_行程備份.json`);
 }
 
-/**
- * Download all trips as self-contained JSON database backup
- */
 export async function exportAllTripsToJSON(trips: Trip[]): Promise<void> {
   const hydratedList = await Promise.all((trips || []).map((t) => hydrateTripMediaForExport(t)));
   const blob = new Blob([JSON.stringify(hydratedList, null, 2)], {
@@ -375,17 +390,21 @@ export async function exportAllTripsToJSON(trips: Trip[]): Promise<void> {
   triggerBlobDownload(blob, `日和手帳_所有旅遊行程完整備份_${getTodayLocal()}.json`);
 }
 
+/**
+ * RFC-4180 CSV escaping with Formula Injection (CWE-1236) neutralization.
+ */
 function escapeCSVCell(value: unknown): string {
-  const str = value === null || value === undefined ? '' : String(value);
+  let str = value === null || value === undefined ? '' : String(value);
+  // Prevent spreadsheet formula execution when opening shared/imported trips in Excel/Sheets
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
   if (/[",\r\n]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
 }
 
-/**
- * Export trip itinerary as UTF-8 BOM RFC-4180 CSV spreadsheet (Excel & Google Sheets friendly)
- */
 export function exportTripToCSV(trip: Trip): void {
   const headers = [
     'Day',
@@ -447,26 +466,30 @@ export function exportTripToCSV(trip: Trip): void {
   const blob = new Blob(['\uFEFF' + csvBody], {
     type: 'text/csv;charset=utf-8',
   });
-  const safeTitle = trip.title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_');
+  const safeTitle = (trip.title || 'trip').replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_');
   triggerBlobDownload(blob, `${safeTitle}_行程表.csv`);
 }
 
-/**
- * Export complete trip (schedule, todos, packing list, expenses, emergency contacts) as Markdown
- */
+function escapeMarkdownCell(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\|/g, '\\|')
+    .replace(/\r?\n/g, ' ');
+}
+
 export function exportTripToMarkdown(trip: Trip): void {
+  const budgetStr = Number(trip.budgetTotal || 0).toLocaleString();
   let md = `# ✈️ ${trip.title}\n\n`;
   md += `**目的地:** ${trip.destination}\n`;
   md += `**日期:** ${trip.startDate} ~ ${trip.endDate}\n`;
-  md += `**幣別 / 預算:** ${trip.currency} ${trip.budgetTotal.toLocaleString()}\n`;
+  md += `**幣別 / 預算:** ${trip.currency} ${budgetStr}\n`;
   if (trip.notes) md += `**備註事項:** ${trip.notes}\n`;
   md += `\n---\n\n`;
 
-  trip.days.forEach((day) => {
+  (trip.days || []).forEach((day) => {
     md += `## 📅 第 ${day.dayNumber} 天 (${day.date})${day.theme ? ` - ${day.theme}` : ''}\n`;
     if (day.notes) md += `*每日叮嚀: ${day.notes}*\n\n`;
 
-    day.items.forEach((item, idx) => {
+    (day.items || []).forEach((item, idx) => {
       md += `### ${idx + 1}. [${item.startTime}${item.endTime ? ` - ${item.endTime}` : ''}] ${item.title}\n`;
       if (item.locationName) md += `- **地點:** ${item.locationName}\n`;
       if (item.address) md += `- **地址:** ${item.address}\n`;
@@ -504,7 +527,7 @@ export function exportTripToMarkdown(trip: Trip): void {
     md += `| --- | --- | --- | --- | --- | --- |\n`;
     trip.expenses.forEach((exp) => {
       const catLabel = trip.customCategoryLabels?.[exp.category] || exp.category;
-      md += `| ${exp.date} | ${exp.title} | ${catLabel} | ${exp.currency} ${exp.amount.toLocaleString()} | ${exp.paymentMethod} | ${exp.notes || ''} |\n`;
+      md += `| ${escapeMarkdownCell(exp.date)} | ${escapeMarkdownCell(exp.title)} | ${escapeMarkdownCell(catLabel)} | ${escapeMarkdownCell(exp.currency)} ${Number(exp.amount || 0).toLocaleString()} | ${escapeMarkdownCell(exp.paymentMethod)} | ${escapeMarkdownCell(exp.notes || '')} |\n`;
     });
     md += `\n`;
   }
@@ -518,7 +541,7 @@ export function exportTripToMarkdown(trip: Trip): void {
   }
 
   const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-  const safeTitle = trip.title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_');
+  const safeTitle = (trip.title || 'trip').replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, '_');
   triggerBlobDownload(blob, `${safeTitle}_行程清單.md`);
 }
 
@@ -535,15 +558,21 @@ export function parseTextItinerary(rawText: string, tripTitle = '匯入的旅遊
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    const dayMatch = line.match(/^(?:Day\s*(\d+)|第\s*([一二三四五六七八九十\d]+)\s*天|D(\d+))/i);
-    if (dayMatch || line.startsWith('### Day') || line.startsWith('## Day')) {
-      const dayNum = dayCounter++;
-      const theme = line
-        .replace(/^(?:Day\s*\d+|第[一二三四五六七八九十\d]+天|D\d+|#+)\s*[:：\-]?\s*/i, '')
+    const strippedHeading = line.replace(/^#+\s*/, '');
+    const dayMatch = strippedHeading.match(
+      /^(?:Day\s*(\d+)|第\s*([一二三四五六七八九十\d]+)\s*天|D(\d+))(?:\s*[:：\-—–]|\s|$)/i
+    );
+    if (dayMatch) {
+      const parsedNum = Number(dayMatch[1] || dayMatch[3]);
+      const dayNum = Number.isInteger(parsedNum) && parsedNum > 0 ? parsedNum : dayCounter;
+      dayCounter = Math.max(dayCounter + 1, dayNum + 1);
+
+      const theme = strippedHeading
+        .replace(/^(?:Day\s*\d+|第\s*[一二三四五六七八九十\d]+\s*天|D\d+)\s*[:：\-—–]?\s*/i, '')
         .trim();
 
       currentDay = {
-        id: `imported-day-${Date.now()}-${dayNum}`,
+        id: `imported-day-${Date.now()}-${dayNum}-${i}`,
         dayNumber: dayNum,
         date: addDaysLocal(startDate, dayNum - 1),
         theme: theme || `第 ${dayNum} 天行程`,
@@ -577,7 +606,7 @@ export function parseTextItinerary(rawText: string, tripTitle = '匯入的旅遊
       else if (/買|購|商場|百貨|選品|伴手禮|超市/.test(content)) category = 'shopping';
 
       currentDay.items.push({
-        id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         title: content,
         category,
         startTime,
@@ -587,12 +616,13 @@ export function parseTextItinerary(rawText: string, tripTitle = '匯入的旅遊
       continue;
     }
 
-    const bulletMatch = line.match(/^[-*•\d+.]\s*(.*)$/);
-    const itemTitle = bulletMatch ? bulletMatch[1].trim() : line;
+    // Properly strip list bullets (`- `, `* `, `• `, `10. `, `1) `) without eating digits of `"2026年..."`
+    const bulletMatch = line.match(/^(?:[-*•]\s+|\d+[.)、]\s+)(.*)$/);
+    const itemTitle = (bulletMatch ? bulletMatch[1] : line).trim();
     if (itemTitle.length > 1) {
       const defaultTime = `${String(8 + Math.min(currentDay.items.length * 2, 12)).padStart(2, '0')}:00`;
       currentDay.items.push({
-        id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         title: itemTitle,
         category: 'spot',
         startTime: defaultTime,
@@ -604,7 +634,7 @@ export function parseTextItinerary(rawText: string, tripTitle = '匯入的旅遊
   const lastDayDate = days.length > 0 ? days[days.length - 1].date : startDate;
 
   return {
-    id: `trip-${Date.now()}`,
+    id: `trip-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     title: tripTitle || '匯入的旅遊新行程',
     destination: '自訂目的地',
     startDate,
@@ -624,6 +654,7 @@ export function parseTextItinerary(rawText: string, tripTitle = '匯入的旅遊
               items: [],
             },
           ],
+    todos: [],
     packingList: [
       { id: 'p1', name: '護照 / 身分證件', category: 'documents', packed: false, essential: true },
       { id: 'p2', name: '手機充電線 & 行動電源', category: 'electronics', packed: false, essential: true },
@@ -640,7 +671,7 @@ export function parseTextItinerary(rawText: string, tripTitle = '匯入的旅遊
 }
 
 /**
- * RFC-4180 compliant CSV parser handling quoted commas, escaped quotes (""), and multi-line cells
+ * RFC-4180 compliant CSV parser: only opens quotes at cell start so mid-cell quotes (`5" Ramen`) stay intact.
  */
 export function parseCSVRows(csvContent: string): string[][] {
   const clean = csvContent.replace(/^\uFEFF/, '');
@@ -663,7 +694,8 @@ export function parseCSVRows(csvContent: string): string[][] {
         currentCell += ch;
       }
     } else {
-      if (ch === '"') {
+      if (ch === '"' && currentCell.trim().length === 0) {
+        currentCell = '';
         inQuotes = true;
       } else if (ch === ',') {
         currentRow.push(currentCell.trim());
@@ -693,9 +725,6 @@ export function parseCSVRows(csvContent: string): string[][] {
   return rows;
 }
 
-/**
- * CSV Import Parser (RFC-4180 compliant)
- */
 export function parseCSVItinerary(csvContent: string): Trip {
   const rows = parseCSVRows(csvContent);
   if (rows.length < 2) {
@@ -722,11 +751,21 @@ export function parseCSVItinerary(csvContent: string): Trip {
   const noteIdx = headers.findIndex((h) => h.includes('note') || h.includes('備忘') || h.includes('備註'));
 
   const daysMap = new Map<number, { date?: string; theme?: string; items: ItineraryItem[] }>();
-  const validCats: Set<string> = new Set(['spot', 'food', 'transport', 'hotel', 'shopping', 'activity', 'other']);
+  const validCats: Set<string> = new Set([
+    'spot',
+    'food',
+    'transport',
+    'hotel',
+    'shopping',
+    'activity',
+    'other',
+  ]);
 
   for (let i = 1; i < rows.length; i++) {
     const cols = rows[i];
-    const dayNum = dayIdx !== -1 ? parseInt(cols[dayIdx], 10) || 1 : 1;
+    const dayRaw = dayIdx !== -1 ? cols[dayIdx] || '' : '';
+    const dayDigits = dayRaw.match(/(\d+)/);
+    const dayNum = dayDigits ? Math.max(1, parseInt(dayDigits[1], 10)) : 1;
     const rawTitle = titleIdx !== -1 ? cols[titleIdx] : cols[0] || '';
     const dateVal = dateIdx !== -1 ? cols[dateIdx] : undefined;
     const themeVal = themeIdx !== -1 ? cols[themeIdx] : undefined;
@@ -793,6 +832,7 @@ export function parseCSVItinerary(csvContent: string): Trip {
               items: [],
             },
           ],
+    todos: [],
     packingList: [],
     expenses: [],
     emergencyContacts: [],

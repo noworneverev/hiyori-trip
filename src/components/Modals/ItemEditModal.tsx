@@ -1,11 +1,17 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ItineraryItem, CategoryType } from '../../types/itinerary';
-import { searchLocationOSM } from '../../utils/geo';
+import {
+  searchLocationOSM,
+  isValidCoordinate,
+  looksLikeGoogleMapsUrl,
+  resolveGoogleMapsLink,
+} from '../../utils/geo';
 import { compressImageFile, storeImageAsMediaRef, extractMediaId, isMediaRef } from '../../utils/image';
 import { idbDeleteMedia } from '../../utils/indexedDb';
 import { sanitizeExternalUrl } from '../../utils/url';
 import { canUploadImages } from '../../utils/userPermissions';
 import { findInsertionPosition, checkItemTimeOverlap } from '../../utils/date';
+import { Language } from '../../utils/i18n';
 import { MediaImage } from '../UI/MediaImage';
 import {
   IosModalSheet,
@@ -40,19 +46,21 @@ import {
   AlertTriangle,
   X,
   Tag,
+  Link2,
 } from 'lucide-react';
 
 interface ItemEditModalProps {
   item?: ItineraryItem | null;
   dayNumber: number;
   currency: string;
+  lang?: Language;
   tripId?: string;
   ownerId?: string;
   collabId?: string;
   canEdit?: boolean;
   onSave: (itemData: Omit<ItineraryItem, 'id'>, existingId?: string) => void;
   onClose: () => void;
-  onStartMapPick?: () => void;
+  onStartMapPick?: (currentDraft?: Partial<ItineraryItem>) => void;
   pickedCoords?: { lat: number; lng: number } | null;
   existingDayItems?: ItineraryItem[];
   defaultStartTime?: string;
@@ -77,6 +85,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   item,
   dayNumber,
   currency,
+  lang = 'zh',
   tripId,
   ownerId,
   collabId,
@@ -98,24 +107,32 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   const [categoryExpanded, setCategoryExpanded] = useState(false);
   const [timeExpanded, setTimeExpanded] = useState(false);
   const [locationExpanded, setLocationExpanded] = useState(
-    Boolean(item?.locationName || item?.address || typeof item?.lat === 'number' || pickedCoords)
+    Boolean(item?.locationName || item?.address || isValidCoordinate(item?.lat, item?.lng) || pickedCoords)
   );
   const [transitExpanded, setTransitExpanded] = useState(Boolean(item?.transportNote));
   const [memoriesExpanded, setMemoriesExpanded] = useState(
     Boolean(item?.googlePhotosUrl || (item?.memoryPhotos && item.memoryPhotos.length > 0))
   );
 
-  // Detail fields
+  // Detail fields (string states for lat/lng allow smooth typing of negative coordinates like -33.8688)
+  const initialLat = pickedCoords ? pickedCoords.lat : item?.lat;
+  const initialLng = pickedCoords ? pickedCoords.lng : item?.lng;
   const [locationName, setLocationName] = useState(item?.locationName || '');
   const [address, setAddress] = useState(item?.address || '');
-  const [lat, setLat] = useState<number | undefined>(pickedCoords ? pickedCoords.lat : item?.lat);
-  const [lng, setLng] = useState<number | undefined>(pickedCoords ? pickedCoords.lng : item?.lng);
+  const [latText, setLatText] = useState<string>(
+    typeof initialLat === 'number' && Number.isFinite(initialLat) ? String(initialLat) : ''
+  );
+  const [lngText, setLngText] = useState<string>(
+    typeof initialLng === 'number' && Number.isFinite(initialLng) ? String(initialLng) : ''
+  );
   const [showRawCoords, setShowRawCoords] = useState(false);
 
   const [transportNote, setTransportNote] = useState(item?.transportNote || '');
   const [notes, setNotes] = useState(item?.notes || '');
   const [bookingCode, setBookingCode] = useState(item?.bookingCode || '');
-  const [cost, setCost] = useState<string>(item?.cost ? String(item.cost) : '');
+  const [cost, setCost] = useState<string>(
+    typeof item?.cost === 'number' && Number.isFinite(item.cost) ? String(item.cost) : ''
+  );
   const [costPaid, setCostPaid] = useState(item?.costPaid || false);
   const [memoryPhotos, setMemoryPhotos] = useState<string[]>(item?.memoryPhotos || []);
   const [memoryMood, setMemoryMood] = useState<string>(item?.memoryMood || '✨');
@@ -126,20 +143,38 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   const initialPhotosRef = useRef<string[]>(item?.memoryPhotos || []);
   const memoryPhotosRef = useRef<string[]>(memoryPhotos);
   const didSaveRef = useRef(false);
+  const isPickingMapRef = useRef(false);
 
   useEffect(() => {
     memoryPhotosRef.current = memoryPhotos;
   }, [memoryPhotos]);
 
-  // Search OSM
+  const parsedLat = useMemo(() => {
+    const trimmed = latText.trim();
+    if (!trimmed) return undefined;
+    const n = Number(trimmed);
+    return Number.isFinite(n) && n >= -90 && n <= 90 ? n : undefined;
+  }, [latText]);
+
+  const parsedLng = useMemo(() => {
+    const trimmed = lngText.trim();
+    if (!trimmed) return undefined;
+    const n = Number(trimmed);
+    return Number.isFinite(n) && n >= -180 && n <= 180 ? n : undefined;
+  }, [lngText]);
+
+  const hasValidCoords = isValidCoordinate(parsedLat, parsedLng);
+
+  // Search OSM & Google Maps Link Resolver
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Array<{ name: string; address: string; lat: number; lng: number }>>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [mapsLinkFeedback, setMapsLinkFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
   useEffect(() => {
-    if (pickedCoords) {
-      setLat(pickedCoords.lat);
-      setLng(pickedCoords.lng);
+    if (pickedCoords && isValidCoordinate(pickedCoords.lat, pickedCoords.lng)) {
+      setLatText(String(Number(pickedCoords.lat.toFixed(6))));
+      setLngText(String(Number(pickedCoords.lng.toFixed(6))));
       setLocationExpanded(true);
     }
   }, [pickedCoords]);
@@ -154,12 +189,14 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
       setShowEndTimeInput(Boolean(item.endTime));
       setLocationName(item.locationName || '');
       setAddress(item.address || '');
-      setLat(item.lat);
-      setLng(item.lng);
+      const nextLat = pickedCoords ? pickedCoords.lat : item.lat;
+      const nextLng = pickedCoords ? pickedCoords.lng : item.lng;
+      setLatText(typeof nextLat === 'number' && Number.isFinite(nextLat) ? String(nextLat) : '');
+      setLngText(typeof nextLng === 'number' && Number.isFinite(nextLng) ? String(nextLng) : '');
       setTransportNote(item.transportNote || '');
       setNotes(item.notes || '');
       setBookingCode(item.bookingCode || '');
-      setCost(item.cost ? String(item.cost) : '');
+      setCost(typeof item.cost === 'number' && Number.isFinite(item.cost) ? String(item.cost) : '');
       setCostPaid(item.costPaid || false);
       setMemoryPhotos(item.memoryPhotos || []);
       setMemoryMood(item.memoryMood || '✨');
@@ -168,7 +205,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   }, [item, defaultStartTime]);
 
   const handleClose = () => {
-    if (!didSaveRef.current) {
+    if (!didSaveRef.current && !isPickingMapRef.current) {
       memoryPhotosRef.current.forEach((ref) => {
         if (isMediaRef(ref) && !initialPhotosRef.current.includes(ref)) {
           const mid = extractMediaId(ref);
@@ -177,6 +214,34 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
       });
     }
     onClose();
+  };
+
+  // Preserve full unsaved draft when temporarily hiding modal to pick coordinates on map
+  const handleTriggerMapPick = () => {
+    if (!onStartMapPick) return;
+    isPickingMapRef.current = true;
+    const parsedCostNum = cost.trim() !== '' ? Number(cost) : undefined;
+    const draft: Partial<ItineraryItem> = {
+      id: item?.id,
+      title,
+      category,
+      startTime,
+      endTime: showEndTimeInput && endTime ? endTime : undefined,
+      locationName: locationName || undefined,
+      address: address || undefined,
+      lat: parsedLat,
+      lng: parsedLng,
+      transportNote: transportNote || undefined,
+      notes: notes || undefined,
+      bookingCode: bookingCode || undefined,
+      cost: typeof parsedCostNum === 'number' && Number.isFinite(parsedCostNum) && parsedCostNum >= 0 ? parsedCostNum : undefined,
+      costPaid,
+      memoryPhotos: memoryPhotos.length > 0 ? memoryPhotos : undefined,
+      memoryMood,
+      googlePhotosUrl: googlePhotosUrl || undefined,
+      completed: item?.completed,
+    };
+    onStartMapPick(draft);
   };
 
   const handlePhotoFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -215,10 +280,76 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     setMemoryPhotos((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const handleSearchOSM = async (queryText?: string) => {
-    const q = queryText ?? searchQuery;
-    if (!q.trim()) return;
+  const handleImportGoogleMapsUrl = async (rawUrl: string): Promise<boolean> => {
+    const trimmed = (rawUrl || '').trim();
+    if (!trimmed) return false;
     setIsSearching(true);
+    setMapsLinkFeedback(null);
+    setLocationExpanded(true);
+    try {
+      const { place, error } = await resolveGoogleMapsLink(trimmed);
+      if (error || !place) {
+        setMapsLinkFeedback({ type: 'err', text: error || '無法解析此 Google Maps 連結' });
+        return false;
+      }
+      if (place.name) {
+        setLocationName(place.name);
+        setTitle((prev) => (!prev.trim() || looksLikeGoogleMapsUrl(prev) ? place.name! : prev));
+      }
+      if (isValidCoordinate(place.lat, place.lng)) {
+        setLatText(String(Number(place.lat!.toFixed(6))));
+        setLngText(String(Number(place.lng!.toFixed(6))));
+      }
+      setSearchResults([]);
+      setSearchQuery('');
+      setMapsLinkFeedback({
+        type: 'ok',
+        text: place.name
+          ? `已從 Google Maps 帶入「${place.name}」與座標！`
+          : '已從 Google Maps 帶入精準座標！',
+      });
+      return true;
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handlePasteMapsFromClipboard = async () => {
+    setMapsLinkFeedback(null);
+    try {
+      if (navigator.clipboard?.readText) {
+        const clipText = (await navigator.clipboard.readText()).trim();
+        if (clipText) {
+          setSearchQuery(clipText);
+          if (looksLikeGoogleMapsUrl(clipText) || /^-?\d{1,2}\.\d{3,}\s*[,，\s]\s*-?\d{1,3}\.\d{3,}$/.test(clipText)) {
+            await handleImportGoogleMapsUrl(clipText);
+            return;
+          }
+          await handleSearchOSM(clipText);
+          return;
+        }
+      }
+      setMapsLinkFeedback({
+        type: 'err',
+        text: '請直接在上方輸入框貼上 Google Maps 分享連結。',
+      });
+    } catch {
+      setMapsLinkFeedback({
+        type: 'err',
+        text: '瀏覽器未授權自動讀取剪貼簿，請直接長按貼上至上方搜尋欄。',
+      });
+    }
+  };
+
+  const handleSearchOSM = async (queryText?: string) => {
+    const q = (queryText ?? searchQuery).trim();
+    if (!q) return;
+    if (looksLikeGoogleMapsUrl(q) || /^-?\d{1,2}\.\d{3,}\s*[,，\s]\s*-?\d{1,3}\.\d{3,}$/.test(q)) {
+      await handleImportGoogleMapsUrl(q);
+      return;
+    }
+    setIsSearching(true);
+    setMapsLinkFeedback(null);
     try {
       const results = await searchLocationOSM(q);
       setSearchResults(results);
@@ -231,17 +362,21 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     if (!title) setTitle(res.name);
     setLocationName(res.name);
     setAddress(res.address);
-    setLat(res.lat);
-    setLng(res.lng);
+    setLatText(String(Number(res.lat.toFixed(6))));
+    setLngText(String(Number(res.lng.toFixed(6))));
     setSearchResults([]);
     setSearchQuery('');
   };
 
+  // Fixed midnight `00:xx` falsy-zero bug (uses Number.isNaN instead of `|| 9`)
   const adjustStartTime = (minutesToAdd: number) => {
-    const [hStr, mStr] = startTime.split(':');
-    let total = (parseInt(hStr, 10) || 9) * 60 + (parseInt(mStr, 10) || 0) + minutesToAdd;
-    if (total >= 24 * 60) total %= 24 * 60;
-    if (total < 0) total += 24 * 60;
+    const [hStr, mStr] = (startTime || '09:00').split(':');
+    const parsedH = parseInt(hStr, 10);
+    const parsedM = parseInt(mStr, 10);
+    const baseH = Number.isNaN(parsedH) ? 9 : parsedH;
+    const baseM = Number.isNaN(parsedM) ? 0 : parsedM;
+    let total = baseH * 60 + baseM + minutesToAdd;
+    total = ((total % (24 * 60)) + 24 * 60) % (24 * 60);
     const h = Math.floor(total / 60);
     const m = total % 60;
     setStartTime(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
@@ -263,29 +398,36 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
     return checkItemTimeOverlap(
       { id: item?.id, title: title || '此行程', startTime, endTime: showEndTimeInput ? endTime : undefined },
       othersInDay,
-      'zh'
+      lang
     );
-  }, [item?.id, title, startTime, endTime, showEndTimeInput, othersInDay]);
+  }, [item?.id, title, startTime, endTime, showEndTimeInput, othersInDay, lang]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit || !title.trim()) return;
+
+    const rawCost = cost.trim() !== '' ? Number(cost) : undefined;
+    const validCost =
+      typeof rawCost === 'number' && Number.isFinite(rawCost) && rawCost >= 0 ? rawCost : undefined;
+
+    const finalLat = hasValidCoords ? parsedLat : undefined;
+    const finalLng = hasValidCoords ? parsedLng : undefined;
 
     didSaveRef.current = true;
     onSave(
       {
         title: title.trim(),
         category,
-        startTime,
+        startTime: startTime || '09:00',
         endTime: showEndTimeInput && endTime ? endTime : undefined,
         locationName: locationName.trim() || undefined,
         address: address.trim() || undefined,
-        lat,
-        lng,
+        lat: finalLat,
+        lng: finalLng,
         transportNote: transportNote.trim() || undefined,
         notes: notes.trim() || undefined,
         bookingCode: bookingCode.trim() || undefined,
-        cost: cost ? parseFloat(cost) : undefined,
+        cost: validCost,
         costPaid,
         memoryPhotos: memoryPhotos.length > 0 ? memoryPhotos : undefined,
         memoryMood: memoryMood || '✨',
@@ -298,24 +440,23 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 
   const activeCategoryObj = CATEGORIES.find((c) => c.type === category) || CATEGORIES[0];
   const ActiveCategoryIcon = activeCategoryObj.icon;
-  const hasCoords = typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng);
 
   return (
     <IosModalSheet
       onClose={handleClose}
       maxWidthClass="sm:max-w-xl"
       variant="grouped"
-      ariaLabel={item ? '編輯景點' : `新增第 ${dayNumber} 天行程`}
+      ariaLabel={item?.id ? '編輯景點' : `新增第 ${dayNumber} 天行程`}
     >
       <IosNavBar
-        title={item ? '編輯行程景點' : `新增第 ${dayNumber} 天`}
+        title={item?.id ? '編輯行程景點' : `新增第 ${dayNumber} 天`}
         subtitle={`自動排於第 ${insertionPreview.targetIndex + 1} 站`}
         leftLabel="取消"
         onLeftClick={handleClose}
-        rightLabel={item ? '儲存' : '加入'}
+        rightLabel={item?.id ? '儲存' : '加入'}
         rightType="submit"
         rightFormId="item-edit-form"
-        rightDisabled={!canEdit || !title.trim()}
+        rightDisabled={!canEdit || !title.trim() || isUploadingPhoto}
       />
 
       <form
@@ -325,19 +466,26 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
       >
         {/* Group 1: Core Info */}
         <IosInsetGroup header="基本資訊">
-          {/* Spot Name Row */}
-          <div className="px-4 py-2.5 min-h-[50px] flex items-center justify-between gap-2">
-            <label className="text-sm sm:text-xs font-semibold text-slate-800 dark:text-slate-200 shrink-0 w-20">
+          {/* Spot Name Row — left-aligned on mobile for comfortable iOS cursor placement */}
+          <div className="px-4 py-2.5 space-y-1.5 sm:space-y-0 sm:min-h-[50px] sm:flex sm:items-center sm:justify-between sm:gap-2">
+            <label className="text-[11px] sm:text-xs font-semibold text-slate-500 sm:text-slate-800 dark:text-slate-400 sm:dark:text-slate-200 shrink-0 sm:w-20 block">
               景點名稱<span className="text-rose-500 ml-0.5">*</span>
             </label>
-            <div className="flex-1 min-w-0 flex items-center justify-end gap-1.5">
+            <div className="flex-1 min-w-0 flex items-center gap-1.5">
               <input
                 type="text"
                 required
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="輸入景點或餐廳名稱..."
-                className="min-w-0 flex-1 bg-transparent text-right text-[16px] sm:text-xs font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
+                onPaste={(e) => {
+                  const pasted = e.clipboardData?.getData('text') || '';
+                  if (looksLikeGoogleMapsUrl(pasted)) {
+                    e.preventDefault();
+                    void handleImportGoogleMapsUrl(pasted);
+                  }
+                }}
+                placeholder="輸入景點名稱，或直接貼上 Google Maps 連結..."
+                className="min-w-0 flex-1 bg-transparent text-left sm:text-right text-[16px] sm:text-xs font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
               />
               {title.trim().length >= 2 && !address && (
                 <button
@@ -356,7 +504,6 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             </div>
           </div>
 
-          {/* Inline Category Disclosure Row */}
           <IosDisclosureRow
             icon={<Tag className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
             label="行程類別"
@@ -389,7 +536,6 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             </div>
           </IosDisclosureRow>
 
-          {/* Inline Schedule Time Disclosure Row */}
           <IosDisclosureRow
             icon={<Clock className={`w-4 h-4 ${timeWarnings.length > 0 ? 'text-amber-600' : 'text-teal-700 dark:text-teal-400'}`} />}
             label="安排時間"
@@ -412,7 +558,6 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                   </label>
                   <input
                     type="time"
-                    required
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
                     className="w-full min-h-[42px] px-3 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 font-mono tabular-nums font-bold text-[16px] sm:text-xs outline-none focus:border-teal-600"
@@ -457,7 +602,6 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                 )}
               </div>
 
-              {/* Quick Time Jump Bar */}
               <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar text-[11px]">
                 {[
                   { label: '+30分', onClick: () => adjustStartTime(30) },
@@ -500,22 +644,29 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             value={
               locationName
                 ? locationName
-                : hasCoords
-                ? `${lat!.toFixed(3)}, ${lng!.toFixed(3)}`
-                : '選填'
+                : hasValidCoords
+                  ? `${parsedLat!.toFixed(3)}, ${parsedLng!.toFixed(3)}`
+                  : '選填'
             }
             expanded={locationExpanded}
             onToggle={() => setLocationExpanded((v) => !v)}
           >
             <div className="p-3.5 space-y-3">
-              {/* OSM Search & Map Pick */}
               <div className="relative space-y-2">
                 <div className="flex items-center gap-1.5">
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="搜尋地名自動填入地址與座標..."
+                    onPaste={(e) => {
+                      const pasted = e.clipboardData?.getData('text') || '';
+                      if (looksLikeGoogleMapsUrl(pasted)) {
+                        e.preventDefault();
+                        setSearchQuery(pasted);
+                        void handleImportGoogleMapsUrl(pasted);
+                      }
+                    }}
+                    placeholder="搜尋地名，或貼上 Google Maps 連結..."
                     className="min-w-0 flex-1 min-h-[40px] px-3 py-1.5 text-[16px] sm:text-xs bg-white dark:bg-slate-900 rounded-xl border border-[#E5E2DC] dark:border-slate-700 text-slate-900 dark:text-slate-100 outline-none focus:border-teal-600"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -536,7 +687,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                   {onStartMapPick && (
                     <button
                       type="button"
-                      onClick={onStartMapPick}
+                      onClick={handleTriggerMapPick}
                       className="min-h-[40px] px-3 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-bold flex items-center gap-1 shrink-0 cursor-pointer"
                     >
                       <Map className="w-3.5 h-3.5" />
@@ -544,6 +695,36 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                     </button>
                   )}
                 </div>
+
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handlePasteMapsFromClipboard}
+                    disabled={isSearching}
+                    className="min-h-[34px] px-2.5 py-1 rounded-lg bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/70 border border-teal-200/80 dark:border-teal-800/70 text-teal-800 dark:text-teal-300 text-[11px] font-bold inline-flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Link2 className="w-3.5 h-3.5 shrink-0" />
+                    <span>一鍵貼上 Google Maps 連結</span>
+                  </button>
+                  <span className="text-[10px] text-slate-400">支援 maps.app.goo.gl、完整網址或座標</span>
+                </div>
+
+                {mapsLinkFeedback && (
+                  <div
+                    className={`px-3 py-2 rounded-xl text-[11px] font-semibold flex items-center gap-1.5 ${
+                      mapsLinkFeedback.type === 'ok'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300'
+                        : 'bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-300'
+                    }`}
+                  >
+                    {mapsLinkFeedback.type === 'ok' ? (
+                      <Check className="w-3.5 h-3.5 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                    <span>{mapsLinkFeedback.text}</span>
+                  </div>
+                )}
 
                 {searchResults.length > 0 && (
                   <div className="bg-white dark:bg-slate-900 rounded-xl border border-[#E5E2DC] dark:border-slate-700 max-h-44 overflow-y-auto divide-y divide-[#E5E2DC]/60 dark:divide-slate-800">
@@ -566,20 +747,20 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
               </div>
 
               <div className="rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 divide-y divide-[#E5E2DC]/75 dark:divide-slate-800">
-                <div className="px-3.5 py-2 flex items-center justify-between gap-3 min-h-[44px]">
-                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0">
+                <div className="px-3.5 py-2 space-y-1 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
+                  <label className="text-[11px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 shrink-0 block">
                     地標名稱
                   </label>
                   <input
                     type="text"
                     value={locationName}
                     onChange={(e) => setLocationName(e.target.value)}
-                    placeholder="例如：名古屋城天守閣"
-                    className="min-w-0 flex-1 bg-transparent text-right text-[16px] sm:text-xs text-slate-900 dark:text-white outline-none"
+                    placeholder="例如：兼六園桂坂口"
+                    className="w-full sm:flex-1 bg-transparent text-left sm:text-right text-[16px] sm:text-xs text-slate-900 dark:text-white outline-none"
                   />
                 </div>
-                <div className="px-3.5 py-2 flex items-center justify-between gap-3 min-h-[44px]">
-                  <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 shrink-0">
+                <div className="px-3.5 py-2 space-y-1 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
+                  <label className="text-[11px] sm:text-xs font-semibold text-slate-500 dark:text-slate-400 shrink-0 block">
                     詳細地址
                   </label>
                   <input
@@ -587,17 +768,17 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
                     placeholder="選填"
-                    className="min-w-0 flex-1 bg-transparent text-right text-[16px] sm:text-xs text-slate-900 dark:text-white outline-none"
+                    className="w-full sm:flex-1 bg-transparent text-left sm:text-right text-[16px] sm:text-xs text-slate-900 dark:text-white outline-none"
                   />
                 </div>
               </div>
 
               <div className="flex items-center justify-between text-[11px]">
                 <div className="text-slate-500 dark:text-slate-400 font-mono tabular-nums">
-                  {hasCoords ? (
+                  {hasValidCoords ? (
                     <span className="text-teal-700 dark:text-teal-400 font-semibold inline-flex items-center gap-1">
                       <Check className="w-3.5 h-3.5" />
-                      {lat!.toFixed(4)}, {lng!.toFixed(4)}
+                      {parsedLat!.toFixed(4)}, {parsedLng!.toFixed(4)}
                     </span>
                   ) : (
                     <span>尚未設定導航座標</span>
@@ -615,20 +796,20 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
               {showRawCoords && (
                 <div className="grid grid-cols-2 gap-2">
                   <input
-                    type="number"
-                    step="any"
-                    value={lat ?? ''}
-                    onChange={(e) => setLat(e.target.value ? parseFloat(e.target.value) : undefined)}
-                    placeholder="緯度 35.1856"
-                    className="w-full min-h-[38px] px-2.5 bg-white dark:bg-slate-900 rounded-xl border border-[#E5E2DC] dark:border-slate-700 font-mono text-[16px] sm:text-xs outline-none"
+                    type="text"
+                    inputMode="decimal"
+                    value={latText}
+                    onChange={(e) => setLatText(e.target.value)}
+                    placeholder="緯度 (-90 ~ 90)"
+                    className="w-full min-h-[40px] px-2.5 bg-white dark:bg-slate-900 rounded-xl border border-[#E5E2DC] dark:border-slate-700 font-mono text-[16px] sm:text-xs outline-none focus:border-teal-600"
                   />
                   <input
-                    type="number"
-                    step="any"
-                    value={lng ?? ''}
-                    onChange={(e) => setLng(e.target.value ? parseFloat(e.target.value) : undefined)}
-                    placeholder="經度 136.8991"
-                    className="w-full min-h-[38px] px-2.5 bg-white dark:bg-slate-900 rounded-xl border border-[#E5E2DC] dark:border-slate-700 font-mono text-[16px] sm:text-xs outline-none"
+                    type="text"
+                    inputMode="decimal"
+                    value={lngText}
+                    onChange={(e) => setLngText(e.target.value)}
+                    placeholder="經度 (-180 ~ 180)"
+                    className="w-full min-h-[40px] px-2.5 bg-white dark:bg-slate-900 rounded-xl border border-[#E5E2DC] dark:border-slate-700 font-mono text-[16px] sm:text-xs outline-none focus:border-teal-600"
                   />
                 </div>
               )}
@@ -668,7 +849,6 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             </div>
           </IosDisclosureRow>
 
-          {/* Booking Code Row */}
           <div className="px-4 py-2.5 min-h-[48px] flex items-center justify-between gap-3">
             <label className="text-sm sm:text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 shrink-0">
               <Bookmark className="w-4 h-4 text-teal-700 dark:text-teal-400" />
@@ -683,7 +863,6 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             />
           </div>
 
-          {/* Cost Row */}
           <div className="px-4 py-2.5 min-h-[48px] flex items-center justify-between gap-3">
             <label className="text-sm sm:text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-2 shrink-0">
               <DollarSign className="w-4 h-4 text-teal-700 dark:text-teal-400" />
@@ -691,6 +870,8 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             </label>
             <input
               type="number"
+              min="0"
+              step="any"
               inputMode="decimal"
               value={cost}
               onChange={(e) => setCost(e.target.value)}
@@ -699,14 +880,12 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             />
           </div>
 
-          {/* Paid Switch */}
           <IosToggleRow
             label="費用已預先付款"
             checked={costPaid}
             onChange={setCostPaid}
           />
 
-          {/* Notes Area */}
           <div className="p-3.5 space-y-1.5">
             <label className="text-xs font-semibold text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
               <FileText className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
@@ -736,7 +915,6 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             onToggle={() => setMemoriesExpanded((v) => !v)}
           >
             <div className="p-3.5 space-y-3">
-              {/* Mood Strip */}
               <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
                 <span className="text-[11px] text-slate-500 shrink-0">心情：</span>
                 {['✨', '☀️', '🍜', '⛩️', '🌸', '🍁', '☕', '🏯', '🛍️'].map((emoji) => (
@@ -776,8 +954,8 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                       {isUploadingPhoto
                         ? '照片處理中...'
                         : memoryPhotos.length >= 3
-                        ? '已達上限 3 張'
-                        : '選取景點相片（最多 3 張）'}
+                          ? '已達上限 3 張'
+                          : '選取景點相片（最多 3 張）'}
                     </span>
                   </button>
                   {photoError && (
@@ -818,7 +996,6 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                 </div>
               )}
 
-              {/* Google Photos Original Link */}
               <div className="pt-2 border-t border-[#E5E2DC]/75 dark:border-slate-800 space-y-1.5">
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1">
@@ -837,7 +1014,8 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                   )}
                 </div>
                 <input
-                  type="url"
+                  type="text"
+                  inputMode="url"
                   value={googlePhotosUrl}
                   onChange={(e) => setGooglePhotosUrl(e.target.value)}
                   placeholder="https://photos.app.goo.gl/..."

@@ -36,6 +36,7 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
   onOpenChange,
 }) => {
   const isMobile = useIsMobileViewport();
+  const isZh = lang === 'zh' || lang === 'zh-CN';
   const [user, setUser] = useState<User | null>(() => auth.currentUser);
   const [authReady, setAuthReady] = useState<boolean>(() => Boolean(auth.currentUser));
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -43,6 +44,7 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
   const [showDropdown, setShowDropdown] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncDone, setSyncDone] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [driveConnected, setDriveConnected] = useState<boolean>(() => hasDriveAccessToken());
   const [isConnectingDrive, setIsConnectingDrive] = useState(false);
   const [driveError, setDriveError] = useState<string | null>(null);
@@ -56,11 +58,17 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
 
   useEffect(() => {
     const syncDriveState = () => setDriveConnected(hasDriveAccessToken());
+    const resetSpinnerOnBFCache = (e: PageTransitionEvent) => {
+      if (e.persisted) setIsLoggingIn(false);
+    };
     window.addEventListener('hiyori_drive_auth_changed', syncDriveState);
-    return () => window.removeEventListener('hiyori_drive_auth_changed', syncDriveState);
+    window.addEventListener('pageshow', resetSpinnerOnBFCache);
+    return () => {
+      window.removeEventListener('hiyori_drive_auth_changed', syncDriveState);
+      window.removeEventListener('pageshow', resetSpinnerOnBFCache);
+    };
   }, []);
 
-  // Desktop popover click outside / Escape handling
   useEffect(() => {
     if (!isOverlayOpen || isMobile) return;
     const handleClickOutside = (e: MouseEvent | TouchEvent) => {
@@ -120,15 +128,19 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
   };
 
   const handleUploadAllLocalToCloud = async () => {
-    if (!user) return;
+    if (!user || isSyncing) return;
     setIsSyncing(true);
+    setSyncError(null);
     try {
       const localDeletedIds = new Set(getDeletedTripIds());
-      const cloudTombstones = await fetchUserTombstones(user.uid);
+      const cloudTombstones = (await fetchUserTombstones(user.uid)) || {};
       const TOMBSTONE_SKEW_MS = 15 * 60 * 1000;
 
+      // Only sync user's own trips (never hijack another owner's collab trip or read-only imported share)
       const validTrips = localTrips.filter((trip) => {
         if (localDeletedIds.has(trip.id)) return false;
+        if (trip.id.startsWith('imported-share_')) return false;
+        if (trip.isCollaborative && trip.ownerId && trip.ownerId !== user.uid) return false;
         const deletedAt = cloudTombstones[trip.id];
         if (typeof deletedAt === 'number' && deletedAt + TOMBSTONE_SKEW_MS >= (trip.updatedAt || 0)) {
           return false;
@@ -137,9 +149,15 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
       });
 
       const syncedMap: Record<string, number> = {};
+      let failCount = 0;
       for (const trip of validTrips) {
-        const saved = await saveTripToCloud(user.uid, trip);
-        syncedMap[trip.id] = Math.max(Date.now(), saved.lastSyncedAt || trip.updatedAt || 0);
+        try {
+          const saved = await saveTripToCloud(user.uid, trip);
+          syncedMap[trip.id] = Math.max(Date.now(), saved.lastSyncedAt || trip.updatedAt || 0);
+        } catch (err) {
+          failCount++;
+          console.warn('Manual sync failed for trip:', trip.id, err);
+        }
       }
       if (Object.keys(syncedMap).length > 0) {
         const stored = getStoredTrips();
@@ -149,11 +167,20 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
           )
         );
       }
-      setSyncDone(true);
-      if (onCloudSyncSuccess) onCloudSyncSuccess();
-      setTimeout(() => setSyncDone(false), 3000);
+      if (failCount > 0) {
+        setSyncError(
+          isZh
+            ? `有 ${failCount} 筆旅程同步失敗，請確認網路連線後重試`
+            : `${failCount} trip(s) failed to sync. Please check your connection.`
+        );
+      } else {
+        setSyncDone(true);
+        if (onCloudSyncSuccess) onCloudSyncSuccess();
+        setTimeout(() => setSyncDone(false), 3000);
+      }
     } catch (e) {
       console.error('Failed to sync trips to cloud:', e);
+      setSyncError(isZh ? '雲端同步失敗，請稍後再試' : 'Cloud sync failed. Please try again.');
     } finally {
       setIsSyncing(false);
     }
@@ -164,7 +191,7 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
   if (!authReady) {
     return (
       <div
-        className="h-10 sm:h-9 w-10 sm:w-20 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-[#F3F1EC] dark:bg-slate-800/70 animate-pulse shrink-0"
+        className="w-11 h-11 sm:h-9 sm:w-20 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-[#F3F1EC] dark:bg-slate-800/70 animate-pulse shrink-0"
         aria-hidden="true"
       />
     );
@@ -172,18 +199,19 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
 
   if (!user) {
     return (
-      <div className="relative" ref={authDropdownRef}>
+      <div className="relative shrink-0" ref={authDropdownRef}>
         <button
+          type="button"
           onClick={handleLogin}
           disabled={isLoggingIn}
-          className="h-10 sm:h-9 px-2.5 sm:px-3 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0 whitespace-nowrap cursor-pointer disabled:opacity-60"
-          title={lang === 'zh' ? 'Google 登入同步' : 'Sign in with Google'}
-          aria-label="Google 登入同步"
+          className="w-11 h-11 sm:w-auto sm:h-9 sm:px-3 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0 whitespace-nowrap cursor-pointer disabled:opacity-60"
+          title={isZh ? 'Google 登入雲端同步' : 'Sign in with Google'}
+          aria-label={isZh ? 'Google 登入同步' : 'Sign in with Google'}
         >
           {isLoggingIn ? (
             <div className="w-4 h-4 border-2 border-slate-300 border-t-teal-600 rounded-full animate-spin shrink-0" />
           ) : (
-            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
               <path
                 fill="#4285F4"
                 d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -203,7 +231,7 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
             </svg>
           )}
           <span className="hidden sm:inline text-xs font-semibold">
-            {isLoggingIn ? (lang === 'zh' ? '登入中...' : 'Signing in...') : lang === 'zh' ? '登入' : 'Sign In'}
+            {isLoggingIn ? (isZh ? '登入中...' : 'Signing in...') : isZh ? '登入同步' : 'Sign In'}
           </span>
         </button>
 
@@ -227,11 +255,11 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
 
         {authError && isMobile && (
           <IosActionSheet
-            title={lang === 'zh' ? '無法完成 Google 登入' : 'Google Sign-In Failed'}
+            title={isZh ? '無法完成 Google 登入' : 'Google Sign-In Failed'}
             message={authError}
             options={[
               {
-                label: lang === 'zh' ? '重試登入' : 'Try Again',
+                label: isZh ? '重試登入' : 'Try Again',
                 tone: 'primary',
                 onClick: () => {
                   setAuthError(null);
@@ -239,9 +267,9 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
                 },
               },
             ]}
-            cancelLabel={lang === 'zh' ? '關閉' : 'Close'}
+            cancelLabel={isZh ? '關閉' : 'Close'}
             onClose={() => setAuthError(null)}
-            zIndexClass="z-[90]"
+            zIndexClass="z-[95]"
           />
         )}
       </div>
@@ -250,12 +278,12 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
 
   const renderGroupedAccountActions = () => (
     <div className="space-y-3">
-      <IosInsetGroup header={lang === 'zh' ? '雲端與備份' : 'Cloud & Backup'}>
+      <IosInsetGroup header={isZh ? '雲端與備份' : 'Cloud & Backup'}>
         <IosRow
           onClick={handleUploadAllLocalToCloud}
           disabled={isSyncing}
           icon={<UploadCloud className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-          label={lang === 'zh' ? '同步全部旅程至雲端' : 'Sync All Trips to Cloud'}
+          label={isZh ? '同步我的旅程至雲端' : 'Sync My Trips to Cloud'}
           trailing={
             syncDone ? (
               <Check className="w-4 h-4 text-teal-700 dark:text-teal-400" />
@@ -275,7 +303,7 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
               setDriveConnected(ok);
               if (!ok) {
                 setDriveError(
-                  lang === 'zh'
+                  isZh
                     ? 'Google Drive 授權已取消或彈窗被封鎖'
                     : 'Drive authorization cancelled or popup blocked'
                 );
@@ -287,10 +315,10 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
           icon={<HardDrive className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
           label={
             driveConnected
-              ? lang === 'zh'
+              ? isZh
                 ? 'Drive 原圖備份已連線'
                 : 'Drive Originals Connected'
-              : lang === 'zh'
+              : isZh
               ? '連線 Google Drive 原圖空間'
               : 'Connect Google Drive Originals'
           }
@@ -299,12 +327,18 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
               <Check className="w-4 h-4 text-teal-700 dark:text-teal-400" />
             ) : (
               <span className="text-xs font-bold text-teal-700 dark:text-teal-400">
-                {isConnectingDrive ? '...' : '授權'}
+                {isConnectingDrive ? '...' : isZh ? '授權' : 'Link'}
               </span>
             )
           }
         />
       </IosInsetGroup>
+
+      {syncError && (
+        <p className="px-2 text-[11px] font-medium text-rose-600 dark:text-rose-400 leading-snug">
+          {syncError}
+        </p>
+      )}
 
       {driveError && (
         <p className="px-2 text-[11px] font-medium text-amber-700 dark:text-amber-300 leading-snug">
@@ -317,34 +351,38 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
           onClick={handleLogout}
           destructive
           icon={<LogOut className="w-4 h-4 text-rose-600 dark:text-rose-400" />}
-          label={lang === 'zh' ? '登出帳號' : 'Sign Out'}
+          label={isZh ? '登出帳號' : 'Sign Out'}
         />
       </IosInsetGroup>
     </div>
   );
 
   return (
-    <div className="relative" ref={authDropdownRef}>
+    <div className="relative shrink-0" ref={authDropdownRef}>
       <button
+        type="button"
         onClick={() => setShowDropdown(!showDropdown)}
-        className="flex items-center gap-1.5 h-10 sm:h-9 px-2 sm:px-2.5 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 transition active:scale-95 cursor-pointer"
+        aria-expanded={showDropdown}
+        aria-haspopup="menu"
+        className="flex items-center justify-center gap-1.5 min-w-[44px] h-11 sm:min-w-0 sm:h-9 px-2 sm:px-2.5 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-200 transition active:scale-95 cursor-pointer"
         title={user.displayName || activeEmail || '使用者帳號'}
+        aria-label={user.displayName || activeEmail || '使用者帳號'}
       >
         {user.photoURL ? (
           <img
             src={user.photoURL}
             alt={user.displayName || 'User'}
-            className="w-5 h-5 rounded-full object-cover border border-teal-700/30 shrink-0"
+            className="w-6 h-6 sm:w-5 sm:h-5 rounded-full object-cover border border-teal-700/30 shrink-0"
           />
         ) : (
-          <div className="w-5 h-5 rounded-full bg-teal-700 text-white flex items-center justify-center text-[10px] shrink-0">
+          <div className="w-6 h-6 sm:w-5 sm:h-5 rounded-full bg-teal-700 text-white flex items-center justify-center text-[10px] shrink-0">
             <UserIcon className="w-3 h-3" />
           </div>
         )}
         <span className="hidden sm:inline-block max-w-[85px] truncate text-xs font-semibold">
-          {user.displayName?.split(' ')[0] || (lang === 'zh' ? '已登入' : 'Account')}
+          {user.displayName?.split(' ')[0] || (isZh ? '已登入' : 'Account')}
         </span>
-        <CloudCheck className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+        <CloudCheck className="hidden sm:block w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
       </button>
 
       {/* Mobile Bottom Sheet */}
@@ -356,10 +394,10 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
           ariaLabel={user.displayName || '使用者帳戶'}
         >
           <IosNavBar
-            title={user.displayName || (lang === 'zh' ? '已登入帳號' : 'Account')}
+            title={user.displayName || (isZh ? '已登入帳號' : 'Account')}
             subtitle={activeEmail || undefined}
             leftLabel=""
-            rightLabel={lang === 'zh' ? '完成' : 'Done'}
+            rightLabel={isZh ? '完成' : 'Done'}
             onRightClick={() => setShowDropdown(false)}
           />
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
@@ -368,27 +406,29 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
         </IosModalSheet>
       )}
 
-      {/* Desktop Dropdown Popover */}
+      {/* Desktop Popover */}
       {showDropdown && !isMobile && (
-        <div className="absolute right-0 top-full mt-1.5 w-72 bg-[#FAF9F6] dark:bg-[#0B1120] rounded-2xl shadow-xl border border-[#E5E2DC] dark:border-slate-800 z-50 text-xs animate-in fade-in zoom-in-95 duration-100 overflow-hidden">
-          <div className="px-3.5 py-2.5 border-b border-[#E5E2DC] dark:border-slate-800 bg-white/85 dark:bg-[#111827] space-y-0.5">
-            <div className="flex items-center justify-between gap-2">
-              <p className="font-bold text-xs text-slate-900 dark:text-slate-100 truncate">
-                {user.displayName || (lang === 'zh' ? '已登入用戶' : 'Signed In')}
-              </p>
-              <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 shrink-0">
-                {lang === 'zh' ? '雲端同步' : 'Synced'}
-              </span>
-            </div>
-            {activeEmail && (
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate font-mono">
-                {activeEmail}
-              </p>
+        <div className="absolute right-0 top-full mt-2 w-72 bg-[#FAF9F6] dark:bg-[#090D16] rounded-3xl shadow-2xl border border-[#E5E2DC] dark:border-slate-800 p-3 z-50 animate-in fade-in zoom-in-95 duration-150 space-y-3">
+          <div className="px-2 py-1 border-b border-[#E5E2DC] dark:border-slate-800 pb-2.5 flex items-center gap-2.5">
+            {user.photoURL ? (
+              <img src={user.photoURL} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
+            ) : (
+              <div className="w-9 h-9 rounded-full bg-teal-700 text-white flex items-center justify-center shrink-0">
+                <UserIcon className="w-4 h-4" />
+              </div>
             )}
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                {user.displayName || (isZh ? '已登入帳號' : 'Account')}
+              </p>
+              {activeEmail && (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                  {activeEmail}
+                </p>
+              )}
+            </div>
           </div>
-          <div className="p-2.5">
-            {renderGroupedAccountActions()}
-          </div>
+          {renderGroupedAccountActions()}
         </div>
       )}
     </div>

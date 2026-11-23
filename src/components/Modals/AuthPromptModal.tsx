@@ -29,22 +29,31 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
     setErrorMessage(null);
     setStatusMessage(null);
     setIsLoggingIn(false);
+
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setIsLoggingIn(false);
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const isZh = lang === 'zh';
+  const isZh = lang === 'zh' || lang === 'zh-CN';
 
   const handleGoogleSignIn = async () => {
+    if (isLoggingIn) return;
     setIsLoggingIn(true);
     setErrorMessage(null);
     setStatusMessage(null);
     try {
       const res = await loginWithGoogleDetailed();
       if (res.user) {
-        onClose();
+        // Call onLoginSuccess BEFORE onClose so parent's pendingActionRef is executed, not cleared!
         if (onLoginSuccess) {
           onLoginSuccess();
+        } else {
+          onClose();
         }
         return;
       }
@@ -72,11 +81,11 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
       zIndexClass="z-[85]"
       variant="grouped"
       disableBackdropClose={isLoggingIn}
-      ariaLabel={isZh ? '登入以編輯並雲端備份' : 'Sign in to Edit & Sync'}
+      ariaLabel={isZh ? '登入以啟用雲端同步' : 'Sign in for Cloud Sync'}
     >
       <IosNavBar
         title={isZh ? '登入雲端同步' : 'Cloud Sign In'}
-        leftLabel={isZh ? '略過' : 'Skip'}
+        leftLabel={isZh ? '關閉' : 'Close'}
         onLeftClick={onClose}
         leftDisabled={isLoggingIn}
       />
@@ -88,16 +97,16 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
           </div>
           <div className="min-w-0">
             <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-              {isZh ? '登入以編輯並跨裝置同步' : 'Sign in to Edit & Sync'}
+              {isZh ? '啟用雲端同步與多人共編' : 'Unlock Cloud Sync & Sharing'}
             </h4>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-snug">
               {reason
                 ? isZh
-                  ? `操作「${reason}」前請先登入 Google 帳號`
-                  : `Sign in required to ${reason}`
+                  ? `使用「${reason}」需先登入 Google 帳號`
+                  : `Sign in with Google to ${reason}`
                 : isZh
-                ? '登入後可跨手機與電腦即時同步所有旅程與變更'
-                : 'Stay signed in and auto-sync trips across devices'}
+                ? '登入後可跨手機與電腦即時同步所有旅程與照片'
+                : 'Auto-sync trips & photos seamlessly across all devices'}
             </p>
           </div>
         </div>
@@ -105,15 +114,15 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
         <IosInsetGroup>
           <IosRow
             icon={<Check className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-            label={isZh ? '即時雲端雙向同步' : 'Real-time cloud sync'}
+            label={isZh ? '跨裝置即時雙向同步' : 'Real-time multi-device sync'}
           />
           <IosRow
             icon={<Check className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-            label={isZh ? '跨裝置刪除與備份一致' : 'Consistent cross-device deletion'}
+            label={isZh ? '建立分享連結與旅伴多人共編' : 'Share links & live collaboration'}
           />
           <IosRow
             icon={<Check className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-            label={isZh ? '本機草稿自動無縫匯入' : 'Seamless local draft import'}
+            label={isZh ? '本機已建立的行程將自動無縫合併上雲' : 'Existing local trips merge automatically'}
           />
         </IosInsetGroup>
 
@@ -136,7 +145,7 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
           </p>
         )}
 
-        <div className="space-y-2 pt-1">
+        <div className="pt-1">
           <button
             type="button"
             onClick={handleGoogleSignIn}
@@ -154,15 +163,6 @@ export const AuthPromptModal: React.FC<AuthPromptModalProps> = ({
               </svg>
             )}
             <span>{isZh ? '使用 Google 帳號登入' : 'Sign in with Google'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={isLoggingIn}
-            className="w-full min-h-[44px] py-2.5 px-4 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold text-xs transition cursor-pointer"
-          >
-            {isZh ? '繼續唯讀瀏覽' : 'Continue Read-Only'}
           </button>
         </div>
       </div>

@@ -169,7 +169,7 @@ service cloud.firestore {
     // 1. User Private Trips Collection
     match /users/{userId}/trips/{tripId} {
       allow get: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(tripId);
-      allow list: if isVerifiedOwner(userId) && isValidId(userId) && resource.data.ownerId == request.auth.uid;
+      allow list: if isVerifiedOwner(userId) && isValidId(userId);
       allow create: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(tripId) &&
                        isValidUserTrip(incoming(), userId);
       allow update: if isVerifiedOwner(userId) && isValidId(userId) && isValidId(tripId) &&
@@ -230,6 +230,7 @@ service cloud.firestore {
     match /collab_trips/{collabId} {
       allow get: if isValidId(collabId) && (
                       resource == null ||
+                      !('generalAccess' in existing()) ||
                       existing().generalAccess != 'restricted' ||
                       isCollabMemberData(existing())
                     );
@@ -262,16 +263,27 @@ service cloud.firestore {
       match /media/{mediaId} {
         allow get: if isValidId(collabId) && isValidId(mediaId) &&
                       (
+                        !('generalAccess' in get(/databases/$(database)/documents/collab_trips/$(collabId)).data) ||
                         get(/databases/$(database)/documents/collab_trips/$(collabId)).data.generalAccess != 'restricted' ||
                         isCollabMemberData(get(/databases/$(database)/documents/collab_trips/$(collabId)).data)
                       );
         allow list: if false;
-        allow create, update: if isVerifiedUser() && isValidId(collabId) && isValidId(mediaId) &&
-                               incoming().ownerId == request.auth.uid &&
-                               isValidMediaAsset(incoming()) &&
-                               isCollabEditorData(get(/databases/$(database)/documents/collab_trips/$(collabId)).data);
-        allow delete: if isVerifiedUser() && isValidId(collabId) && isValidId(mediaId) &&
+        allow create: if isVerifiedUser() && isValidId(collabId) && isValidId(mediaId) &&
+                         incoming().ownerId == request.auth.uid &&
+                         isValidMediaAsset(incoming()) &&
                          isCollabEditorData(get(/databases/$(database)/documents/collab_trips/$(collabId)).data);
+        allow update: if isVerifiedUser() && isValidId(collabId) && isValidId(mediaId) &&
+                         incoming().ownerId == existing().ownerId &&
+                         isValidMediaAsset(incoming()) &&
+                         (
+                           existing().ownerId == request.auth.uid ||
+                           get(/databases/$(database)/documents/collab_trips/$(collabId)).data.ownerId == request.auth.uid
+                         );
+        allow delete: if isVerifiedUser() && isValidId(collabId) && isValidId(mediaId) &&
+                         (
+                           existing().ownerId == request.auth.uid ||
+                           get(/databases/$(database)/documents/collab_trips/$(collabId)).data.ownerId == request.auth.uid
+                         );
       }
     }
   }

@@ -1,6 +1,8 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { Trip, ExpenseItem, PaymentMethod } from '../../types/itinerary';
+import { useModalLayer } from '../../hooks/useModalHistory';
+import { Trip, ExpenseItem } from '../../types/itinerary';
 import { formatDateSlash, getTodayLocal } from '../../utils/date';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
 import { compressImageFile, storeImageAsMediaRef, resolveMediaSrc, garbageCollectOrphanedMedia, isMediaRef, extractMediaId } from '../../utils/image';
@@ -41,6 +43,7 @@ import {
   Filter,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   ArrowRightLeft,
   Tag,
   RefreshCw,
@@ -62,11 +65,13 @@ import { calculateTripSplits, formatSplitsForSharing } from '../../utils/billSpl
 import { CategoryManageModal } from '../Modals/CategoryManageModal';
 import { ExpenseFilterDrawer } from '../Modals/ExpenseFilterDrawer';
 import { ExpenseCalendarBar } from '../Expenses/ExpenseCalendarBar';
+import { CategoryDonutChart } from '../Expenses/CategoryDonutChart';
 import {
   TiantianExpenseEditor,
   TiantianExpenseDraft,
   formatExpenseDescriptionDraft,
   parseExpenseDescription,
+  evaluateExpenseAmount,
 } from '../Expenses/TiantianExpenseEditor';
 import {
   DEFAULT_EXPENSE_CATEGORIES,
@@ -75,9 +80,6 @@ import {
 } from '../Expenses/expenseMeta';
 import {
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
   Tooltip as RechartsTooltip,
   BarChart,
   Bar,
@@ -113,11 +115,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
   // Split members list
   const splitMembersList = useMemo(() => {
-    return trip.splitMembers && trip.splitMembers.length > 0 ? trip.splitMembers : ['我', '同行夥伴'];
+    return trip.splitMembers && trip.splitMembers.length > 0 ? trip.splitMembers : ['我', '同行旅伴'];
   }, [trip.splitMembers]);
 
   // Form states (Tiantian Bookkeeping Draft)
   const [showAddModal, setShowAddModal] = useState(false);
+  const [isEditorSubPickerOpen, setIsEditorSubPickerOpen] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [splitNotice, setSplitNotice] = useState<string | null>(null);
   const [expenseDraft, setExpenseDraft] = useState<TiantianExpenseDraft>(() => ({
@@ -127,7 +130,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     category: 'food',
     paymentMethod: 'cash',
     paidBy: '我',
-    splitWith: trip.splitMembers && trip.splitMembers.length > 0 ? trip.splitMembers : ['我', '同行夥伴'],
+    splitWith: trip.splitMembers && trip.splitMembers.length > 0 ? trip.splitMembers : ['我', '同行旅伴'],
     isPersonal: false,
     tags: [],
     receiptImages: [],
@@ -138,12 +141,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   const [saveToast, setSaveToast] = useState<string | null>(null);
   const [editorFocusTrigger, setEditorFocusTrigger] = useState(0);
 
-  useEffect(() => {
-    const nextCur = trip.currency || detectTripCurrency(trip);
-    setBaseCurrency(nextCur);
-    setExpenseDraft((prev) => ({ ...prev, currency: nextCur }));
-  }, [trip.id, trip.currency]);
-
   // Filter Drawer Bottom Sheet state
   const [showFilterDrawer, setShowFilterDrawer] = useState(false);
 
@@ -153,9 +150,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   // Exchange rate config modal & Live Market Rates
   const [showRateModal, setShowRateModal] = useState(false);
   const [showCashModal, setShowCashModal] = useState(false);
-  const [tempRates, setTempRates] = useState<Record<string, number>>(trip.customExchangeRates || {});
+  const [showBaseCurrencySheet, setShowBaseCurrencySheet] = useState(false);
+  const [tempRateInputs, setTempRateInputs] = useState<Record<string, string>>({});
   const [liveRatesInfo, setLiveRatesInfo] = useState<LiveRatesCache | null>(() => getCachedLiveRates());
   const [isFetchingRates, setIsFetchingRates] = useState(false);
+
+  const ratesVersion = liveRatesInfo?.updatedAt ?? 0;
 
   React.useEffect(() => {
     fetchLiveExchangeRates().then((res) => setLiveRatesInfo(res));
@@ -163,15 +163,30 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
   React.useEffect(() => {
     if (showRateModal) {
-      setTempRates(trip.customExchangeRates || {});
+      const nextInputs: Record<string, string> = {};
+      SUPPORTED_CURRENCIES.filter((c) => c.code !== 'JPY').forEach((cur) => {
+        const val =
+          trip.customExchangeRates?.[cur.code] ??
+          liveRatesInfo?.rates?.[cur.code] ??
+          cur.defaultRateToJPY;
+        nextInputs[cur.code] = String(val);
+      });
+      setTempRateInputs(nextInputs);
     }
-  }, [showRateModal, trip.customExchangeRates]);
+  }, [showRateModal, trip.customExchangeRates, liveRatesInfo]);
 
   const handleRefreshLiveRates = async () => {
     setIsFetchingRates(true);
     try {
       const res = await fetchLiveExchangeRates(true);
       setLiveRatesInfo(res);
+      if (showRateModal && res?.rates) {
+        const refreshedInputs: Record<string, string> = {};
+        SUPPORTED_CURRENCIES.filter((c) => c.code !== 'JPY').forEach((cur) => {
+          refreshedInputs[cur.code] = String(res.rates[cur.code] ?? cur.defaultRateToJPY);
+        });
+        setTempRateInputs(refreshedInputs);
+      }
     } finally {
       setIsFetchingRates(false);
     }
@@ -180,23 +195,47 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   // Chart view: 'daily' vs 'category'
   const [chartView, setChartView] = useState<'daily' | 'category'>('daily');
 
-  // Navigation subtabs & states
-  const [expenseSubTab, setExpenseSubTab] = useState<'records' | 'table' | 'charts' | 'split'>('records');
+  // Navigation subtabs (Consolidated into 3 crisp tabs: 明細 / 統計 / 分帳)
+  const [expenseSubTab, setExpenseSubTab] = useState<'records' | 'stats' | 'split'>('records');
   const effectiveSubTab = (trip.isSoloTrip || !trip.isSplitEnabled) && expenseSubTab === 'split' ? 'records' : expenseSubTab;
+
+  const getTransferSettlementKey = (from: string, to: string, amount: number) =>
+    `${from.trim()}->${to.trim()}::${baseCurrency}::${Math.round(amount * 100)}`;
+
+  const handleToggleTransferSettled = (from: string, to: string, amount: number) => {
+    if (!canEdit) return;
+    const key = getTransferSettlementKey(from, to, amount);
+    const prevMap = trip.settledTransfers || {};
+    const nextSettled = !prevMap[key]?.settled;
+    const nextMap: Record<string, { settled: boolean; settledAt?: number }> = { ...prevMap };
+    if (nextSettled) {
+      nextMap[key] = { settled: true, settledAt: Date.now() };
+    } else {
+      delete nextMap[key];
+    }
+    onUpdateTrip({
+      ...trip,
+      settledTransfers: Object.keys(nextMap).length > 0 ? nextMap : undefined,
+      updatedAt: Date.now(),
+    });
+  };
   const [expandedTableDate, setExpandedTableDate] = useState<string | null>(null);
   const [newCompanionName, setNewCompanionName] = useState('');
   const [showAddCompanionInput, setShowAddCompanionInput] = useState(false);
+  const [pendingRemoveCompanion, setPendingRemoveCompanion] = useState<string | null>(null);
   const [copiedSplitToast, setCopiedSplitToast] = useState(false);
   const [expenseSearchQuery, setExpenseSearchQuery] = useState('');
 
-  // Calculated splits
+  // Calculated splits (recomputes whenever live rates update)
   const splitsResult = useMemo(() => {
     return calculateTripSplits(trip, baseCurrency, trip.customExchangeRates);
-  }, [trip, baseCurrency, trip.customExchangeRates]);
+  }, [trip, baseCurrency, trip.customExchangeRates, ratesVersion]);
 
   // Filter & Lightbox states
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [selectedDateFilter, setSelectedDateFilter] = useState<string>('all');
+  const [cashOnlyFilter, setCashOnlyFilter] = useState<boolean>(false);
+  const [withReceiptFilter, setWithReceiptFilter] = useState<boolean>(false);
   const [chartCategoryDetail, setChartCategoryDetail] = useState<string | null>(null);
   const [chartDateDetail, setChartDateDetail] = useState<string | null>(null);
   const [viewingReceiptGallery, setViewingReceiptGallery] = useState<{
@@ -207,6 +246,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     currency: string;
     expenseId?: string;
   } | null>(null);
+  const receiptSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const [openSwipeId, setOpenSwipeId] = useState<string | null>(null);
   const [pendingDeleteExpense, setPendingDeleteExpense] = useState<ExpenseItem | null>(null);
@@ -219,6 +259,33 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     }
   });
 
+  const saveToastTimerRef = useRef<number | null>(null);
+  const copiedSplitTimerRef = useRef<number | null>(null);
+  const splitNoticeTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (saveToastTimerRef.current) window.clearTimeout(saveToastTimerRef.current);
+      if (copiedSplitTimerRef.current) window.clearTimeout(copiedSplitTimerRef.current);
+      if (splitNoticeTimerRef.current) window.clearTimeout(splitNoticeTimerRef.current);
+    };
+  }, []);
+
+  // Reset per-trip currency & filters when switching trips
+  useEffect(() => {
+    const nextCur = trip.currency || detectTripCurrency(trip);
+    setBaseCurrency(nextCur);
+    setExpenseDraft((prev) => ({ ...prev, currency: nextCur }));
+    setSelectedCategoryFilter('all');
+    setSelectedDateFilter('all');
+    setCashOnlyFilter(false);
+    setWithReceiptFilter(false);
+    setChartCategoryDetail(null);
+    setChartDateDetail(null);
+    setExpenseSearchQuery('');
+    setExpandedTableDate(null);
+  }, [trip.id, trip.currency]);
+
   const dismissSwipeHint = () => {
     if (hasSeenSwipeHint) return;
     setHasSeenSwipeHint(true);
@@ -229,10 +296,33 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
   useEffect(() => {
     setOpenSwipeId(null);
-  }, [trip.id, selectedCategoryFilter, selectedDateFilter, expenseSearchQuery, effectiveSubTab, showAddModal, pendingDeleteExpense]);
+  }, [trip.id, selectedCategoryFilter, selectedDateFilter, cashOnlyFilter, withReceiptFilter, expenseSearchQuery, effectiveSubTab, showAddModal, pendingDeleteExpense]);
 
-  // Lock background scroll for the receipt gallery viewer (IosModalSheet & IosActionSheet self-lock)
+  // Lock background scroll & push history layer for receipt lightbox
   useBodyScrollLock(Boolean(viewingReceiptGallery));
+  useModalLayer(Boolean(viewingReceiptGallery), () => setViewingReceiptGallery(null));
+
+  // Keyboard arrow navigation inside receipt lightbox
+  useEffect(() => {
+    if (!viewingReceiptGallery || viewingReceiptGallery.images.length <= 1) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setViewingReceiptGallery((prev) =>
+          prev
+            ? { ...prev, currentIndex: (prev.currentIndex - 1 + prev.images.length) % prev.images.length }
+            : null
+        );
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setViewingReceiptGallery((prev) =>
+          prev ? { ...prev, currentIndex: (prev.currentIndex + 1) % prev.images.length } : null
+        );
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [Boolean(viewingReceiptGallery), viewingReceiptGallery?.images.length]);
 
   const closeAddExpenseModal = () => {
     const stagedAdded = expenseDraft.receiptImages.filter(
@@ -246,32 +336,24 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     }
     initialEditReceiptsRef.current = [];
     setShowAddModal(false);
+    setIsEditorSubPickerOpen(false);
     setEditingExpenseId(null);
     setSaveToast(null);
     setExpenseDraft((prev) => ({ ...prev, receiptImages: [] }));
     setReceiptError(null);
   };
 
-  useEffect(() => {
-    const hasOverlay = showAddModal || showRateModal || showCashModal || Boolean(viewingReceiptGallery) || Boolean(pendingDeleteExpense);
-    if (!hasOverlay) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (pendingDeleteExpense) setPendingDeleteExpense(null);
-        else if (viewingReceiptGallery) setViewingReceiptGallery(null);
-        else if (showCashModal) setShowCashModal(false);
-        else if (showRateModal) setShowRateModal(false);
-        else if (showAddModal) {
-          closeAddExpenseModal();
-        }
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [showAddModal, showRateModal, showCashModal, viewingReceiptGallery, pendingDeleteExpense, expenseDraft.receiptImages]);
-
   // Custom categories list from trip
   const customCategories = trip.customExpenseCategories || [];
+
+  const categoryUsageCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    (trip.expenses || []).forEach((exp) => {
+      const key = exp.category || 'other';
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    return counts;
+  }, [trip.expenses]);
 
   // Helper: get display info for a category
   const getCategoryMeta = (catKey: string) => resolveExpenseCategoryMeta(catKey, trip);
@@ -281,27 +363,39 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     return convertAmount(item.amount, item.currency, baseCurrency, trip.customExchangeRates);
   };
 
+  const baseDecimals = CURRENCY_MAP[baseCurrency]?.decimals ?? 0;
+  const roundForBase = (val: number) => {
+    const f = Math.pow(10, baseDecimals);
+    return Math.round(val * f) / f;
+  };
+
   // Total Spending in base currency
   const totalSpentInBase = useMemo(() => {
-    return trip.expenses.reduce((sum, item) => sum + getItemConvertedAmount(item), 0);
-  }, [trip.expenses, baseCurrency, trip.customExchangeRates]);
+    return roundForBase(trip.expenses.reduce((sum, item) => sum + getItemConvertedAmount(item), 0));
+  }, [trip.expenses, baseCurrency, trip.customExchangeRates, ratesVersion]);
+
+  // Budget converted into baseCurrency (trip.budgetTotal is denominated in trip.currency || defaultDetectedCurrency)
+  const tripPrimaryCurrency = trip.currency || defaultDetectedCurrency;
+  const budgetInBase = useMemo(() => {
+    if (!trip.budgetTotal || trip.budgetTotal <= 0) return 0;
+    return convertAmount(trip.budgetTotal, tripPrimaryCurrency, baseCurrency, trip.customExchangeRates);
+  }, [trip.budgetTotal, tripPrimaryCurrency, baseCurrency, trip.customExchangeRates, ratesVersion]);
 
   // Today's spending in base currency (local timezone)
   const todayStr = getTodayLocal();
 
   const todaySpentInBase = useMemo(() => {
-    return trip.expenses
-      .filter((item) => item.date === todayStr)
-      .reduce((sum, item) => sum + getItemConvertedAmount(item), 0);
-  }, [trip.expenses, baseCurrency, trip.customExchangeRates, todayStr]);
+    return roundForBase(
+      trip.expenses
+        .filter((item) => item.date === todayStr)
+        .reduce((sum, item) => sum + getItemConvertedAmount(item), 0)
+    );
+  }, [trip.expenses, baseCurrency, trip.customExchangeRates, todayStr, ratesVersion]);
 
   // Cash on hand tracker (手頭現金管理)
-  const initialCashCur = trip.initialCashCurrency || baseCurrency || 'JPY';
-  const storedLocalCashRaw = typeof window !== 'undefined' ? localStorage.getItem(`trip_cash_${trip.id}`) : null;
-  const hasInitialCash = typeof trip.initialCashAmount === 'number' || storedLocalCashRaw !== null;
-  const initialCashAmt = typeof trip.initialCashAmount === 'number'
-    ? trip.initialCashAmount
-    : (storedLocalCashRaw !== null ? (parseFloat(storedLocalCashRaw) || 0) : 0);
+  const initialCashCur = trip.initialCashCurrency || tripPrimaryCurrency || 'JPY';
+  const hasInitialCash = typeof trip.initialCashAmount === 'number' && Number.isFinite(trip.initialCashAmount);
+  const initialCashAmt = hasInitialCash ? trip.initialCashAmount! : 0;
 
   const totalCashSpent = useMemo(() => {
     return trip.expenses
@@ -315,7 +409,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         );
         return sum + itemValInCashCur;
       }, 0);
-  }, [trip.expenses, initialCashCur, trip.customExchangeRates]);
+  }, [trip.expenses, initialCashCur, trip.customExchangeRates, ratesVersion]);
 
   const remainingCash = initialCashAmt - totalCashSpent;
   const cashSpentPercent = initialCashAmt > 0
@@ -324,6 +418,15 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
   const [cashInputAmt, setCashInputAmt] = useState<string>(hasInitialCash ? String(initialCashAmt) : '');
   const [cashInputCur, setCashInputCur] = useState<string>(initialCashCur);
+
+  // Live preview cash spent in the currency currently selected inside the Cash Modal
+  const modalCashSpent = useMemo(() => {
+    return trip.expenses
+      .filter((item) => item.paymentMethod === 'cash')
+      .reduce((sum, item) => {
+        return sum + convertAmount(item.amount, item.currency, cashInputCur, trip.customExchangeRates);
+      }, 0);
+  }, [trip.expenses, cashInputCur, trip.customExchangeRates, ratesVersion]);
 
   useEffect(() => {
     setCashInputCur(initialCashCur);
@@ -343,7 +446,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         updatedAt: Date.now(),
       });
       if (typeof window !== 'undefined') {
-        localStorage.removeItem(`trip_cash_${trip.id}`);
+        try {
+          localStorage.removeItem(`trip_cash_${trip.id}`);
+        } catch {}
       }
       setShowCashModal(false);
       return;
@@ -357,7 +462,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       updatedAt: Date.now(),
     });
     if (typeof window !== 'undefined') {
-      localStorage.setItem(`trip_cash_${trip.id}`, String(parsed));
+      try {
+        localStorage.removeItem(`trip_cash_${trip.id}`);
+      } catch {}
     }
     setShowCashModal(false);
   };
@@ -380,23 +487,25 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       map[cat] = (map[cat] || 0) + val;
     });
     return map;
-  }, [trip.expenses, baseCurrency, trip.customExchangeRates]);
+  }, [trip.expenses, baseCurrency, trip.customExchangeRates, ratesVersion]);
 
   const pieChartData = useMemo(() => {
     return Object.entries(categoryTotals)
       .map(([catKey, val]) => {
         const meta = getCategoryMeta(catKey);
+        const roundedVal = roundForBase(val);
         return {
           key: catKey,
           name: meta.label,
-          value: Math.round(val),
+          value: roundedVal,
           color: meta.color,
           Icon: meta.Icon,
           percentage: totalSpentInBase > 0 ? ((val / totalSpentInBase) * 100).toFixed(1) : '0',
         };
       })
-      .filter((d) => d.value > 0);
-  }, [categoryTotals, totalSpentInBase]);
+      .filter((d) => d.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }, [categoryTotals, totalSpentInBase, baseDecimals, trip.customCategoryLabels]);
 
   // Daily totals for bar chart
   const dailyChartData = useMemo(() => {
@@ -423,10 +532,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       return {
         date: d,
         label,
-        amount: Math.round(val),
+        amount: roundForBase(val),
       };
     });
-  }, [trip.expenses, trip.days, trip.startDate, baseCurrency, trip.customExchangeRates]);
+  }, [trip.expenses, trip.days, trip.startDate, baseCurrency, trip.customExchangeRates, ratesVersion]);
 
   // Filtered expenses for chart interactive breakdown detail
   const chartFilteredExpenses = useMemo(() => {
@@ -440,8 +549,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   }, [trip.expenses, chartView, chartCategoryDetail, chartDateDetail]);
 
   const chartFilteredTotal = useMemo(() => {
-    return chartFilteredExpenses.reduce((sum, e) => sum + getItemConvertedAmount(e), 0);
-  }, [chartFilteredExpenses, baseCurrency, trip.customExchangeRates]);
+    return roundForBase(chartFilteredExpenses.reduce((sum, e) => sum + getItemConvertedAmount(e), 0));
+  }, [chartFilteredExpenses, baseCurrency, trip.customExchangeRates, ratesVersion]);
 
   // Daily Breakdown Rows for Table (每日記帳統計總覽表)
   const dailyTableData = useMemo(() => {
@@ -526,7 +635,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     });
 
     return Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
-  }, [trip.expenses, trip.days, trip.startDate, baseCurrency, trip.customExchangeRates, todayStr]);
+  }, [trip.expenses, trip.days, trip.startDate, baseCurrency, trip.customExchangeRates, todayStr, ratesVersion]);
 
   // Multi-file receipt upload handler (max 5 receipts per expense)
   const handleUploadReceiptsForDraft = async (files: FileList) => {
@@ -663,21 +772,31 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     }
   };
 
-  // Delete custom category (confirmation already handled inline inside CategoryManageModal)
+  // Delete custom category (migrates existing expenses to 'other' and clears stale filter)
   const handleDeleteCategory = (catKey: string) => {
     if (!canEdit) return;
     if (requireAuth && !requireAuth(() => handleDeleteCategory(catKey), lang === 'zh' ? '刪除自訂類別' : 'Delete category')) {
       return;
     }
     const updatedCats = customCategories.filter((c) => c !== catKey);
+    const updatedExpenses = trip.expenses.map((e) =>
+      e.category === catKey ? { ...e, category: 'other' } : e
+    );
     onUpdateTrip({
       ...trip,
       customExpenseCategories: updatedCats,
+      expenses: updatedExpenses,
       updatedAt: Date.now(),
     });
 
     if (expenseDraft.category === catKey) {
       setExpenseDraft((prev) => ({ ...prev, category: 'food' }));
+    }
+    if (selectedCategoryFilter === catKey) {
+      setSelectedCategoryFilter('all');
+    }
+    if (chartCategoryDetail === catKey) {
+      setChartCategoryDetail(null);
     }
   };
 
@@ -751,7 +870,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     if (requireAuth && !requireAuth(() => handleSaveExpense(continueAdding), editingExpenseId ? '編輯支出紀錄' : '新增支出記帳')) {
       return;
     }
-    const parsedAmount = parseFloat(expenseDraft.amount);
+    const draftDecimals = CURRENCY_MAP[expenseDraft.currency]?.decimals ?? 0;
+    const parsedAmount = evaluateExpenseAmount(expenseDraft.amount, draftDecimals);
     if (isNaN(parsedAmount) || parsedAmount <= 0) return;
 
     const resolvedCatMeta = getCategoryMeta(expenseDraft.category);
@@ -780,11 +900,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             receiptImages: expenseDraft.receiptImages.length > 0 ? expenseDraft.receiptImages : undefined,
             receiptImage: expenseDraft.receiptImages[0] || undefined,
             convertedAmount: convertAmount(parsedAmount, expenseDraft.currency, baseCurrency, trip.customExchangeRates),
-            paidBy: isSplitMode ? (expenseDraft.paidBy || '我') : undefined,
-            splitWith: isSplitMode && !expenseDraft.isPersonal
-              ? (expenseDraft.splitWith.length > 0 ? expenseDraft.splitWith : splitMembersList)
-              : undefined,
-            isPersonal: !isSplitMode ? true : expenseDraft.isPersonal,
+            // Preserve existing split metadata untouched if split mode is currently toggled off
+            paidBy: isSplitMode ? (expenseDraft.paidBy || splitMembersList[0] || '我') : exp.paidBy,
+            splitWith: isSplitMode
+              ? (!expenseDraft.isPersonal
+                  ? (expenseDraft.splitWith.length > 0 ? expenseDraft.splitWith : splitMembersList)
+                  : undefined)
+              : exp.splitWith,
+            isPersonal: isSplitMode ? expenseDraft.isPersonal : (exp.isPersonal ?? false),
           };
         }
         return exp;
@@ -801,7 +924,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       ).catch(() => {});
     } else {
       const newExpense: ExpenseItem = {
-        id: `exp-${Date.now()}`,
+        id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         title: finalTitle,
         amount: parsedAmount,
         currency: expenseDraft.currency,
@@ -814,11 +937,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         receiptImages: expenseDraft.receiptImages.length > 0 ? expenseDraft.receiptImages : undefined,
         receiptImage: expenseDraft.receiptImages[0] || undefined,
         convertedAmount: convertAmount(parsedAmount, expenseDraft.currency, baseCurrency, trip.customExchangeRates),
-        paidBy: isSplitMode ? (expenseDraft.paidBy || '我') : undefined,
+        paidBy: isSplitMode ? (expenseDraft.paidBy || splitMembersList[0] || '我') : undefined,
         splitWith: isSplitMode && !expenseDraft.isPersonal
           ? (expenseDraft.splitWith.length > 0 ? expenseDraft.splitWith : splitMembersList)
           : undefined,
-        isPersonal: !isSplitMode ? true : expenseDraft.isPersonal,
+        isPersonal: isSplitMode ? expenseDraft.isPersonal : false,
       };
 
       const updatedTrip: Trip = {
@@ -845,7 +968,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       }));
       setReceiptError(null);
       setEditorFocusTrigger((c) => c + 1);
-      setTimeout(() => setSaveToast(null), 2600);
+      if (saveToastTimerRef.current) window.clearTimeout(saveToastTimerRef.current);
+      saveToastTimerRef.current = window.setTimeout(() => setSaveToast(null), 2600);
       return;
     }
 
@@ -853,6 +977,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     initialEditReceiptsRef.current = [];
     setEditingExpenseId(null);
     setSaveToast(null);
+    setIsEditorSubPickerOpen(false);
     setExpenseDraft((prev) => ({ ...prev, receiptImages: [] }));
     setShowAddModal(false);
   };
@@ -927,44 +1052,62 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     performAddCompanion();
   };
 
-  // Remove companion member
-  const handleRemoveCompanion = (memberToRemove: string) => {
+  // Request removing a companion member (confirmed via IosActionSheet)
+  const requestRemoveCompanion = (memberToRemove: string) => {
     if (!canEdit) return;
     if (memberToRemove === '我') {
       setSplitNotice(lang === 'zh' ? '「我」為預設成員，無法移除。' : 'Cannot remove primary member "我".');
-      setTimeout(() => setSplitNotice(null), 2500);
+      if (splitNoticeTimerRef.current) window.clearTimeout(splitNoticeTimerRef.current);
+      splitNoticeTimerRef.current = window.setTimeout(() => setSplitNotice(null), 2500);
       return;
     }
-    if (requireAuth && !requireAuth(() => handleRemoveCompanion(memberToRemove), lang === 'zh' ? '移除分帳旅伴' : 'Remove companion')) {
+    if (requireAuth && !requireAuth(() => requestRemoveCompanion(memberToRemove), lang === 'zh' ? '移除分帳旅伴' : 'Remove companion')) {
       return;
     }
+    setPendingRemoveCompanion(memberToRemove);
+  };
+
+  const handleConfirmRemoveCompanion = (memberToRemove: string) => {
     const updated = splitMembersList.filter((m) => m !== memberToRemove);
     onUpdateTrip({
       ...trip,
       splitMembers: updated.length > 0 ? updated : ['我'],
       updatedAt: Date.now(),
     });
+    setPendingRemoveCompanion(null);
   };
 
-  // Copy formatted split summary for LINE / messages
+  // Copy formatted split summary for LINE / messages (uses current display baseCurrency & custom rates)
   const handleCopySplitSummary = async () => {
-    const text = formatSplitsForSharing(trip);
+    const text = formatSplitsForSharing(trip, baseCurrency, trip.customExchangeRates);
     const copied = await copyTextToClipboard(text);
     if (copied) {
       setCopiedSplitToast(true);
-      setTimeout(() => setCopiedSplitToast(false), 2500);
+      if (copiedSplitTimerRef.current) window.clearTimeout(copiedSplitTimerRef.current);
+      copiedSplitTimerRef.current = window.setTimeout(() => setCopiedSplitToast(false), 2500);
     }
   };
 
-  // Save exchange rates
+  // Save exchange rates (validating > 0)
   const handleSaveRates = () => {
     if (!canEdit) return;
     if (requireAuth && !requireAuth(handleSaveRates, lang === 'zh' ? '儲存自訂匯率' : 'Save exchange rates')) {
       return;
     }
+    const nextRates: Record<string, number> = {};
+    for (const cur of SUPPORTED_CURRENCIES) {
+      if (cur.code === 'JPY') continue;
+      const raw = tempRateInputs[cur.code];
+      if (raw !== undefined && raw.trim() !== '') {
+        const parsed = parseFloat(raw);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          nextRates[cur.code] = parsed;
+        }
+      }
+    }
     onUpdateTrip({
       ...trip,
-      customExchangeRates: tempRates,
+      customExchangeRates: Object.keys(nextRates).length > 0 ? nextRates : undefined,
       updatedAt: Date.now(),
     });
     setShowRateModal(false);
@@ -975,7 +1118,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     return trip.expenses.filter((e) => e.date === todayStr).length;
   }, [trip.expenses, todayStr]);
 
-  // Filtered expenses list based on date, category & search query
+  // Filtered expenses list based on date, category, composable flags & search query
   const filteredExpenses = useMemo(() => {
     return trip.expenses.filter((item) => {
       // Search keyword filter
@@ -995,6 +1138,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         if (!titleMatch && !notesMatch && !catMatch && !catLabelMatch && !payMethodMatch && !payLabelMatch && !paidByMatch && !tagsMatch && !amountMatch) {
           return false;
         }
+      }
+
+      // Composable flags
+      if (cashOnlyFilter && item.paymentMethod !== 'cash') return false;
+      if (withReceiptFilter && !((item.receiptImages && item.receiptImages.length > 0) || !!item.receiptImage)) {
+        return false;
       }
 
       // Date filter
@@ -1034,12 +1183,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       }
       return item.category === selectedCategoryFilter;
     });
-  }, [trip.expenses, expenseSearchQuery, selectedDateFilter, selectedCategoryFilter, todayStr, trip.startDate, trip.days]);
+  }, [trip.expenses, expenseSearchQuery, selectedDateFilter, selectedCategoryFilter, cashOnlyFilter, withReceiptFilter, todayStr, trip.startDate, trip.days, trip.customCategoryLabels]);
 
   // Total for currently filtered expenses in base currency
   const filteredTotalInBase = useMemo(() => {
-    return filteredExpenses.reduce((sum, item) => sum + getItemConvertedAmount(item), 0);
-  }, [filteredExpenses, baseCurrency, trip.customExchangeRates]);
+    return roundForBase(filteredExpenses.reduce((sum, item) => sum + getItemConvertedAmount(item), 0));
+  }, [filteredExpenses, baseCurrency, trip.customExchangeRates, ratesVersion]);
 
   // Group filtered expenses by date for Apple Wallet style daily cards
   const groupedDailyExpenses = useMemo(() => {
@@ -1053,7 +1202,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
     const map = new Map<string, ExpenseItem[]>();
     filteredExpenses.forEach((item) => {
-      const d = (item.date || '').slice(0, 10) || 'other';
+      const d = (item.date || '').slice(0, 10).replace(/\//g, '-') || 'other';
       if (!map.has(d)) map.set(d, []);
       map.get(d)!.push(item);
     });
@@ -1063,7 +1212,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
     sortedDates.forEach((d) => {
       const items = map.get(d)!;
-      const totalInBase = items.reduce((sum, it) => sum + getItemConvertedAmount(it), 0);
+      const totalInBase = roundForBase(items.reduce((sum, it) => sum + getItemConvertedAmount(it), 0));
 
       let label = d;
       let dayNumber: number | undefined;
@@ -1077,11 +1226,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         if (dayIdx >= 0) {
           dayNumber = dayIdx + 1;
           const weekdayNames = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
-          const dateObj = new Date(d);
+          const dateObj = new Date(`${d}T00:00:00`);
           const weekday = !isNaN(dateObj.getTime()) ? weekdayNames[dateObj.getDay()] : '';
           label = `Day ${dayIdx + 1} · ${d.slice(5).replace('-', '/')} ${weekday}`;
         } else {
-          label = d.slice(5).replace('-', '/');
+          const weekdayNames = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+          const dateObj = new Date(`${d}T00:00:00`);
+          const weekday = !isNaN(dateObj.getTime()) ? ` ${weekdayNames[dateObj.getDay()]}` : '';
+          label = `${d.slice(5).replace('-', '/')}${weekday}`;
         }
       }
 
@@ -1095,21 +1247,42 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     });
 
     return groups;
-  }, [filteredExpenses, trip.startDate, trip.days, baseCurrency, trip.customExchangeRates]);
+  }, [filteredExpenses, trip.startDate, trip.days, baseCurrency, trip.customExchangeRates, ratesVersion]);
 
-  const baseDecimals = CURRENCY_MAP[baseCurrency]?.decimals ?? 0;
-  const roundForBase = (val: number) => {
-    const f = Math.pow(10, baseDecimals);
-    return Math.round(val * f) / f;
-  };
+  // Smart exchange rate badge comparing baseCurrency vs TWD (or tripPrimaryCurrency when base is TWD)
+  const displayRateSource = baseCurrency;
+  const displayRateTarget = baseCurrency === 'TWD'
+    ? (tripPrimaryCurrency !== 'TWD' ? tripPrimaryCurrency : 'JPY')
+    : 'TWD';
+  const getRateToJpy = (code: string) =>
+    trip.customExchangeRates?.[code] ??
+    liveRatesInfo?.rates?.[code] ??
+    CURRENCY_MAP[code]?.defaultRateToJPY ??
+    1;
+  const displayRateValue = (() => {
+    const src = getRateToJpy(displayRateSource);
+    const dst = getRateToJpy(displayRateTarget);
+    if (!src || !dst) return 1;
+    return src / dst;
+  })();
+  const displayRateFormatted =
+    displayRateValue < 0.05
+      ? displayRateValue.toFixed(4)
+      : displayRateValue < 1
+      ? displayRateValue.toFixed(3)
+      : displayRateValue.toFixed(2);
 
-  const displayRateSource = baseCurrency === 'JPY' ? 'TWD' : baseCurrency;
-  const displayRateTarget = 'JPY';
-  const displayRateToJpy =
-    trip.customExchangeRates?.[displayRateSource] ??
-    liveRatesInfo?.rates?.[displayRateSource] ??
-    CURRENCY_MAP[displayRateSource]?.defaultRateToJPY ??
-    4.8;
+  // Quick currency pills: prioritize baseCurrency, tripPrimaryCurrency, TWD, JPY (up to 3 unique)
+  const quickCurrencyCodes = useMemo(() => {
+    const list = Array.from(new Set([tripPrimaryCurrency, 'TWD', 'JPY', baseCurrency]));
+    return list.slice(0, 3).map((code) => CURRENCY_MAP[code]).filter(Boolean);
+  }, [tripPrimaryCurrency, baseCurrency]);
+
+  const activeFilterCount =
+    (selectedDateFilter !== 'all' ? 1 : 0) +
+    (selectedCategoryFilter !== 'all' ? 1 : 0) +
+    (cashOnlyFilter ? 1 : 0) +
+    (withReceiptFilter ? 1 : 0);
 
   return (
     <div className="space-y-4">
@@ -1132,7 +1305,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           <div className="flex items-center gap-2 flex-wrap">
             {/* Live Exchange Rate Indicator */}
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-teal-50/80 dark:bg-teal-950/50 border border-teal-200/80 dark:border-teal-800 text-[11px] font-semibold text-teal-800 dark:text-teal-300 font-mono tabular-nums">
-              <span>1 {displayRateSource} ≈ {displayRateToJpy.toFixed(2)} {displayRateTarget}</span>
+              <span>1 {displayRateSource} ≈ {displayRateFormatted} {displayRateTarget}</span>
               <button
                 type="button"
                 onClick={handleRefreshLiveRates}
@@ -1145,17 +1318,18 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               </button>
             </div>
 
-            {/* Base Display Currency Selector */}
+            {/* Base Display Currency Selector (Quick Pills + All 13 Currencies Sheet) */}
             <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/90 p-1 rounded-xl text-xs font-semibold">
-              <span className="text-[10px] text-slate-400 pl-1.5 flex items-center gap-1">
+              <span className="text-[10px] text-slate-400 pl-1.5 hidden sm:flex items-center gap-1">
                 <ArrowRightLeft className="w-3 h-3" />
                 <span>幣別:</span>
               </span>
-              {SUPPORTED_CURRENCIES.slice(0, 3).map((cur) => (
+              {quickCurrencyCodes.map((cur) => (
                 <button
                   key={cur.code}
+                  type="button"
                   onClick={() => setBaseCurrency(cur.code)}
-                  className={`px-2 py-1 rounded-lg text-xs transition ${
+                  className={`px-2 py-1 rounded-lg text-xs transition cursor-pointer ${
                     baseCurrency === cur.code
                       ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 font-bold shadow-2xs'
                       : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
@@ -1166,8 +1340,26 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               ))}
               <button
                 type="button"
+                onClick={() => setShowBaseCurrencySheet(true)}
+                className={`px-2 py-1 rounded-lg text-xs transition flex items-center gap-0.5 cursor-pointer ${
+                  !quickCurrencyCodes.some((c) => c.code === baseCurrency)
+                    ? 'bg-white dark:bg-slate-700 text-teal-700 dark:text-teal-300 font-bold shadow-2xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 hover:bg-white dark:hover:bg-slate-700'
+                }`}
+                title="切換全部 13 種支援幣別"
+                aria-label="更多幣別"
+              >
+                <span>
+                  {!quickCurrencyCodes.some((c) => c.code === baseCurrency)
+                    ? `${CURRENCY_MAP[baseCurrency]?.flag || ''} ${baseCurrency}`
+                    : '更多'}
+                </span>
+                <ChevronDown className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
                 onClick={() => setShowRateModal(true)}
-                className="px-2 py-1 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 hover:bg-white dark:hover:bg-slate-700 transition flex items-center gap-1"
+                className="px-2 py-1 rounded-lg text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 hover:bg-white dark:hover:bg-slate-700 transition flex items-center gap-1 cursor-pointer"
                 title="自訂匯率"
               >
                 <Tag className="w-3 h-3 text-teal-600 dark:text-teal-400" />
@@ -1259,7 +1451,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             )}
           </div>
 
-          {/* Metric 2: Budget Progress */}
+          {/* Metric 2: Budget Progress (accurately converted from tripPrimaryCurrency -> baseCurrency) */}
           <div className="p-3.5 sm:p-4 flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between text-[11px] text-slate-700 dark:text-slate-300 font-semibold mb-1">
@@ -1267,34 +1459,34 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   <Coins className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                   <span>預算執行率</span>
                 </span>
-                {trip.budgetTotal > 0 && (
+                {budgetInBase > 0 && (
                   <span className={`font-mono tabular-nums font-bold ${
-                    totalSpentInBase > trip.budgetTotal
+                    totalSpentInBase > budgetInBase
                       ? 'text-rose-600 dark:text-rose-400'
                       : 'text-teal-700 dark:text-teal-400'
                   }`}>
-                    {Math.round((totalSpentInBase / trip.budgetTotal) * 100)}%
+                    {Math.round((totalSpentInBase / budgetInBase) * 100)}%
                   </span>
                 )}
               </div>
               <div className="font-black font-mono tabular-nums text-lg sm:text-2xl text-slate-900 dark:text-white tracking-tight truncate">
-                {trip.budgetTotal > 0 ? (
-                  formatCurrencyAmount(trip.budgetTotal, baseCurrency)
+                {budgetInBase > 0 ? (
+                  formatCurrencyAmount(budgetInBase, baseCurrency)
                 ) : (
                   <span className="text-sm font-bold text-slate-400">尚未設定總預算</span>
                 )}
               </div>
             </div>
-            {trip.budgetTotal > 0 ? (
+            {budgetInBase > 0 ? (
               <div className="mt-1.5 space-y-1">
                 <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 font-mono tabular-nums">
-                  <span>剩餘 {formatCurrencyAmount(Math.max(0, trip.budgetTotal - totalSpentInBase), baseCurrency)}</span>
-                  <span>{totalSpentInBase > trip.budgetTotal ? '已超支' : '可支配'}</span>
+                  <span>剩餘 {formatCurrencyAmount(Math.max(0, roundForBase(budgetInBase - totalSpentInBase)), baseCurrency)}</span>
+                  <span>{totalSpentInBase > budgetInBase ? '已超支' : '可支配'}</span>
                 </div>
                 <div className="w-full h-1.5 rounded-full bg-[#E5E2DC] dark:bg-slate-700 overflow-hidden">
                   <div
-                    className={`h-full transition-all ${totalSpentInBase > trip.budgetTotal ? 'bg-rose-500' : 'bg-teal-600'}`}
-                    style={{ width: `${Math.min(100, (totalSpentInBase / trip.budgetTotal) * 100)}%` }}
+                    className={`h-full transition-all ${totalSpentInBase > budgetInBase ? 'bg-rose-500' : 'bg-teal-600'}`}
+                    style={{ width: `${Math.min(100, (totalSpentInBase / budgetInBase) * 100)}%` }}
                   />
                 </div>
               </div>
@@ -1377,9 +1569,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
             {hasInitialCash ? (
               <div className="mt-1.5 space-y-1">
-                <div className="flex items-center justify-between text-[10px] text-emerald-800 dark:text-emerald-300 font-mono tabular-nums">
-                  <span>初始 {initialCashAmt.toLocaleString()}</span>
-                  <span>已付 {totalCashSpent.toLocaleString()}</span>
+                <div className="flex items-center justify-between gap-1 text-[10px] text-emerald-800 dark:text-emerald-300 font-mono tabular-nums">
+                  <span className="truncate">初始 {formatCurrencyAmount(initialCashAmt, initialCashCur)}</span>
+                  <span className="truncate">已付 {formatCurrencyAmount(totalCashSpent, initialCashCur)}</span>
                 </div>
                 <div className="w-full h-1.5 rounded-full bg-emerald-100 dark:bg-emerald-950 overflow-hidden">
                   <div
@@ -1397,58 +1589,52 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         </div>
 
 
-        {/* Navigation Tabs for Expenses: Records, Table, Charts, Split */}
-        <div className="flex items-center gap-2 pt-4 border-t border-slate-100 dark:border-slate-800 mt-4 overflow-x-auto scrollbar-none">
-          <button
-            type="button"
-            onClick={() => setExpenseSubTab('records')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
-              effectiveSubTab === 'records'
-                ? 'bg-teal-600 text-white shadow-xs'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
-            }`}
+        {/* Navigation Segmented Control for Expenses: 明細 / 統計 / 分帳 */}
+        <div className="pt-4 border-t border-[#E5E2DC]/80 dark:border-slate-800 mt-4">
+          <div
+            className={`grid ${
+              !trip.isSoloTrip && trip.isSplitEnabled ? 'grid-cols-3' : 'grid-cols-2'
+            } p-1 rounded-xl bg-[#EFECE5] dark:bg-slate-800/90 gap-1`}
           >
-            <Receipt className="w-3.5 h-3.5" />
-            <span>支出明細與圓餅圖</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setExpenseSubTab('table')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
-              effectiveSubTab === 'table'
-                ? 'bg-teal-600 text-white shadow-xs'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
-            }`}
-          >
-            <TableProperties className="w-3.5 h-3.5" />
-            <span>每日支出統計表</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setExpenseSubTab('charts')}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 ${
-              effectiveSubTab === 'charts'
-                ? 'bg-teal-600 text-white shadow-xs'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
-            }`}
-          >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span>統計圖表</span>
-          </button>
-          {!trip.isSoloTrip && trip.isSplitEnabled && (
             <button
               type="button"
-              onClick={() => setExpenseSubTab('split')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
-                effectiveSubTab === 'split'
-                  ? 'bg-teal-700 text-white shadow-xs'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+              onClick={() => setExpenseSubTab('records')}
+              className={`min-h-[38px] sm:min-h-[34px] px-2.5 rounded-lg text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                effectiveSubTab === 'records'
+                  ? 'bg-white dark:bg-[#111827] text-teal-800 dark:text-teal-300 shadow-xs font-bold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 font-semibold'
               }`}
             >
-              <Users className="w-3.5 h-3.5" />
-              <span>朋友分帳與結算 ({splitMembersList.length} 人)</span>
+              <Receipt className="w-3.5 h-3.5 shrink-0" />
+              <span>{lang === 'zh' ? '明細' : 'Records'}</span>
             </button>
-          )}
+            <button
+              type="button"
+              onClick={() => setExpenseSubTab('stats')}
+              className={`min-h-[38px] sm:min-h-[34px] px-2.5 rounded-lg text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                effectiveSubTab === 'stats'
+                  ? 'bg-white dark:bg-[#111827] text-teal-800 dark:text-teal-300 shadow-xs font-bold'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 font-semibold'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5 shrink-0" />
+              <span>{lang === 'zh' ? '統計' : 'Stats'}</span>
+            </button>
+            {!trip.isSoloTrip && trip.isSplitEnabled && (
+              <button
+                type="button"
+                onClick={() => setExpenseSubTab('split')}
+                className={`min-h-[38px] sm:min-h-[34px] px-2.5 rounded-lg text-xs transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  effectiveSubTab === 'split'
+                    ? 'bg-white dark:bg-[#111827] text-teal-800 dark:text-teal-300 shadow-xs font-bold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 font-semibold'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5 shrink-0" />
+                <span>{lang === 'zh' ? `分帳 (${splitMembersList.length})` : `Split (${splitMembersList.length})`}</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1523,7 +1709,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   ) : canEdit ? (
                     <button
                       type="button"
-                      onClick={() => handleRemoveCompanion(m)}
+                      onClick={() => requestRemoveCompanion(m)}
                       className="p-1 rounded-full hover:bg-rose-100 dark:hover:bg-rose-950/60 text-slate-400 hover:text-rose-600 transition cursor-pointer"
                       title="移除此旅伴"
                     >
@@ -1638,7 +1824,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               </button>
             </div>
 
-            {/* Transfers List */}
+            {/* Transfers List with Settled Checkboxes */}
             {splitsResult.transfers.length === 0 ? (
               <div className="py-6 px-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800/50 border border-[#E5E2DC]/80 dark:border-slate-800 text-center space-y-1">
                 <Sparkles className="w-6 h-6 mx-auto text-teal-600 dark:text-teal-400 mb-1" />
@@ -1649,26 +1835,101 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   所有公費支出皆已平衡
                 </p>
               </div>
-            ) : (
-              <div className="rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/40 border border-[#E5E2DC] dark:border-slate-800 divide-y divide-[#E5E2DC]/75 dark:divide-slate-800 overflow-hidden">
-                {splitsResult.transfers.map((t, idx) => (
-                  <div
-                    key={idx}
-                    className="px-4 py-3 flex items-center justify-between gap-3"
-                  >
-                    <div className="flex items-center gap-2 text-xs font-bold text-slate-800 dark:text-slate-200">
-                      <span className="text-rose-600 dark:text-rose-400">{t.from}</span>
-                      <span className="text-slate-400 font-normal">➜ 應付給</span>
-                      <span className="text-emerald-700 dark:text-emerald-400">{t.to}</span>
-                    </div>
-
-                    <div className="font-black font-mono tabular-nums text-base text-teal-700 dark:text-teal-300 shrink-0">
-                      {formatCurrencyAmount(t.amount, baseCurrency)}
-                    </div>
+            ) : (() => {
+              const settledCount = splitsResult.transfers.filter((tr) =>
+                Boolean(trip.settledTransfers?.[getTransferSettlementKey(tr.from, tr.to, tr.amount)]?.settled)
+              ).length;
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-[11px] px-1">
+                    <span className="text-slate-500 dark:text-slate-400 font-medium">
+                      點擊左側圓圈可標記已完成轉帳
+                    </span>
+                    <span
+                      className={`font-mono tabular-nums font-bold ${
+                        settledCount === splitsResult.transfers.length
+                          ? 'text-emerald-700 dark:text-emerald-400'
+                          : 'text-teal-700 dark:text-teal-400'
+                      }`}
+                    >
+                      已結清 {settledCount} / {splitsResult.transfers.length} 筆
+                    </span>
                   </div>
-                ))}
-              </div>
-            )}
+                  <div className="rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/40 border border-[#E5E2DC] dark:border-slate-800 divide-y divide-[#E5E2DC]/75 dark:divide-slate-800 overflow-hidden">
+                    {splitsResult.transfers.map((tr, idx) => {
+                      const settleKey = getTransferSettlementKey(tr.from, tr.to, tr.amount);
+                      const isSettled = Boolean(trip.settledTransfers?.[settleKey]?.settled);
+                      return (
+                        <div
+                          key={settleKey || idx}
+                          className={`px-3.5 sm:px-4 py-3 flex items-center justify-between gap-3 transition ${
+                            isSettled ? 'bg-emerald-50/50 dark:bg-emerald-950/20' : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <button
+                              type="button"
+                              disabled={!canEdit}
+                              onClick={() => handleToggleTransferSettled(tr.from, tr.to, tr.amount)}
+                              className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition cursor-pointer disabled:opacity-50 ${
+                                isSettled
+                                  ? 'bg-emerald-600 border-emerald-600 text-white'
+                                  : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 hover:border-teal-600'
+                              }`}
+                              title={isSettled ? '取消已還清標記' : '標記為已還清'}
+                              aria-label={isSettled ? '取消已還清標記' : '標記為已還清'}
+                            >
+                              {isSettled && <Check className="w-4 h-4 stroke-[2.8]" />}
+                            </button>
+                            <div className="min-w-0">
+                              <div
+                                className={`flex items-center gap-1.5 text-xs font-bold flex-wrap ${
+                                  isSettled ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-800 dark:text-slate-200'
+                                }`}
+                              >
+                                <span className={isSettled ? '' : 'text-rose-600 dark:text-rose-400'}>{tr.from}</span>
+                                <span className="text-slate-400 font-normal">➜ 應付給</span>
+                                <span className={isSettled ? '' : 'text-emerald-700 dark:text-emerald-400'}>{tr.to}</span>
+                              </div>
+                              {isSettled && (
+                                <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
+                                  已還清結案
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span
+                              className={`font-black font-mono tabular-nums text-base ${
+                                isSettled
+                                  ? 'line-through text-slate-400 dark:text-slate-500'
+                                  : 'text-teal-700 dark:text-teal-300'
+                              }`}
+                            >
+                              {formatCurrencyAmount(tr.amount, baseCurrency)}
+                            </span>
+                            {canEdit && (
+                              <button
+                                type="button"
+                                onClick={() => handleToggleTransferSettled(tr.from, tr.to, tr.amount)}
+                                className={`hidden sm:inline-flex min-h-[30px] px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                                  isSettled
+                                    ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300'
+                                    : 'bg-white dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-teal-600'
+                                }`}
+                              >
+                                {isSettled ? '已結清' : '標記已還'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -1676,8 +1937,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       {/* ================= SECTION B: CHARTS & EXPENSES LIST ================= */}
       {effectiveSubTab !== 'split' && (
         <>
-          {/* 2. Charts Section */}
-          {effectiveSubTab === 'charts' && (
+          {/* 2. Unified Stats Section (Charts + Daily Summary Table combined) */}
+          {effectiveSubTab === 'stats' && (
       <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-6 shadow-xs">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
           <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
@@ -1720,17 +1981,20 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         ) : chartView === 'daily' ? (
           /* Daily Spending Bar Chart */
           <div className="space-y-4">
-            <div className="w-full h-56 sm:h-64">
+            <div className="w-full h-56 sm:h-64 min-w-0">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={dailyChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <BarChart data={dailyChartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.15} />
                   <XAxis
                     dataKey="label"
+                    interval="preserveStartEnd"
+                    minTickGap={16}
                     tick={{ fontSize: 11, fill: '#94a3b8' }}
                     tickLine={false}
                     axisLine={{ stroke: '#cbd5e1', opacity: 0.3 }}
                   />
                   <YAxis
+                    width={42}
                     tick={{ fontSize: 10, fill: '#94a3b8' }}
                     tickLine={false}
                     axisLine={false}
@@ -1754,6 +2018,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                     fill="#0f766e"
                     radius={[6, 6, 0, 0]}
                     maxBarSize={48}
+                    isAnimationActive={false}
                     onClick={(entry: any) => {
                       if (entry && entry.date) {
                         setChartDateDetail((prev) => (prev === entry.date ? null : entry.date));
@@ -1769,14 +2034,6 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-slate-400 font-bold">點擊任一日期查看當日明細：</span>
-                <button
-                  type="button"
-                  onClick={() => setExpenseSubTab('table')}
-                  className="text-teal-600 dark:text-teal-400 hover:underline font-bold flex items-center gap-1"
-                >
-                  <TableProperties className="w-3 h-3" />
-                  <span>查看每日統計總覽表 ➜</span>
-                </button>
               </div>
               <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none text-xs">
                 {dailyChartData.map((d) => (
@@ -1801,69 +2058,19 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             </div>
           </div>
         ) : (
-          /* Category Pie Chart */
+          /* Category Pie Chart (High-DPI interactive SVG Donut) */
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
-            <div className="md:col-span-6 flex flex-col items-center justify-center relative min-h-[210px] w-full">
-              <div className="w-full h-52">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieChartData}
-                      dataKey="value"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={55}
-                      outerRadius={80}
-                      paddingAngle={3}
-                      stroke="none"
-                      onClick={(entry: any) => {
-                        if (entry && entry.key) {
-                          setChartCategoryDetail((prev) => (prev === entry.key ? null : entry.key));
-                        }
-                      }}
-                      className="cursor-pointer"
-                    >
-                      {pieChartData.map((entry) => (
-                        <Cell
-                          key={`cell-${entry.key}`}
-                          fill={entry.color}
-                          opacity={!chartCategoryDetail || chartCategoryDetail === entry.key ? 1 : 0.4}
-                          className="transition-opacity cursor-pointer"
-                        />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip
-                      formatter={(val: any, name: any, item: any) => [
-                        `${formatCurrencyAmount(Number(val), baseCurrency)} (${item.payload.percentage}%)`,
-                        name,
-                      ]}
-                      contentStyle={{
-                        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                        border: 'none',
-                        borderRadius: '12px',
-                        color: '#fff',
-                        fontSize: '12px',
-                        padding: '8px 12px',
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div className="absolute pointer-events-none flex flex-col items-center justify-center">
-                <span className="text-[10px] text-slate-400 font-semibold">
-                  {chartCategoryDetail ? '類別小計' : (lang === 'zh' ? '總支出' : 'Total')}
-                </span>
-                <span className="text-xs sm:text-sm font-black font-mono text-slate-800 dark:text-slate-100">
-                  {formatCurrencyAmount(
-                    chartCategoryDetail
-                      ? (pieChartData.find((p) => p.key === chartCategoryDetail)?.value || 0)
-                      : totalSpentInBase,
-                    baseCurrency
-                  )}
-                </span>
-              </div>
+            <div className="md:col-span-6 flex flex-col items-center justify-center w-full">
+              <CategoryDonutChart
+                data={pieChartData}
+                totalValue={totalSpentInBase}
+                baseCurrency={baseCurrency}
+                selectedKey={chartCategoryDetail}
+                onSelectKey={(key) =>
+                  setChartCategoryDetail((prev) => (prev === key ? null : key))
+                }
+                totalLabel={lang === 'zh' ? '總支出' : 'Total'}
+              />
             </div>
 
             <div className="md:col-span-6 space-y-2">
@@ -2040,8 +2247,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       </div>
           )}
 
-          {/* 2.5 Daily Expense Table Section */}
-          {effectiveSubTab === 'table' && (
+          {/* 2.5 Daily Expense Table Section (shown right beneath Charts inside unified Stats tab) */}
+          {effectiveSubTab === 'stats' && (
             <div className="bg-white dark:bg-[#111827] rounded-3xl p-4 sm:p-6 border border-[#E5E2DC] dark:border-slate-800 shadow-xs space-y-4 animate-in fade-in duration-150">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
                 <div>
@@ -2441,76 +2648,20 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-center">
-                    {/* Donut Chart */}
-                    <div className="md:col-span-5 flex flex-col items-center justify-center relative min-h-[190px] w-full">
-                      <div className="w-full h-48 sm:h-52">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={pieChartData}
-                              dataKey="value"
-                              nameKey="name"
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={55}
-                              outerRadius={80}
-                              paddingAngle={3}
-                              stroke="none"
-                              onClick={(entry: any) => {
-                                if (entry && entry.key) {
-                                  const nextKey = selectedCategoryFilter === entry.key ? 'all' : entry.key;
-                                  setSelectedCategoryFilter(nextKey);
-                                  setChartCategoryDetail(nextKey === 'all' ? null : nextKey);
-                                }
-                              }}
-                              className="cursor-pointer"
-                            >
-                              {pieChartData.map((entry) => (
-                                <Cell
-                                  key={`cell-${entry.key}`}
-                                  fill={entry.color}
-                                  opacity={
-                                    selectedCategoryFilter === 'all' || selectedCategoryFilter === entry.key
-                                      ? 1
-                                      : 0.35
-                                  }
-                                  className="transition-opacity cursor-pointer"
-                                />
-                              ))}
-                            </Pie>
-                            <RechartsTooltip
-                              formatter={(val: any, name: any, item: any) => [
-                                `${formatCurrencyAmount(Number(val), baseCurrency)} (${item.payload.percentage}%)`,
-                                name,
-                              ]}
-                              contentStyle={{
-                                backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                                border: 'none',
-                                borderRadius: '12px',
-                                color: '#fff',
-                                fontSize: '12px',
-                                padding: '8px 12px',
-                              }}
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-
-                      <div className="absolute pointer-events-none flex flex-col items-center justify-center">
-                        <span className="text-[10px] text-slate-400 font-semibold">
-                          {selectedCategoryFilter !== 'all'
-                            ? (pieChartData.find((p) => p.key === selectedCategoryFilter)?.name || '類別小計')
-                            : (lang === 'zh' ? '總支出' : 'Total')}
-                        </span>
-                        <span className="text-xs sm:text-sm font-black font-mono text-slate-800 dark:text-slate-100">
-                          {formatCurrencyAmount(
-                            selectedCategoryFilter !== 'all'
-                              ? (pieChartData.find((p) => p.key === selectedCategoryFilter)?.value || 0)
-                              : totalSpentInBase,
-                            baseCurrency
-                          )}
-                        </span>
-                      </div>
+                    {/* High-DPI Interactive SVG Donut Chart */}
+                    <div className="md:col-span-5 flex flex-col items-center justify-center w-full">
+                      <CategoryDonutChart
+                        data={pieChartData}
+                        totalValue={totalSpentInBase}
+                        baseCurrency={baseCurrency}
+                        selectedKey={selectedCategoryFilter !== 'all' ? selectedCategoryFilter : null}
+                        onSelectKey={(key) => {
+                          const nextKey = selectedCategoryFilter === key ? 'all' : key;
+                          setSelectedCategoryFilter(nextKey);
+                          setChartCategoryDetail(nextKey === 'all' ? null : nextKey);
+                        }}
+                        totalLabel={lang === 'zh' ? '總支出' : 'Total'}
+                      />
                     </div>
 
                     {/* Category List Breakdown */}
@@ -2600,6 +2751,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           todayStr={todayStr}
           lang={lang}
           hasPreTripExpenses={trip.expenses.some((e) => trip.startDate && e.date < trip.startDate)}
+          ratesVersion={ratesVersion}
         />
 
         {/* Compact Search & Filter Action Bar */}
@@ -2633,7 +2785,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             type="button"
             onClick={() => setShowFilterDrawer(true)}
             className={`min-h-[44px] sm:min-h-[40px] px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 border shadow-2xs active:scale-95 cursor-pointer ${
-              (selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all')
+              activeFilterCount > 0
                 ? 'bg-teal-700 text-white border-teal-700 shadow-teal-600/20'
                 : 'bg-white dark:bg-slate-800 border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-[#FAF9F6] dark:hover:bg-slate-700'
             }`}
@@ -2641,16 +2793,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           >
             <Filter className="w-3.5 h-3.5" />
             <span>{lang === 'zh' ? '篩選' : 'Filter'}</span>
-            {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all') && (
+            {activeFilterCount > 0 && (
               <span className="font-mono tabular-nums font-black">
-                ({(selectedDateFilter !== 'all' ? 1 : 0) + (selectedCategoryFilter !== 'all' ? 1 : 0)})
+                ({activeFilterCount})
               </span>
             )}
           </button>
         </div>
 
         {/* Quiet Active Filter Ribbon (僅在有條件時顯示，完全不佔用多餘版面) */}
-        {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all' || expenseSearchQuery.trim()) && (
+        {(activeFilterCount > 0 || expenseSearchQuery.trim()) && (
           <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-teal-50/70 dark:bg-teal-950/30 border border-teal-200/50 dark:border-teal-900/40 text-xs">
             <div className="flex items-center gap-1.5 flex-wrap min-w-0">
               <span className="text-[11px] font-medium text-slate-400 shrink-0">
@@ -2667,12 +2819,16 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                       ? '行前準備'
                       : selectedDateFilter === 'cash_only'
                       ? '僅看現金'
-                      : `Day ${trip.days.find(d => d.date === selectedDateFilter)?.dayNumber || ''} (${selectedDateFilter.slice(5).replace('-', '/')})`}
+                      : (() => {
+                          const matchedDay = trip.days.find((d) => d.date === selectedDateFilter);
+                          const dateLabel = selectedDateFilter.slice(5).replace('-', '/');
+                          return matchedDay ? `Day ${matchedDay.dayNumber} (${dateLabel})` : dateLabel;
+                        })()}
                   </span>
                   <button
                     type="button"
                     onClick={() => setSelectedDateFilter('all')}
-                    className="hover:text-rose-500 transition p-0.5"
+                    className="hover:text-rose-500 transition p-0.5 cursor-pointer"
                     aria-label="移除日期篩選"
                   >
                     <X className="w-3 h-3" />
@@ -2690,9 +2846,42 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   </span>
                   <button
                     type="button"
-                    onClick={() => setSelectedCategoryFilter('all')}
-                    className="hover:text-rose-500 transition p-0.5"
+                    onClick={() => {
+                      setSelectedCategoryFilter('all');
+                      setChartCategoryDetail(null);
+                    }}
+                    className="hover:text-rose-500 transition p-0.5 cursor-pointer"
                     aria-label="移除類別篩選"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {/* Cash Only composable chip */}
+              {cashOnlyFilter && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-teal-200/80 dark:border-teal-800 text-[11px] font-semibold text-teal-800 dark:text-teal-200">
+                  <span>僅看現金</span>
+                  <button
+                    type="button"
+                    onClick={() => setCashOnlyFilter(false)}
+                    className="hover:text-rose-500 transition p-0.5 cursor-pointer"
+                    aria-label="移除僅看現金篩選"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              )}
+
+              {/* With Receipt composable chip */}
+              {withReceiptFilter && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 border border-teal-200/80 dark:border-teal-800 text-[11px] font-semibold text-teal-800 dark:text-teal-200">
+                  <span>附發票憑證</span>
+                  <button
+                    type="button"
+                    onClick={() => setWithReceiptFilter(false)}
+                    className="hover:text-rose-500 transition p-0.5 cursor-pointer"
+                    aria-label="移除附發票篩選"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -2706,7 +2895,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   <button
                     type="button"
                     onClick={() => setExpenseSearchQuery('')}
-                    className="hover:text-rose-500 transition p-0.5"
+                    className="hover:text-rose-500 transition p-0.5 cursor-pointer"
                     aria-label="移除搜尋關鍵字"
                   >
                     <X className="w-3 h-3" />
@@ -2715,7 +2904,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               )}
 
               <span className="text-[10px] text-slate-400 font-mono">
-                ({filteredExpenses.length} 筆)
+                ({filteredExpenses.length} 筆 · {formatCurrencyAmount(filteredTotalInBase, baseCurrency)})
               </span>
             </div>
 
@@ -2724,9 +2913,12 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               onClick={() => {
                 setSelectedDateFilter('all');
                 setSelectedCategoryFilter('all');
+                setCashOnlyFilter(false);
+                setWithReceiptFilter(false);
+                setChartCategoryDetail(null);
                 setExpenseSearchQuery('');
               }}
-              className="text-[11px] font-bold text-teal-700 dark:text-teal-300 hover:underline shrink-0"
+              className="text-[11px] font-bold text-teal-700 dark:text-teal-300 hover:underline shrink-0 cursor-pointer"
             >
               {lang === 'zh' ? '全部清除' : 'Clear All'}
             </button>
@@ -2742,28 +2934,31 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               <p className="font-bold text-sm text-slate-700 dark:text-slate-200">
                 {expenseSearchQuery.trim()
                   ? `找不到符合「${expenseSearchQuery}」的記帳記錄`
-                  : selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all'
+                  : activeFilterCount > 0
                   ? '目前篩選條件下尚無支出記錄'
                   : '尚未有任何記帳支出'}
               </p>
               <p className="text-xs text-slate-400 mt-0.5">
                 {expenseSearchQuery.trim()
                   ? '可嘗試更換關鍵字，或點擊下方按鈕顯示全部明細'
-                  : selectedDateFilter !== 'all'
+                  : activeFilterCount > 0
                   ? '點擊下方按鈕可為此日期新增支出，或重設檢視全部'
                   : '旅途中隨手記下一筆，即時換算匯率與掌握預算'}
               </p>
             </div>
             <div className="flex items-center justify-center gap-2 pt-1">
-              {(selectedDateFilter !== 'all' || selectedCategoryFilter !== 'all' || expenseSearchQuery.trim()) && (
+              {(activeFilterCount > 0 || expenseSearchQuery.trim()) && (
                 <button
                   type="button"
                   onClick={() => {
                     setSelectedDateFilter('all');
                     setSelectedCategoryFilter('all');
+                    setCashOnlyFilter(false);
+                    setWithReceiptFilter(false);
+                    setChartCategoryDetail(null);
                     setExpenseSearchQuery('');
                   }}
-                  className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold transition active:scale-95"
+                  className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold transition active:scale-95 cursor-pointer"
                 >
                   顯示全部明細
                 </button>
@@ -2877,10 +3072,25 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                                 {item.title}
                               </span>
                               {allImages.length > 0 && (
-                                <span className="text-[10px] text-teal-600 dark:text-teal-400 font-bold flex items-center gap-0.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setViewingReceiptGallery({
+                                      images: allImages,
+                                      currentIndex: 0,
+                                      title: item.title,
+                                      amount: item.amount,
+                                      currency: item.currency,
+                                      expenseId: item.id,
+                                    });
+                                  }}
+                                  className="px-1.5 py-0.5 rounded-md bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-[10px] text-teal-700 dark:text-teal-300 font-bold flex items-center gap-0.5 shrink-0 cursor-pointer transition"
+                                  title="直接檢視發票收據"
+                                >
                                   <Receipt className="w-3 h-3" />
                                   <span>{allImages.length}</span>
-                                </span>
+                                </button>
                               )}
                             </div>
 
@@ -2984,20 +3194,29 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           fullHeightOnMobile
           maxWidthClass="sm:max-w-lg"
           zIndexClass="z-[70]"
+          disableBackdropClose={Boolean(viewingReceiptGallery)}
           ariaLabel={editingExpenseId ? '編輯支出' : '新增支出'}
         >
-          <IosNavBar
-            title={
-              editingExpenseId
-                ? (lang === 'zh' ? '編輯支出' : 'Edit Expense')
-                : (lang === 'zh' ? '新增支出' : 'Add Expense')
-            }
-            leftLabel={lang === 'zh' ? '取消' : 'Cancel'}
-            onLeftClick={closeAddExpenseModal}
-            rightLabel={lang === 'zh' ? '儲存' : 'Save'}
-            onRightClick={() => handleSaveExpense(false)}
-            rightDisabled={!canEdit || (parseFloat(expenseDraft.amount) || 0) <= 0}
-          />
+          {!isEditorSubPickerOpen && (
+            <IosNavBar
+              title={
+                editingExpenseId
+                  ? (lang === 'zh' ? '編輯支出' : 'Edit Expense')
+                  : (lang === 'zh' ? '新增支出' : 'Add Expense')
+              }
+              leftLabel={lang === 'zh' ? '取消' : 'Cancel'}
+              onLeftClick={closeAddExpenseModal}
+              rightLabel={lang === 'zh' ? '儲存' : 'Save'}
+              onRightClick={() => handleSaveExpense(false)}
+              rightDisabled={
+                !canEdit ||
+                evaluateExpenseAmount(
+                  expenseDraft.amount,
+                  CURRENCY_MAP[expenseDraft.currency]?.decimals ?? 0
+                ) <= 0
+              }
+            />
+          )}
 
           <TiantianExpenseEditor
             trip={trip}
@@ -3022,7 +3241,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   expenseDraft.description,
                   getCategoryMeta(expenseDraft.category).label
                 ).title,
-                amount: parseFloat(expenseDraft.amount) || 0,
+                amount: evaluateExpenseAmount(
+                  expenseDraft.amount,
+                  CURRENCY_MAP[expenseDraft.currency]?.decimals ?? 0
+                ),
                 currency: expenseDraft.currency,
               });
             }}
@@ -3032,7 +3254,45 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             saveStatusToast={saveToast}
             focusTrigger={editorFocusTrigger}
             hideFooterSaveCancel={true}
+            onPickerActiveChange={setIsEditorSubPickerOpen}
           />
+        </IosModalSheet>
+      )}
+
+      {/* 4.5 Base Currency Picker iOS Sheet (All 13 Supported Currencies) */}
+      {showBaseCurrencySheet && (
+        <IosModalSheet
+          onClose={() => setShowBaseCurrencySheet(false)}
+          variant="grouped"
+          maxWidthClass="sm:max-w-md"
+          zIndexClass="z-[75]"
+          ariaLabel="切換顯示幣別"
+        >
+          <IosNavBar
+            title={lang === 'zh' ? '選擇顯示幣別' : 'Display Currency'}
+            subtitle="所有圖表與總計將即時換算"
+            leftLabel={lang === 'zh' ? '關閉' : 'Close'}
+            onLeftClick={() => setShowBaseCurrencySheet(false)}
+          />
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+            <IosInsetGroup>
+              {SUPPORTED_CURRENCIES.map((cur) => (
+                <IosCheckmarkRow
+                  key={cur.code}
+                  icon={<span className="text-base leading-none">{cur.flag}</span>}
+                  label={`${cur.code} · ${cur.name}`}
+                  trailingMeta={
+                    <span className="text-xs font-mono text-slate-500">{cur.symbol}</span>
+                  }
+                  selected={baseCurrency === cur.code}
+                  onSelect={() => {
+                    setBaseCurrency(cur.code);
+                    setShowBaseCurrencySheet(false);
+                  }}
+                />
+              ))}
+            </IosInsetGroup>
+          </div>
         </IosModalSheet>
       )}
 
@@ -3058,7 +3318,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               <IosRow
                 icon={<RefreshCw className={`w-4 h-4 text-teal-700 dark:text-teal-400 ${isFetchingRates ? 'animate-spin' : ''}`} />}
                 label="更新今日網路匯率"
-                subtitle="將自動填入參考外幣匯率"
+                subtitle={liveRatesInfo?.source || '將自動填入參考外幣匯率'}
                 onClick={handleRefreshLiveRates}
                 disabled={isFetchingRates}
                 trailing={
@@ -3069,9 +3329,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               />
             </IosInsetGroup>
 
-            <IosInsetGroup header="自訂外幣匯率（以日圓 JPY 計價）">
+            <IosInsetGroup header="自訂外幣匯率（以日圓 JPY 計價，須大於 0）">
               {SUPPORTED_CURRENCIES.filter((c) => c.code !== 'JPY').map((cur) => {
-                const currentVal = tempRates[cur.code] ?? cur.defaultRateToJPY;
+                const rawVal = tempRateInputs[cur.code] ?? String(cur.defaultRateToJPY);
+                const parsedVal = parseFloat(rawVal);
+                const isInvalid = rawVal.trim() !== '' && (!Number.isFinite(parsedVal) || parsedVal <= 0);
                 return (
                   <div
                     key={cur.code}
@@ -3083,16 +3345,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                     </span>
                     <div className="flex items-center gap-1.5 font-mono tabular-nums">
                       <input
-                        type="number"
-                        step="0.01"
-                        value={currentVal}
+                        type="text"
+                        inputMode="decimal"
+                        value={rawVal}
                         onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          if (!isNaN(val)) {
-                            setTempRates((prev) => ({ ...prev, [cur.code]: val }));
-                          }
+                          const cleaned = e.target.value.replace(/[^0-9.]/g, '');
+                          setTempRateInputs((prev) => ({ ...prev, [cur.code]: cleaned }));
                         }}
-                        className="w-24 bg-transparent text-right text-[16px] sm:text-xs font-bold text-slate-900 dark:text-white outline-none"
+                        placeholder={String(cur.defaultRateToJPY)}
+                        className={`w-24 bg-transparent text-right text-[16px] sm:text-xs font-bold outline-none ${
+                          isInvalid ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-white'
+                        }`}
                       />
                       <span className="text-xs text-slate-400">JPY</span>
                     </div>
@@ -3106,7 +3369,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                 label="恢復系統預設匯率"
                 destructive
                 onClick={() => {
-                  setTempRates({});
+                  setTempRateInputs({});
                   onUpdateTrip({ ...trip, customExchangeRates: undefined, updatedAt: Date.now() });
                   setShowRateModal(false);
                 }}
@@ -3213,7 +3476,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   label="累計現金支出扣除"
                   trailing={
                     <span className="text-xs font-mono tabular-nums font-bold text-rose-600 dark:text-rose-400">
-                      - {formatCurrencyAmount(totalCashSpent, cashInputCur)}
+                      - {formatCurrencyAmount(modalCashSpent, cashInputCur)}
                     </span>
                   }
                 />
@@ -3221,11 +3484,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                   label="預估手頭剩餘"
                   trailing={
                     <span className={`text-sm font-mono tabular-nums font-black ${
-                      (parseFloat(cashInputAmt) || 0) - totalCashSpent < 0
+                      (parseFloat(cashInputAmt) || 0) - modalCashSpent < 0
                         ? 'text-rose-600 dark:text-rose-400'
                         : 'text-emerald-700 dark:text-emerald-300'
                     }`}>
-                      {formatCurrencyAmount((parseFloat(cashInputAmt) || 0) - totalCashSpent, cashInputCur)}
+                      {formatCurrencyAmount((parseFloat(cashInputAmt) || 0) - modalCashSpent, cashInputCur)}
                     </span>
                   }
                 />
@@ -3235,10 +3498,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         </IosModalSheet>
       )}
 
-      {/* 6. Multi-Receipt Fullscreen Lightbox / Gallery */}
-      {viewingReceiptGallery && (
+      {/* 6. Multi-Receipt Fullscreen Lightbox / Gallery (Portaled above z-[70] sheets) */}
+      {viewingReceiptGallery && typeof document !== 'undefined' && createPortal(
         <div
-          className="fixed inset-0 z-60 bg-black/85 backdrop-blur-sm flex items-center justify-center px-2 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150"
+          className="fixed inset-0 z-[110] bg-black/88 backdrop-blur-sm flex items-center justify-center px-2 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] animate-in fade-in duration-150"
           onClick={() => setViewingReceiptGallery(null)}
         >
           <div
@@ -3247,10 +3510,10 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
           >
             {/* Header */}
             <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-teal-600" />
-                <div>
-                  <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white">
+              <div className="flex items-center gap-2 min-w-0">
+                <Receipt className="w-4 h-4 text-teal-600 shrink-0" />
+                <div className="min-w-0">
+                  <h4 className="font-bold text-xs sm:text-sm text-slate-900 dark:text-white truncate">
                     {viewingReceiptGallery.title}
                   </h4>
                   <p className="text-[10px] text-slate-400 font-mono">
@@ -3268,18 +3531,48 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               </button>
             </div>
 
-            {/* Image Preview with Next/Prev Carousel */}
-            <div className="relative p-2 sm:p-4 flex-1 overflow-auto flex items-center justify-center bg-slate-950/20 min-h-[300px]">
+            {/* Image Preview with Touch Swipe + Next/Prev Carousel */}
+            <div
+              className="relative p-2 sm:p-4 flex-1 overflow-auto flex items-center justify-center bg-slate-950/20 min-h-[300px]"
+              onTouchStart={(e) => {
+                if (e.touches.length === 1 && viewingReceiptGallery.images.length > 1) {
+                  receiptSwipeStartRef.current = {
+                    x: e.touches[0].clientX,
+                    y: e.touches[0].clientY,
+                  };
+                }
+              }}
+              onTouchEnd={(e) => {
+                const start = receiptSwipeStartRef.current;
+                receiptSwipeStartRef.current = null;
+                if (!start || e.changedTouches.length !== 1 || viewingReceiptGallery.images.length <= 1) return;
+                const dx = e.changedTouches[0].clientX - start.x;
+                const dy = e.changedTouches[0].clientY - start.y;
+                if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+                  setViewingReceiptGallery((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          currentIndex:
+                            dx < 0
+                              ? (prev.currentIndex + 1) % prev.images.length
+                              : (prev.currentIndex - 1 + prev.images.length) % prev.images.length,
+                        }
+                      : null
+                  );
+                }
+              }}
+            >
               <MediaImage
                 tripId={trip.id}
                 ownerId={trip.ownerId}
                 collabId={trip.collabId}
                 src={viewingReceiptGallery.images[viewingReceiptGallery.currentIndex]}
                 alt="Receipt Image"
-                className="max-h-[65vh] max-w-full rounded-2xl object-contain shadow-lg border border-slate-200 dark:border-slate-800"
+                className="max-h-[65dvh] max-w-full rounded-2xl object-contain shadow-lg border border-slate-200 dark:border-slate-800"
               />
 
-              {/* Prev Button */}
+              {/* Prev / Next Buttons */}
               {viewingReceiptGallery.images.length > 1 && (
                 <>
                   <button
@@ -3323,7 +3616,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
             {/* Bottom bar */}
             <div className="p-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
               <span className="text-[11px] text-slate-400">
-                可多張左右滑動切換
+                {viewingReceiptGallery.images.length > 1 ? '可左右滑動或方向鍵切換' : '發票收據原圖檢視'}
               </span>
               <div className="flex items-center gap-2">
                 {canEdit && viewingReceiptGallery.expenseId && (
@@ -3360,7 +3653,8 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Dedicated Category Manage Modal */}
@@ -3368,6 +3662,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         <CategoryManageModal
           customCategories={customCategories}
           customCategoryLabels={trip.customCategoryLabels}
+          categoryUsageCounts={categoryUsageCounts}
           onAddCategory={handleAddCustomCategory}
           onRenameCategory={handleRenameCategory}
           onDeleteCategory={handleDeleteCategory}
@@ -3382,7 +3677,14 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         selectedDateFilter={selectedDateFilter}
         onSelectDateFilter={setSelectedDateFilter}
         selectedCategoryFilter={selectedCategoryFilter}
-        onSelectCategoryFilter={setSelectedCategoryFilter}
+        onSelectCategoryFilter={(next) => {
+          setSelectedCategoryFilter(next);
+          setChartCategoryDetail(next === 'all' ? null : next);
+        }}
+        cashOnly={cashOnlyFilter}
+        onToggleCashOnly={setCashOnlyFilter}
+        withReceipt={withReceiptFilter}
+        onToggleWithReceipt={setWithReceiptFilter}
         defaultCategories={DEFAULT_CATEGORIES}
         customCategories={customCategories}
         customCategoryLabels={trip.customCategoryLabels}
@@ -3393,9 +3695,39 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
         onResetAll={() => {
           setSelectedDateFilter('all');
           setSelectedCategoryFilter('all');
+          setCashOnlyFilter(false);
+          setWithReceiptFilter(false);
+          setChartCategoryDetail(null);
         }}
         lang={lang}
       />
+
+      {/* Safe Remove Companion Confirmation iOS Action Sheet */}
+      {pendingRemoveCompanion && (
+        <IosActionSheet
+          title={lang === 'zh' ? `確定要移除旅伴「${pendingRemoveCompanion}」？` : `Remove companion "${pendingRemoveCompanion}"?`}
+          message={(() => {
+            const refCount = trip.expenses.filter(
+              (e) =>
+                e.paidBy === pendingRemoveCompanion ||
+                (Array.isArray(e.splitWith) && e.splitWith.includes(pendingRemoveCompanion))
+            ).length;
+            if (refCount > 0) {
+              return `「${pendingRemoveCompanion}」共有 ${refCount} 筆歷史分帳紀錄，移除後新支出將不再預設分攤，但歷史結算明細會完整保留。`;
+            }
+            return `移除後「${pendingRemoveCompanion}」將不再出現在分帳成員名單中。`;
+          })()}
+          options={[
+            {
+              label: lang === 'zh' ? '確認移除' : 'Remove',
+              tone: 'destructive',
+              onClick: () => handleConfirmRemoveCompanion(pendingRemoveCompanion),
+            },
+          ]}
+          cancelLabel={lang === 'zh' ? '取消' : 'Cancel'}
+          onClose={() => setPendingRemoveCompanion(null)}
+        />
+      )}
 
       {/* Safe Delete Confirmation iOS Action Sheet */}
       {pendingDeleteExpense && (

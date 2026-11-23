@@ -20,6 +20,19 @@ export const MediaImage: React.FC<MediaImageProps> = ({
   ...rest
 }) => {
   const [resolvedSrc, setResolvedSrc] = useState<string>(() => getCachedMediaDisplaySrc(src));
+  const [authTick, setAuthTick] = useState(0);
+
+  // Re-attempt resolving cloud media once Firebase Auth restores on cold start
+  useEffect(() => {
+    if (!src || !isMediaRef(src) || resolvedSrc) return;
+    const handleAuthReady = () => setAuthTick((n) => n + 1);
+    window.addEventListener('hiyori_auth_ready', handleAuthReady);
+    window.addEventListener('auth_state_change', handleAuthReady);
+    return () => {
+      window.removeEventListener('hiyori_auth_ready', handleAuthReady);
+      window.removeEventListener('auth_state_change', handleAuthReady);
+    };
+  }, [src, resolvedSrc]);
 
   useEffect(() => {
     if (!src) {
@@ -37,17 +50,26 @@ export const MediaImage: React.FC<MediaImageProps> = ({
       return;
     }
 
+    // Clear stale previous image immediately while resolving new ref
+    setResolvedSrc('');
+
     let cancelled = false;
-    resolveMediaSrc(src, { tripId, ownerId, collabId }).then((dataUrl) => {
-      if (!cancelled && dataUrl) {
-        setResolvedSrc(dataUrl);
-      }
-    });
+    resolveMediaSrc(src, { tripId, ownerId, collabId })
+      .then((dataUrl) => {
+        if (!cancelled && dataUrl) {
+          setResolvedSrc(dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setResolvedSrc('');
+        }
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [src, tripId, ownerId, collabId]);
+  }, [src, tripId, ownerId, collabId, authTick]);
 
   return <img src={resolvedSrc || TRANSPARENT_PLACEHOLDER} alt={alt} {...rest} />;
 };

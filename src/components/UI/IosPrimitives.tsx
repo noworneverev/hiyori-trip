@@ -1,7 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import { useVisualViewport } from '../../hooks/useVisualViewport';
+import { useModalLayer } from '../../hooks/useModalHistory';
 
 export interface IosModalSheetProps {
   onClose: () => void;
@@ -12,6 +14,7 @@ export interface IosModalSheetProps {
   disableBackdropClose?: boolean;
   fullHeightOnMobile?: boolean;
   ariaLabel?: string;
+  enableSwipeToDismiss?: boolean;
 }
 
 export const IosModalSheet: React.FC<IosModalSheetProps> = ({
@@ -23,27 +26,101 @@ export const IosModalSheet: React.FC<IosModalSheetProps> = ({
   disableBackdropClose = false,
   fullHeightOnMobile = false,
   ariaLabel,
+  enableSwipeToDismiss = true,
 }) => {
   useBodyScrollLock(true);
+  useModalLayer(true, onClose, { disableEscape: disableBackdropClose });
+  const viewport = useVisualViewport(true);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !disableBackdropClose) {
-        onClose();
-      }
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<{
+    active: boolean;
+    startY: number;
+    startTime: number;
+    currentY: number;
+  }>({ active: false, startY: 0, startTime: 0, currentY: 0 });
+  const [isDraggingSheet, setIsDraggingSheet] = useState(false);
+
+  const handleGrabberTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (disableBackdropClose || !enableSwipeToDismiss || e.touches.length !== 1) return;
+    dragStateRef.current = {
+      active: true,
+      startY: e.touches[0].clientY,
+      startTime: Date.now(),
+      currentY: 0,
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, disableBackdropClose]);
+    setIsDraggingSheet(true);
+  };
+
+  const handleGrabberTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    const state = dragStateRef.current;
+    if (!state.active || e.touches.length !== 1) return;
+    const rawDy = e.touches[0].clientY - state.startY;
+    // Slight upward rubber-band resistance, free downward pull
+    const dy = rawDy < 0 ? rawDy * 0.18 : rawDy;
+    state.currentY = dy;
+    if (sheetRef.current) {
+      sheetRef.current.style.transform = `translate3d(0, ${dy}px, 0)`;
+    }
+  };
+
+  const handleGrabberTouchEnd = () => {
+    const state = dragStateRef.current;
+    if (!state.active) return;
+    state.active = false;
+    setIsDraggingSheet(false);
+
+    const elapsed = Math.max(1, Date.now() - state.startTime);
+    const velocity = state.currentY / elapsed; // px/ms
+
+    if (state.currentY > 96 || (velocity > 0.45 && state.currentY > 32)) {
+      if (sheetRef.current) {
+        sheetRef.current.style.transition = 'transform 180ms cubic-bezier(0.32, 0.72, 0, 1)';
+        sheetRef.current.style.transform = 'translate3d(0, 100%, 0)';
+      }
+      window.setTimeout(() => {
+        onClose();
+      }, 150);
+    } else if (sheetRef.current) {
+      sheetRef.current.style.transition = 'transform 220ms cubic-bezier(0.32, 0.72, 0, 1)';
+      sheetRef.current.style.transform = 'translate3d(0, 0, 0)';
+      window.setTimeout(() => {
+        if (sheetRef.current) {
+          sheetRef.current.style.transition = '';
+          sheetRef.current.style.transform = '';
+        }
+      }, 230);
+    }
+  };
 
   const bgSurfaceClass =
     variant === 'grouped'
-      ? 'bg-[#FAF9F6] dark:bg-[#0B1120]'
+      ? 'bg-[#FAF9F6] dark:bg-[#090D16]'
       : 'bg-white dark:bg-[#111827]';
+
+  // Adapt modal height dynamically when iOS/Android software keyboard shrinks visualViewport
+  const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 640;
+  const dynamicContainerStyle: React.CSSProperties | undefined =
+    isMobileScreen && viewport.isKeyboardOpen && viewport.height
+      ? {
+          height: `${viewport.height}px`,
+          top: `${viewport.offsetTop}px`,
+          bottom: 'auto',
+        }
+      : undefined;
+
+  const dynamicSheetStyle: React.CSSProperties | undefined =
+    isMobileScreen && viewport.isKeyboardOpen && viewport.height
+      ? {
+          maxHeight: `${Math.max(280, viewport.height - 16)}px`,
+          height: fullHeightOnMobile ? `${Math.max(280, viewport.height - 16)}px` : undefined,
+        }
+      : undefined;
 
   const content = (
     <div
-      className={`fixed inset-0 ${zIndexClass} flex items-end sm:items-center justify-center bg-slate-950/55 backdrop-blur-[2px] px-0 sm:px-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-0 sm:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] touch-none overscroll-none overflow-hidden animate-in fade-in duration-150`}
+      style={dynamicContainerStyle}
+      className={`fixed inset-0 ${zIndexClass} flex items-end sm:items-center justify-center bg-slate-950/55 backdrop-blur-[3px] px-0 sm:px-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-0 sm:pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] touch-none overscroll-none overflow-hidden animate-in fade-in duration-150`}
       onClick={() => {
         if (!disableBackdropClose) onClose();
       }}
@@ -52,14 +129,27 @@ export const IosModalSheet: React.FC<IosModalSheetProps> = ({
       aria-label={ariaLabel}
     >
       <div
+        ref={sheetRef}
+        style={dynamicSheetStyle}
         className={`w-full ${maxWidthClass} ${bgSurfaceClass} rounded-t-[28px] sm:rounded-3xl shadow-2xl border-t sm:border border-[#E5E2DC] dark:border-slate-800 text-slate-800 dark:text-slate-100 flex flex-col ${
           fullHeightOnMobile ? 'h-[92dvh] sm:h-[90dvh]' : 'max-h-[92dvh] sm:max-h-[90dvh]'
-        } overflow-hidden animate-in slide-in-from-bottom sm:fade-in sm:zoom-in-95 duration-200`}
+        } overflow-hidden ${
+          isDraggingSheet
+            ? ''
+            : 'animate-in slide-in-from-bottom sm:fade-in sm:zoom-in-95 duration-250'
+        }`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Mobile iOS Drag Handle Grabber */}
-        <div className="sm:hidden flex justify-center pt-2.5 pb-1 shrink-0 bg-inherit">
-          <div className="w-9 h-1 rounded-full bg-slate-300/90 dark:bg-slate-700" />
+        {/* Mobile iOS Interactive Drag Handle Grabber */}
+        <div
+          onTouchStart={handleGrabberTouchStart}
+          onTouchMove={handleGrabberTouchMove}
+          onTouchEnd={handleGrabberTouchEnd}
+          onTouchCancel={handleGrabberTouchEnd}
+          className="sm:hidden flex justify-center items-center pt-2.5 pb-1.5 min-h-[24px] shrink-0 bg-inherit touch-none ios-chrome cursor-grab active:cursor-grabbing"
+          aria-hidden="true"
+        >
+          <div className="w-10 h-1 rounded-full bg-slate-300 dark:bg-slate-700" />
         </div>
         {children}
       </div>
@@ -108,31 +198,31 @@ export const IosNavBar: React.FC<IosNavBarProps> = ({
   const rightColorClass =
     rightTone === 'destructive'
       ? 'text-rose-600 dark:text-rose-400 font-bold'
-      : rightTone === 'primary'
-      ? 'text-teal-700 dark:text-teal-400 font-bold'
+      : rightTone === 'done'
+      ? 'text-teal-700 dark:text-teal-300 font-bold'
       : 'text-teal-700 dark:text-teal-400 font-bold';
 
   return (
-    <div className="sticky top-0 z-20 px-3 sm:px-4 min-h-[52px] py-1.5 border-b border-[#E5E2DC]/90 dark:border-slate-800 bg-[#FAF9F6]/95 dark:bg-[#111827]/95 backdrop-blur-md grid grid-cols-[minmax(72px,auto)_1fr_minmax(72px,auto)] items-center gap-2 shrink-0">
+    <div className="sticky top-0 z-20 px-2.5 sm:px-4 min-h-[52px] py-1.5 border-b border-[#E5E2DC]/90 dark:border-slate-800 bg-[#FAF9F6]/95 dark:bg-[#111827]/95 backdrop-blur-xl grid grid-cols-[minmax(76px,1fr)_auto_minmax(76px,1fr)] items-center gap-1.5 shrink-0 ios-chrome">
       {/* Left Action */}
-      <div className="flex items-center justify-start">
+      <div className="flex items-center justify-start min-w-0">
         {onLeftClick ? (
           <button
             type="button"
             onClick={onLeftClick}
             disabled={leftDisabled}
-            className="min-h-[44px] px-2 flex items-center gap-1 rounded-xl text-[15px] sm:text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 active:opacity-60 disabled:opacity-40 transition cursor-pointer whitespace-nowrap"
+            className="min-h-[44px] min-w-[44px] px-2 flex items-center gap-1 rounded-xl text-[15px] sm:text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 active:opacity-60 disabled:opacity-40 transition cursor-pointer whitespace-nowrap"
           >
             {leftIcon}
-            <span>{leftLabel}</span>
+            <span className="truncate">{leftLabel}</span>
           </button>
         ) : (
           <span />
         )}
       </div>
 
-      {/* Centered iOS Title */}
-      <div className="min-w-0 text-center px-1">
+      {/* True Centered iOS Title */}
+      <div className="min-w-0 max-w-[54vw] sm:max-w-[260px] text-center px-1">
         <h3 className="font-bold text-[15px] sm:text-sm text-slate-900 dark:text-white tracking-tight truncate">
           {title}
         </h3>
@@ -144,7 +234,7 @@ export const IosNavBar: React.FC<IosNavBarProps> = ({
       </div>
 
       {/* Right Action */}
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end min-w-0">
         {rightSlot ? (
           rightSlot
         ) : rightLabel ? (
@@ -153,10 +243,10 @@ export const IosNavBar: React.FC<IosNavBarProps> = ({
             form={rightFormId}
             onClick={onRightClick}
             disabled={rightDisabled || rightLoading}
-            className={`min-h-[44px] px-2.5 flex items-center justify-end gap-1.5 rounded-xl text-[15px] sm:text-xs ${rightColorClass} hover:bg-teal-50/70 dark:hover:bg-teal-950/40 active:opacity-60 disabled:opacity-35 disabled:cursor-not-allowed transition cursor-pointer whitespace-nowrap`}
+            className={`min-h-[44px] min-w-[44px] px-2.5 flex items-center justify-end gap-1.5 rounded-xl text-[15px] sm:text-xs ${rightColorClass} hover:bg-teal-50/70 dark:hover:bg-teal-950/40 active:opacity-60 disabled:opacity-35 disabled:cursor-not-allowed transition cursor-pointer whitespace-nowrap`}
           >
             {rightLoading && <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />}
-            <span>{rightLabel}</span>
+            <span className="truncate">{rightLabel}</span>
           </button>
         ) : (
           <span />
@@ -232,7 +322,7 @@ export const IosRow: React.FC<IosRowProps> = ({
   destructive = false,
   className = '',
 }) => {
-  const baseClass = `w-full min-h-[48px] px-4 py-2.5 flex items-center justify-between gap-3 text-left transition ${
+  const baseClass = `w-full min-h-[48px] px-4 py-2.5 flex items-center justify-between gap-3 text-left transition ios-chrome ${
     onClick && !disabled
       ? 'hover:bg-[#FAF9F6] dark:hover:bg-slate-800/45 active:bg-[#F3F1EC] dark:active:bg-slate-800/70 cursor-pointer'
       : ''
@@ -305,7 +395,7 @@ export const IosDisclosureRow: React.FC<IosDisclosureRowProps> = ({
         onClick={onToggle}
         disabled={disabled}
         aria-expanded={mode === 'inline' ? expanded : undefined}
-        className="w-full min-h-[48px] px-4 py-2.5 flex items-center justify-between gap-3 text-left hover:bg-[#FAF9F6] dark:hover:bg-slate-800/45 active:bg-[#F3F1EC] dark:active:bg-slate-800/70 disabled:opacity-50 transition cursor-pointer"
+        className="w-full min-h-[48px] px-4 py-2.5 flex items-center justify-between gap-3 text-left hover:bg-[#FAF9F6] dark:hover:bg-slate-800/45 active:bg-[#F3F1EC] dark:active:bg-slate-800/70 disabled:opacity-50 transition cursor-pointer ios-chrome"
       >
         <div className="flex items-center gap-3 min-w-0 flex-1">
           {icon && <div className="shrink-0 flex items-center justify-center">{icon}</div>}
@@ -376,12 +466,12 @@ export const IosCheckmarkRow: React.FC<IosCheckmarkRowProps> = ({
     <button
       type="button"
       onClick={onSelect}
-      className={`w-full min-h-[46px] ${
+      className={`w-full min-h-[48px] ${
         inset ? 'pl-11 pr-4' : 'px-4'
-      } py-2.5 flex items-center justify-between gap-3 text-left transition cursor-pointer ${
+      } py-2.5 flex items-center justify-between gap-3 text-left transition cursor-pointer ios-chrome ${
         selected
-          ? 'bg-teal-50/60 dark:bg-teal-950/30'
-          : 'hover:bg-[#F3F1EC]/65 dark:hover:bg-slate-800/40'
+          ? 'bg-teal-50/65 dark:bg-teal-950/35'
+          : 'hover:bg-[#F3F1EC]/65 dark:hover:bg-slate-800/40 active:bg-[#F3F1EC] dark:active:bg-slate-800/60'
       }`}
     >
       <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -434,14 +524,17 @@ export const IosToggleSwitch: React.FC<IosToggleSwitchProps> = ({
       aria-checked={checked}
       aria-label={ariaLabel}
       disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-[28px] w-[46px] shrink-0 items-center rounded-full p-[2px] transition-colors duration-200 focus:outline-none cursor-pointer disabled:opacity-50 ${
-        checked ? 'bg-teal-700 dark:bg-teal-500' : 'bg-slate-300/90 dark:bg-slate-700'
+      onClick={(e) => {
+        e.stopPropagation();
+        onChange(!checked);
+      }}
+      className={`relative inline-flex h-[31px] w-[51px] shrink-0 items-center rounded-full p-[2px] transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-teal-500/50 cursor-pointer disabled:opacity-50 ${
+        checked ? 'bg-teal-600 dark:bg-teal-500' : 'bg-slate-300/90 dark:bg-slate-700'
       }`}
     >
       <span
-        className={`pointer-events-none inline-block h-[24px] w-[24px] transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
-          checked ? 'translate-x-[18px]' : 'translate-x-0'
+        className={`pointer-events-none inline-block h-[27px] w-[27px] transform rounded-full bg-white shadow-sm transition-transform duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] ${
+          checked ? 'translate-x-[20px]' : 'translate-x-0'
         }`}
       />
     </button>
@@ -466,7 +559,16 @@ export const IosToggleRow: React.FC<IosToggleRowProps> = ({
   disabled = false,
 }) => {
   return (
-    <div className="w-full min-h-[48px] px-4 py-2.5 flex items-center justify-between gap-3">
+    <div
+      onClick={() => {
+        if (!disabled) onChange(!checked);
+      }}
+      className={`w-full min-h-[52px] px-4 py-2.5 flex items-center justify-between gap-3 transition ios-chrome ${
+        disabled
+          ? 'opacity-50 cursor-not-allowed'
+          : 'hover:bg-[#FAF9F6] dark:hover:bg-slate-800/45 active:bg-[#F3F1EC] dark:active:bg-slate-800/70 cursor-pointer'
+      }`}
+    >
       <div className="flex items-center gap-3 min-w-0 flex-1">
         {icon && <div className="shrink-0 flex items-center justify-center">{icon}</div>}
         <div className="min-w-0 flex-1">
@@ -512,35 +614,30 @@ export const IosActionSheet: React.FC<IosActionSheetProps> = ({
   options,
   cancelLabel = '取消',
   onClose,
-  zIndexClass = 'z-[90]',
+  zIndexClass = 'z-[95]',
 }) => {
+  const titleId = useId();
   useBodyScrollLock(true);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  useModalLayer(true, onClose);
 
   const sheet = (
     <div
-      className={`fixed inset-0 ${zIndexClass} flex items-end sm:items-center justify-center bg-slate-950/55 backdrop-blur-[2px] px-3 sm:px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] touch-none overscroll-none animate-in fade-in duration-150`}
+      className={`fixed inset-0 ${zIndexClass} flex items-end sm:items-center justify-center bg-slate-950/55 backdrop-blur-[3px] px-3 sm:px-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] touch-none overscroll-none animate-in fade-in duration-150`}
       onClick={onClose}
       role="alertdialog"
       aria-modal="true"
+      aria-labelledby={title ? titleId : undefined}
     >
       <div
-        className="w-full max-w-sm space-y-2 animate-in slide-in-from-bottom sm:fade-in sm:zoom-in-95 duration-200"
+        className="w-full max-w-sm space-y-2 animate-in slide-in-from-bottom sm:fade-in sm:zoom-in-95 duration-200 ios-chrome"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Main Grouped Options Card */}
-        <div className="rounded-2xl bg-white/95 dark:bg-[#111827]/95 backdrop-blur-xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl overflow-hidden divide-y divide-[#E5E2DC]/80 dark:divide-slate-800">
+        <div className="rounded-2xl bg-white/95 dark:bg-[#111827]/95 backdrop-blur-xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl overflow-y-auto max-h-[68dvh] divide-y divide-[#E5E2DC]/80 dark:divide-slate-800">
           {(title || message) && (
             <div className="px-5 py-4 text-center space-y-1.5">
               {title && (
-                <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                <h3 id={titleId} className="font-bold text-sm text-slate-900 dark:text-white">
                   {title}
                 </h3>
               )}
@@ -558,7 +655,7 @@ export const IosActionSheet: React.FC<IosActionSheetProps> = ({
               type="button"
               disabled={opt.disabled}
               onClick={opt.onClick}
-              className={`w-full min-h-[50px] px-4 py-3 text-center text-sm sm:text-xs transition active:bg-[#F3F1EC] dark:active:bg-slate-800 hover:bg-[#FAF9F6] dark:hover:bg-slate-800/60 disabled:opacity-45 cursor-pointer ${
+              className={`w-full min-h-[52px] px-4 py-3 text-center text-[15px] sm:text-xs transition active:bg-[#F3F1EC] dark:active:bg-slate-800 hover:bg-[#FAF9F6] dark:hover:bg-slate-800/60 disabled:opacity-45 cursor-pointer ${
                 opt.tone === 'destructive'
                   ? 'font-bold text-rose-600 dark:text-rose-400'
                   : opt.tone === 'primary'
@@ -575,7 +672,7 @@ export const IosActionSheet: React.FC<IosActionSheetProps> = ({
         <button
           type="button"
           onClick={onClose}
-          className="w-full min-h-[50px] px-4 py-3 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-xl text-center text-sm sm:text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 active:scale-[0.99] transition cursor-pointer"
+          className="w-full min-h-[52px] px-4 py-3 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-xl text-center text-[15px] sm:text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 active:scale-[0.99] transition cursor-pointer"
         >
           {cancelLabel}
         </button>

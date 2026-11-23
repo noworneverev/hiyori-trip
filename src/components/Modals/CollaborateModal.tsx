@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Trip, CollaboratorMember, CollaboratorRole, GeneralAccessType } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { enableTripCollaboration } from '../../utils/firebase';
 import { User } from 'firebase/auth';
 import { getPublicShareBaseUrl } from '../../utils/url';
 import { copyTextToClipboard } from '../../utils/clipboard';
+import { generateQrSvgPath } from '../../utils/qrCode';
 import {
   IosModalSheet,
   IosNavBar,
@@ -63,19 +64,23 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
 
   const isOwner = !trip.ownerId || Boolean(currentUser && currentUser.uid === trip.ownerId);
   const ownerEmail = trip.ownerEmail || currentUser?.email || '建立者 (本機)';
-  const currentMembers: CollaboratorMember[] = trip.collaborators || [
-    {
-      id: currentUser?.uid || 'owner',
-      email: ownerEmail,
-      name: currentUser?.displayName || '行程發起人',
-      role: 'owner',
-      addedAt: Date.now(),
-    },
-  ];
+  const currentMembers: CollaboratorMember[] =
+    trip.collaborators && trip.collaborators.length > 0
+      ? trip.collaborators
+      : [
+          {
+            id: currentUser?.uid || 'owner',
+            email: ownerEmail,
+            name: currentUser?.displayName || '行程發起人',
+            role: 'owner',
+            addedAt: Date.now(),
+          },
+        ];
 
   const collabUrl = trip.collabId
     ? `${getPublicShareBaseUrl()}?collab=${trip.collabId}`
     : null;
+  const qrSvg = useMemo(() => (collabUrl ? generateQrSvgPath(collabUrl) : null), [collabUrl]);
 
   const ensureCollaborative = async (): Promise<string> => {
     if (!currentUser) {
@@ -348,7 +353,11 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                   key={member.email}
                   icon={
                     <div className="w-8 h-8 rounded-full bg-teal-50 dark:bg-teal-950 text-teal-800 dark:text-teal-300 font-bold flex items-center justify-center text-xs">
-                      {isMemberOwner ? <Crown className="w-4 h-4 text-amber-500" /> : member.email[0].toUpperCase()}
+                      {isMemberOwner ? (
+                        <Crown className="w-4 h-4 text-amber-500" />
+                      ) : (
+                        (member.email?.[0] || '?').toUpperCase()
+                      )}
                     </div>
                   }
                   label={member.email}
@@ -368,7 +377,7 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
                 key={member.email}
                 icon={
                   <div className="w-8 h-8 rounded-full bg-teal-50 dark:bg-teal-950 text-teal-800 dark:text-teal-300 font-bold flex items-center justify-center text-xs">
-                    {member.email[0].toUpperCase()}
+                    {(member.email?.[0] || '?').toUpperCase()}
                   </div>
                 }
                 label={member.email}
@@ -465,16 +474,23 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
               onToggle={() => setShowQr((v) => !v)}
             >
               <div className="py-5 px-4 text-center space-y-2">
-                <div className="inline-block p-2.5 rounded-2xl bg-white shadow-xs border border-[#E5E2DC]">
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(collabUrl)}`}
-                    alt="Collaborate Trip QR Code"
-                    className="w-32 h-32 mx-auto"
-                    loading="lazy"
-                  />
+                <div className="inline-block p-3 rounded-2xl bg-white shadow-xs border border-[#E5E2DC]">
+                  {qrSvg ? (
+                    <svg
+                      viewBox={`0 0 ${qrSvg.size} ${qrSvg.size}`}
+                      className="w-32 h-32 mx-auto"
+                      role="img"
+                      aria-label="Collaborate Trip QR Code"
+                    >
+                      <rect width={qrSvg.size} height={qrSvg.size} fill="#ffffff" />
+                      <path d={qrSvg.path} fill="#0f172a" />
+                    </svg>
+                  ) : (
+                    <p className="text-xs text-slate-500 py-6 px-4">連結過長，請改用複製連結分享</p>
+                  )}
                 </div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  掃描 QR Code 立即加入共同編輯
+                  本機安全生成 · 掃描 QR Code 立即加入共同編輯
                 </p>
               </div>
             </IosDisclosureRow>

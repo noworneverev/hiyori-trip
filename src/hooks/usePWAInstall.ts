@@ -5,8 +5,19 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 }
 
+declare global {
+  interface Window {
+    __hiyoriDeferredInstallPrompt?: BeforeInstallPromptEvent | null;
+  }
+}
+
 export function usePWAInstall() {
-  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(() => {
+    if (typeof window !== 'undefined' && window.__hiyoriDeferredInstallPrompt) {
+      return window.__hiyoriDeferredInstallPrompt;
+    }
+    return null;
+  });
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
 
@@ -18,7 +29,6 @@ export function usePWAInstall() {
 
     setIsInstalled(computeStandalone());
 
-    // Detect iOS & iPadOS 13+ (which identifies as MacIntel with touch points)
     const userAgent = window.navigator.userAgent.toLowerCase();
     const isIOSDevice =
       /iphone|ipad|ipod/.test(userAgent) ||
@@ -31,33 +41,51 @@ export function usePWAInstall() {
 
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
-      setDeferredPrompt(e as BeforeInstallPromptEvent);
+      const promptEvent = e as BeforeInstallPromptEvent;
+      window.__hiyoriDeferredInstallPrompt = promptEvent;
+      setDeferredPrompt(promptEvent);
+    };
+
+    const handleEarlyCaptured = () => {
+      if (window.__hiyoriDeferredInstallPrompt) {
+        setDeferredPrompt(window.__hiyoriDeferredInstallPrompt);
+      }
     };
 
     const handleAppInstalled = () => {
       setIsInstalled(true);
+      window.__hiyoriDeferredInstallPrompt = null;
       setDeferredPrompt(null);
     };
 
     standaloneMedia.addEventListener?.('change', handleDisplayModeChange);
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('hiyori_install_prompt_ready', handleEarlyCaptured);
     window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
       standaloneMedia.removeEventListener?.('change', handleDisplayModeChange);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('hiyori_install_prompt_ready', handleEarlyCaptured);
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, []);
 
   const install = async () => {
     if (!deferredPrompt) return false;
-    await deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setIsInstalled(true);
-      setDeferredPrompt(null);
-      return true;
+    const promptToUse = deferredPrompt;
+    // Per spec, BeforeInstallPromptEvent can only be prompted once regardless of outcome
+    window.__hiyoriDeferredInstallPrompt = null;
+    setDeferredPrompt(null);
+    try {
+      await promptToUse.prompt();
+      const { outcome } = await promptToUse.userChoice;
+      if (outcome === 'accepted') {
+        setIsInstalled(true);
+        return true;
+      }
+    } catch (err) {
+      console.warn('PWA install prompt error:', err);
     }
     return false;
   };

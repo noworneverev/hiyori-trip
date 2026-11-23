@@ -2,18 +2,17 @@
 <html lang="zh-TW">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>日和手帳 Hiyori - 自由行隨身旅行手帖</title>
     <meta name="description" content="日和手帳 Hiyori：自由行隨身旅行手帖。支援行程路線地圖導覽、隨行即時天氣、多幣別即時換算記帳、發票拍照管理、行前待辦與離線 PDF 隨行手冊。" />
     <meta property="og:title" content="日和手帳 Hiyori - 自由行隨身旅行手帖" />
     <meta property="og:description" content="日和手帳 Hiyori：自由行隨身旅行手帖。支援行程路線地圖導覽、隨行即時天氣、多幣別即時換算記帳、發票拍照管理、行前待辦與離線 PDF 隨行手冊。" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="theme-color" content="#FAF9F6" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#090D16" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#FAF9F6" id="hiyori-theme-color" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="日和手帳" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
@@ -24,66 +23,50 @@
       rel="stylesheet"
     />
     <script>
-      // Browser Extension & Interceptor Compatibility Guard
+      // Synchronous pre-paint theme, text-scale, and PWA install prompt bootstrap (prevents FOUC on iOS/Android)
       (function() {
         try {
-          var _origFetch = window.fetch;
-          Object.defineProperty(window, 'fetch', {
-            get: function() {
-              return _origFetch;
-            },
-            set: function(fn) {
-              _origFetch = fn;
-            },
-            configurable: true,
-            enumerable: true
-          });
-        } catch (e) {
-          // Fallback if property is already defined non-configurable
-        }
-
-        // Suppress harmless Vite HMR WebSocket errors in cloud reverse proxy where HMR is disabled
-        var _origConsoleError = console.error;
-        console.error = function() {
-          for (var i = 0; i < arguments.length; i++) {
-            var arg = arguments[i];
-            var str = String((arg && (arg.message || arg.stack)) || arg || '');
-            if (str.indexOf('[vite]') !== -1 || str.indexOf('WebSocket') !== -1 || str.indexOf('closed without opened') !== -1) {
-              return;
-            }
+          var savedDark = localStorage.getItem('hiyori_theme_dark');
+          if (savedDark === null) savedDark = localStorage.getItem('wayfarer_theme_dark');
+          var isDark = savedDark !== null
+            ? savedDark === 'true'
+            : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var root = document.documentElement;
+          var bg = isDark ? '#090D16' : '#FAF9F6';
+          if (isDark) {
+            root.classList.add('dark');
+            root.style.colorScheme = 'dark';
+          } else {
+            root.classList.remove('dark');
+            root.style.colorScheme = 'light';
           }
-          return _origConsoleError.apply(console, arguments);
-        };
-        var _origConsoleWarn = console.warn;
-        console.warn = function() {
-          for (var i = 0; i < arguments.length; i++) {
-            var arg = arguments[i];
-            var str = String((arg && (arg.message || arg.stack)) || arg || '');
-            if (str.indexOf('[vite]') !== -1 || str.indexOf('WebSocket') !== -1 || str.indexOf('closed without opened') !== -1) {
-              return;
-            }
-          }
-          return _origConsoleWarn.apply(console, arguments);
-        };
+          root.style.backgroundColor = bg;
+          var metaTheme = document.getElementById('hiyori-theme-color');
+          if (metaTheme) metaTheme.setAttribute('content', bg);
 
-        // Suppress extension-injected and Vite HMR WebSocket errors from crashing page telemetry
+          var savedScale = localStorage.getItem('hiyori_accessibility_scale_v1');
+          if (savedScale === 'comfortable' || savedScale === 'senior') {
+            root.setAttribute('data-text-scale', savedScale);
+          }
+
+          var savedLang = localStorage.getItem('hiyori_lang') || localStorage.getItem('wayfarer_lang');
+          if (savedLang) {
+            var langMap = { zh: 'zh-TW', 'zh-CN': 'zh-CN', en: 'en', ja: 'ja', ko: 'ko' };
+            if (langMap[savedLang]) root.lang = langMap[savedLang];
+          }
+        } catch (e) {}
+
+        // Capture early beforeinstallprompt before React mounts
+        window.__hiyoriDeferredInstallPrompt = null;
+        window.addEventListener('beforeinstallprompt', function(e) {
+          e.preventDefault();
+          window.__hiyoriDeferredInstallPrompt = e;
+          window.dispatchEvent(new CustomEvent('hiyori_install_prompt_ready'));
+        });
+
+        // Ignore noise strictly from browser extensions
         window.addEventListener('error', function(e) {
           if (e && e.filename && e.filename.indexOf('chrome-extension://') !== -1) {
-            e.stopImmediatePropagation();
-            e.preventDefault();
-            return true;
-          }
-          var msg = String(e && (e.message || (e.error && e.error.message) || ''));
-          var file = String((e && e.filename) || '');
-          if (msg.indexOf('WebSocket') !== -1 || file.indexOf('@vite/client') !== -1) {
-            e.stopImmediatePropagation();
-            e.preventDefault();
-            return true;
-          }
-        }, true);
-        window.addEventListener('unhandledrejection', function(e) {
-          var reason = String((e && (e.reason && (e.reason.message || e.reason))) || '');
-          if (reason.indexOf('WebSocket') !== -1 || reason.indexOf('[vite]') !== -1) {
             e.stopImmediatePropagation();
             e.preventDefault();
             return true;
@@ -104,16 +87,14 @@
           background-color: #FAF9F6;
           color: #18181B;
           font-family: -apple-system, BlinkMacSystemFont, "Plus Jakarta Sans", "Noto Sans TC", sans-serif;
-          padding: env(safe-area-inset-top, 24px) 24px env(safe-area-inset-bottom, 24px);
+          padding: max(24px, env(safe-area-inset-top, 0px)) 24px max(24px, env(safe-area-inset-bottom, 0px));
           text-align: center;
         }
         .hiyori-splash-title { color: #18181B; }
         .hiyori-splash-sub { color: #0F766E; }
-        @media (prefers-color-scheme: dark) {
-          .hiyori-splash { background-color: #090D16; color: #F8FAFC; }
-          .hiyori-splash-title { color: #F8FAFC; }
-          .hiyori-splash-sub { color: #2DD4BF; }
-        }
+        html.dark .hiyori-splash { background-color: #090D16; color: #F8FAFC; }
+        html.dark .hiyori-splash-title { color: #F8FAFC; }
+        html.dark .hiyori-splash-sub { color: #2DD4BF; }
       </style>
       <div class="hiyori-splash">
         <div style="width: 64px; height: 64px; border-radius: 20px; background: linear-gradient(135deg, #0e2a2c, #0b1e2e); display: flex; align-items: center; justify-content: center; box-shadow: 0 10px 25px -5px rgba(15, 118, 110, 0.22); margin-bottom: 20px; border: 1px solid rgba(255, 255, 255, 0.14);">
@@ -130,4 +111,3 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

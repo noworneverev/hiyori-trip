@@ -2,21 +2,33 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Trip, DayPlan, ItineraryItem } from '../../types/itinerary';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import { useModalLayer } from '../../hooks/useModalHistory';
 import { LeafletMap, CATEGORY_COLORS } from '../Map/LeafletMap';
-import { calculateDistanceKm, formatDistance, estimateTravelTime, getGoogleMapsNavigationUrl } from '../../utils/geo';
+import {
+  calculateDistanceKm,
+  formatDistance,
+  estimateTravelTime,
+  getGoogleMapsNavigationUrl,
+  getGoogleMapsRouteUrl,
+  isValidCoordinate,
+} from '../../utils/geo';
 import {
   formatDateSlash,
   formatMonthDaySlash,
+  formatMinutesToHHMM,
   getDayOfWeek,
   isDateToday,
   addDaysLocal,
+  normalizeDateKey,
   sortItineraryItemsByTime,
   getSuggestedNextStartTime,
   parseTimeToMinutes,
+  isOvernightTimeRange,
   detectDayTimeConflicts,
   autoShiftDayConflicts,
   DayConflictReport,
 } from '../../utils/date';
+import { resolveDestinationTimezone } from '../../utils/timezone';
 import {
   fetchTripWeatherByDay,
   DayWeatherStatus,
@@ -26,7 +38,9 @@ import { Language, TRANSLATIONS } from '../../utils/i18n';
 import { sanitizeExternalUrl } from '../../utils/url';
 import { garbageCollectOrphanedMedia } from '../../utils/image';
 import { getStoredTrips } from '../../utils/storage';
+import { triggerHaptic } from '../../utils/pwaUpdater';
 import { ItineraryOverviewTable } from '../Itinerary/ItineraryOverviewTable';
+import { IosActionSheet } from '../UI/IosPrimitives';
 import {
   Calendar,
   Clock,
@@ -40,7 +54,6 @@ import {
   CheckCircle2,
   Circle,
   Bus,
-  Bookmark,
   DollarSign,
   ChevronDown,
   ChevronUp,
@@ -54,7 +67,6 @@ import {
   ShoppingBag,
   Sparkles,
   Pin,
-  Route,
   Search,
   X,
   ExternalLink,
@@ -65,6 +77,11 @@ import {
   Umbrella,
   CloudSun,
   Wand2,
+  MoreHorizontal,
+  Copy,
+  CalendarArrowUp,
+  GripVertical,
+  ArrowRight,
 } from 'lucide-react';
 import { MediaImage } from '../UI/MediaImage';
 
@@ -85,19 +102,19 @@ interface TimelineTabProps {
   requestedDay?: { dayNumber: number; nonce: number } | null;
 }
 
-const CATEGORY_MAP: Record<string, { labelKey: string; icon: React.ComponentType<{ className?: string }>; text: string }> = {
-  spot: { labelKey: 'cat_spot', icon: Landmark, text: 'text-teal-700 dark:text-teal-400' },
-  food: { labelKey: 'cat_food', icon: Utensils, text: 'text-slate-600 dark:text-slate-400' },
-  transport: { labelKey: 'cat_transport', icon: Train, text: 'text-slate-600 dark:text-slate-400' },
-  hotel: { labelKey: 'cat_hotel', icon: Hotel, text: 'text-slate-600 dark:text-slate-400' },
-  shopping: { labelKey: 'cat_shopping', icon: ShoppingBag, text: 'text-slate-600 dark:text-slate-400' },
-  activity: { labelKey: 'cat_activity', icon: Sparkles, text: 'text-teal-700 dark:text-teal-400' },
+const CATEGORY_MAP: Record<
+  string,
+  { labelKey: string; fallbackLabel: string; icon: React.ComponentType<{ className?: string }>; text: string }
+> = {
+  spot: { labelKey: 'cat_spot', fallbackLabel: '景點', icon: Landmark, text: 'text-teal-700 dark:text-teal-400' },
+  food: { labelKey: 'cat_food', fallbackLabel: '美食', icon: Utensils, text: 'text-orange-600 dark:text-orange-400' },
+  transport: { labelKey: 'cat_transport', fallbackLabel: '交通', icon: Train, text: 'text-sky-600 dark:text-sky-400' },
+  hotel: { labelKey: 'cat_hotel', fallbackLabel: '住宿', icon: Hotel, text: 'text-violet-600 dark:text-violet-400' },
+  shopping: { labelKey: 'cat_shopping', fallbackLabel: '購物', icon: ShoppingBag, text: 'text-pink-600 dark:text-pink-400' },
+  activity: { labelKey: 'cat_activity', fallbackLabel: '活動', icon: Sparkles, text: 'text-rose-600 dark:text-rose-400' },
+  other: { labelKey: 'cat_other', fallbackLabel: '其他', icon: Pin, text: 'text-slate-600 dark:text-slate-400' },
 };
 
-/**
- * Generic debounce utility with cancel capability to prevent excessive re-renders
- * during rapid scrolling bursts.
- */
 function debounce<T extends (...args: any[]) => void>(fn: T, delay: number) {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const debounced = (...args: Parameters<T>) => {
@@ -116,6 +133,24 @@ function debounce<T extends (...args: any[]) => void>(fn: T, delay: number) {
   return debounced;
 }
 
+/**
+ * Detect whether a touch target sits inside a nested horizontally scrollable element
+ * (such as thumbnail photo carousels) so day-swipe never fights horizontal scroll.
+ */
+function isInsideHorizontalScroller(target: EventTarget | null): boolean {
+  let node = target instanceof HTMLElement ? target : null;
+  while (node) {
+    if (node.dataset?.noDaySwipe === 'true') return true;
+    const style = window.getComputedStyle(node);
+    const ox = style.overflowX;
+    if ((ox === 'auto' || ox === 'scroll') && node.scrollWidth > node.clientWidth + 4) {
+      return true;
+    }
+    node = node.parentElement;
+  }
+  return false;
+}
+
 export const TimelineTab: React.FC<TimelineTabProps> = ({
   trip,
   lang,
@@ -124,7 +159,6 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   onOpenAddItem,
   onOpenEditItem,
   isPickMode,
-  onStartMapPick,
   pickedCoords,
   onPickLocation,
   onOpenMemories,
@@ -133,13 +167,86 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   requestedDay = null,
 }) => {
   const t = TRANSLATIONS[lang];
+  const isZh = lang === 'zh' || lang === 'zh-CN';
+
+  // Resolve destination timezone for accurate Today highlighting & weather splitting
+  const firstTripCoords = useMemo(() => {
+    if (isValidCoordinate(trip.destinationLat, trip.destinationLng)) {
+      return { lat: trip.destinationLat!, lng: trip.destinationLng! };
+    }
+    for (const d of trip.days || []) {
+      const it = d.items.find((i) => isValidCoordinate(i.lat, i.lng));
+      if (it) return { lat: it.lat!, lng: it.lng! };
+    }
+    return null;
+  }, [trip.destinationLat, trip.destinationLng, trip.days]);
+
+  const destTzInfo = useMemo(
+    () => resolveDestinationTimezone(trip.destination, firstTripCoords),
+    [trip.destination, firstTripCoords]
+  );
+
   const [timelineViewMode, setTimelineViewMode] = useState<'daily' | 'overview'>('daily');
-  const [selectedDayNumber, setSelectedDayNumber] = useState<number>(1);
+  const [selectedDayNumber, setSelectedDayNumber] = useState<number>(() => {
+    const todayInTrip = (trip.days || []).find((d) => isDateToday(d.date, destTzInfo.tz));
+    return todayInTrip ? todayInTrip.dayNumber : trip.days[0]?.dayNumber || 1;
+  });
+
+  // Pointer Drag-to-Reorder state (zero-dependency, iOS Safari PWA friendly)
+  const [dragState, setDragState] = useState<{ fromIndex: number; overIndex: number } | null>(null);
+  const dragStateRef = useRef<{ fromIndex: number; overIndex: number } | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    dragStateRef.current = dragState;
+  }, [dragState]);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [spotSearchQuery, setSpotSearchQuery] = useState('');
   const [dayWeatherMap, setDayWeatherMap] = useState<Record<number, DayWeatherStatus>>({});
   const [isWeatherLoading, setIsWeatherLoading] = useState(false);
+
+  // Inline Day Theme & Notes Editor
+  const [isEditingDayHeader, setIsEditingDayHeader] = useState(false);
+  const [dayThemeDraft, setDayThemeDraft] = useState('');
+  const [dayNotesDraft, setDayNotesDraft] = useState('');
+
+  // Commercial Action Sheets: Spot More Menu, Move-to-Day Picker, Delete Spot Confirm, Delete Day Confirm
+  const [actionMenuItem, setActionMenuItem] = useState<{ item: ItineraryItem; index: number } | null>(null);
+  const [moveDayItem, setMoveDayItem] = useState<ItineraryItem | null>(null);
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState<ItineraryItem | null>(null);
+  const [confirmDeleteDay, setConfirmDeleteDay] = useState<DayPlan | null>(null);
+
+  // Reset selectedDayNumber cleanly when switching trips
+  const prevTripIdRef = useRef<string>(trip.id);
+  useEffect(() => {
+    if (prevTripIdRef.current !== trip.id) {
+      prevTripIdRef.current = trip.id;
+      const todayInTrip = (trip.days || []).find((d) => isDateToday(d.date, destTzInfo.tz));
+      setSelectedDayNumber(todayInTrip ? todayInTrip.dayNumber : trip.days[0]?.dayNumber || 1);
+      setSelectedItemId(null);
+      setSpotSearchQuery('');
+      setIsEditingDayHeader(false);
+    }
+  }, [trip.id, trip.days, destTzInfo.tz]);
+
+  // Clamp selectedDayNumber if days array shrinks (e.g. after deleting a day or shortening trip)
+  useEffect(() => {
+    if (trip.days.length > 0 && !trip.days.some((d) => d.dayNumber === selectedDayNumber)) {
+      setSelectedDayNumber(trip.days[trip.days.length - 1].dayNumber);
+    }
+  }, [trip.days, selectedDayNumber]);
+
+  // P0 FIX: Auto-expand map and exit overview whenever Map Pick Mode is activated
+  useEffect(() => {
+    if (isPickMode) {
+      setTimelineViewMode('daily');
+      setIsMapExpanded(true);
+      setTimeout(() => {
+        document.getElementById('timeline-day-map')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 80);
+    }
+  }, [isPickMode]);
 
   // Jump cleanly when another tab requests a specific day
   useEffect(() => {
@@ -149,46 +256,48 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     }
   }, [requestedDay?.dayNumber, requestedDay?.nonce]);
 
-  // Multi-day Open-Meteo Weather Forecast (Free, zero API key, cached locally)
+  // Multi-day Open-Meteo Weather Forecast (Timezone-aware, cached locally)
   const weatherSignature = useMemo(() => {
     return (trip.days || [])
       .map((d) => {
-        const firstGeo = (d.items || []).find((it) => typeof it.lat === 'number' && typeof it.lng === 'number');
+        const firstGeo = (d.items || []).find((it) => isValidCoordinate(it.lat, it.lng));
         return `${d.dayNumber}:${d.date}:${firstGeo ? `${firstGeo.lat?.toFixed(2)},${firstGeo.lng?.toFixed(2)}` : 'none'}`;
       })
       .join('|');
   }, [trip.days]);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     if (!trip.days || trip.days.length === 0) return;
     setIsWeatherLoading(true);
     fetchTripWeatherByDay(
       trip.days.map((d) => ({ dayNumber: d.dayNumber, date: d.date, items: d.items || [] })),
-      trip.destination
+      trip.destination,
+      destTzInfo.tz,
+      controller.signal
     )
       .then((res) => {
-        if (!cancelled) setDayWeatherMap(res);
+        if (!controller.signal.aborted) setDayWeatherMap(res);
       })
       .catch(() => {
         // Silent graceful degradation
       })
       .finally(() => {
-        if (!cancelled) setIsWeatherLoading(false);
+        if (!controller.signal.aborted) setIsWeatherLoading(false);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [trip.id, trip.destination, weatherSignature]);
+  }, [trip.id, trip.destination, destTzInfo.tz, weatherSignature]);
 
-  // Per-day time conflict analysis (genuine overlaps / invalid ranges only)
+  // Per-day time conflict analysis
   const dayConflictReports = useMemo<Record<number, DayConflictReport>>(() => {
     const map: Record<number, DayConflictReport> = {};
     (trip.days || []).forEach((d) => {
-      map[d.dayNumber] = detectDayTimeConflicts(d.items || [], lang === 'zh' || lang === 'zh-CN' ? 'zh' : 'en');
+      map[d.dayNumber] = detectDayTimeConflicts(d.items || [], isZh ? 'zh' : 'en');
     });
     return map;
-  }, [trip.days, lang]);
+  }, [trip.days, isZh]);
 
   const [dismissedConflictKeys, setDismissedConflictKeys] = useState<Record<string, boolean>>(() => {
     try {
@@ -208,7 +317,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     const key = getConflictKey(dayNumber, report);
     if (!key) return;
     setDismissedConflictKeys((prev) => {
-      const next = { ...prev, [key]: true };
+      const entries = Object.entries({ ...prev, [key]: true }).slice(-40);
+      const next = Object.fromEntries(entries);
       try {
         localStorage.setItem('hiyori_dismissed_conflicts_v1', JSON.stringify(next));
       } catch {
@@ -220,7 +330,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
   const handleAutoResolveDayConflicts = (dayNumber: number) => {
     if (!canEdit) return;
-    if (requireAuth && !requireAuth(() => handleAutoResolveDayConflicts(dayNumber), lang === 'zh' ? '自動順延衝突時段' : 'Auto-resolve schedule conflicts')) {
+    if (requireAuth && !requireAuth(() => handleAutoResolveDayConflicts(dayNumber), isZh ? '自動順延衝突時段' : 'Auto-resolve schedule conflicts')) {
       return;
     }
     const updatedDays = trip.days.map((d) => {
@@ -233,12 +343,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     onUpdateTrip({ ...trip, days: updatedDays, updatedAt: Date.now() });
   };
 
-  // Horizontal Day Filter Bar scroll state & auto-centering
+  // Horizontal Day Strip scroll & compact header state
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
-
-  // Scroll Detection for Date Filter Bar and Header Expansion State using requestAnimationFrame and debounce
   const [isCompact, setIsCompact] = useState(false);
   const lastScrollYRef = useRef(0);
   const isCompactRef = useRef(false);
@@ -249,7 +357,6 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   }, [isCompact]);
 
   useEffect(() => {
-    // Debounce function to prevent excessive re-renders during rapid scrolling that causes UI stutter
     const debouncedSetExpansion = debounce((shouldCompact: boolean) => {
       if (isCompactRef.current !== shouldCompact) {
         setIsCompact(shouldCompact);
@@ -257,29 +364,17 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     }, 60);
 
     const handleWindowScroll = () => {
-      // Cancel previous pending animation frame to avoid queuing frame updates
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-      }
-
-      // Use requestAnimationFrame for frame-aligned measurement and updating the expansion state
+      if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
       rafIdRef.current = window.requestAnimationFrame(() => {
         const currentScrollY = window.scrollY || document.documentElement.scrollTop || 0;
         const diff = currentScrollY - lastScrollYRef.current;
 
-        // Reset to full mode immediately when near the top of the page
-        if (currentScrollY <= 80) {
+        if (currentScrollY <= 70) {
           debouncedSetExpansion.cancel();
-          if (isCompactRef.current) {
-            setIsCompact(false);
-          }
-        }
-        // Downward scroll deep into timeline schedule -> compact mode via debounce
-        else if (currentScrollY > 180 && diff > 15) {
+          if (isCompactRef.current) setIsCompact(false);
+        } else if (currentScrollY > 160 && diff > 14) {
           debouncedSetExpansion(true);
-        }
-        // Deliberate upward scroll -> restore full expansion mode via debounce
-        else if (diff < -25) {
+        } else if (diff < -24) {
           debouncedSetExpansion(false);
         }
 
@@ -291,23 +386,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     window.addEventListener('scroll', handleWindowScroll, { passive: true });
     return () => {
       window.removeEventListener('scroll', handleWindowScroll);
-      if (rafIdRef.current !== null) {
-        cancelAnimationFrame(rafIdRef.current);
-      }
+      if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
       debouncedSetExpansion.cancel();
     };
   }, []);
-
-  // Safe Haptic Feedback helper (10ms subtle vibration for touch devices)
-  const triggerHaptic = (ms = 10) => {
-    try {
-      if (typeof window !== 'undefined' && 'vibrate' in navigator) {
-        navigator.vibrate(ms);
-      }
-    } catch {
-      // Ignore vibration error on unsupported platforms
-    }
-  };
 
   const scrollToCenterChip = (elementId: string) => {
     const activeBtn = document.getElementById(elementId);
@@ -340,90 +422,33 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     };
   }, [trip.days.length]);
 
-  // Auto-scroll selected day or overview into view when selectedDayNumber or view mode changes
   useEffect(() => {
-    const targetId = timelineViewMode === 'daily'
-      ? `day-filter-chip-${selectedDayNumber}`
-      : 'day-filter-chip-overview';
+    const targetId =
+      timelineViewMode === 'daily'
+        ? `day-filter-chip-${selectedDayNumber}`
+        : 'day-filter-chip-overview';
     scrollToCenterChip(targetId);
   }, [selectedDayNumber, timelineViewMode]);
 
   const handleScrollDays = (direction: 'left' | 'right') => {
     if (!scrollContainerRef.current) return;
-    const offset = direction === 'left' ? -260 : 260;
-    scrollContainerRef.current.scrollBy({ left: offset, behavior: 'smooth' });
+    scrollContainerRef.current.scrollBy({ left: direction === 'left' ? -240 : 240, behavior: 'smooth' });
   };
 
-  // Identify actual today Day or closest Day in the itinerary
+  // Identify Today in destination timezone
   const todayDay = useMemo(() => {
-    return trip.days.find((d) => isDateToday(d.date));
-  }, [trip.days]);
-
-  const targetTodayDay = useMemo(() => {
-    if (todayDay) return todayDay;
-    if (trip.days.length === 0) return null;
-    const nowMs = new Date().setHours(0, 0, 0, 0);
-    let closest = trip.days[0];
-    let minDiff = Infinity;
-    for (const d of trip.days) {
-      const dMs = new Date(d.date + 'T00:00:00').getTime();
-      const diff = Math.abs(dMs - nowMs);
-      if (diff < minDiff) {
-        minDiff = diff;
-        closest = d;
-      }
-    }
-    return closest || trip.days[0] || null;
-  }, [todayDay, trip.days]);
-
-  const isCurrentToday = timelineViewMode === 'daily' && selectedDayNumber === (todayDay?.dayNumber || targetTodayDay?.dayNumber);
-
-  // Travel Progress Information (Calculated for horizontal progress bar & today dot indicator)
-  const todayProgressInfo = useMemo(() => {
-    const totalDays = trip.days.length;
-    if (totalDays === 0) return null;
-
-    const todayIdx = trip.days.findIndex((d) => isDateToday(d.date));
-    const isTodayInTrip = todayIdx !== -1;
-
-    // Pinpoint today's center coordinate along the progress track
-    const todayPercent = isTodayInTrip
-      ? ((todayIdx + 0.5) / totalDays) * 100
-      : null;
-
-    // Current viewed progress fill (percentage of total trip days)
-    const selectedPercent = timelineViewMode === 'overview'
-      ? 100
-      : Math.min(100, Math.max(0, (selectedDayNumber / totalDays) * 100));
-
-    return {
-      totalDays,
-      todayIdx,
-      isTodayInTrip,
-      todayPercent,
-      selectedPercent,
-      currentDayNum: selectedDayNumber,
-      todayDayNumber: isTodayInTrip ? trip.days[todayIdx].dayNumber : null,
-      todayDate: isTodayInTrip ? trip.days[todayIdx].date : null,
-    };
-  }, [trip.days, selectedDayNumber, timelineViewMode]);
+    return trip.days.find((d) => isDateToday(d.date, destTzInfo.tz));
+  }, [trip.days, destTzInfo.tz]);
 
   const handleJumpToToday = () => {
-    const target = todayDay || targetTodayDay;
-    if (!target) return;
-    triggerHaptic(12);
-    handleSelectDay(target.dayNumber);
+    if (!todayDay) return;
+    triggerHaptic(10);
+    handleSelectDay(todayDay.dayNumber);
     setTimelineViewMode('daily');
-    scrollToCenterChip(`day-filter-chip-${target.dayNumber}`);
-    setTimeout(() => {
-      const scheduleEl = document.getElementById('day-schedule-section');
-      if (scheduleEl) {
-        scheduleEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    }, 60);
+    scrollToCenterChip(`day-filter-chip-${todayDay.dayNumber}`);
   };
 
-  // High-Resolution Photo Overlay State for intercepting thumbnail clicks & displaying original high-res URL
+  // High-Resolution Photo Overlay State
   const [overlaySpotPhoto, setOverlaySpotPhoto] = useState<{
     item: ItineraryItem;
     photoIndex: number;
@@ -433,15 +458,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   const [overlayEditUrl, setOverlayEditUrl] = useState('');
 
   useBodyScrollLock(Boolean(overlaySpotPhoto));
-
-  useEffect(() => {
-    if (!overlaySpotPhoto) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOverlaySpotPhoto(null);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [overlaySpotPhoto]);
+  useModalLayer(Boolean(overlaySpotPhoto), () => setOverlaySpotPhoto(null));
 
   useEffect(() => {
     setOverlayHighResFailed(false);
@@ -451,32 +468,28 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
   const handleSaveOverlayGoogleUrl = () => {
     if (!canEdit || !overlaySpotPhoto) return;
-    if (requireAuth && !requireAuth(handleSaveOverlayGoogleUrl, lang === 'zh' ? '修改相片連結' : 'Edit photo link')) {
+    if (requireAuth && !requireAuth(handleSaveOverlayGoogleUrl, isZh ? '修改相片連結' : 'Edit photo link')) {
       return;
     }
     const finalUrl = sanitizeExternalUrl(overlayEditUrl) || '';
     const targetItemId = overlaySpotPhoto.item.id;
 
-    // Update spot in trip.days
     const updatedDays = trip.days.map((d) => ({
       ...d,
       items: d.items.map((it) => (it.id === targetItemId ? { ...it, googlePhotosUrl: finalUrl || undefined } : it)),
     }));
 
-    // Update memories if present
     const updatedMemories = (trip.memories || []).map((m) =>
       m.spotId === targetItemId ? { ...m, googlePhotosUrl: finalUrl || undefined } : m
     );
 
-    const updatedTrip = {
+    onUpdateTrip({
       ...trip,
       days: updatedDays,
       memories: updatedMemories,
       updatedAt: Date.now(),
-    };
-    onUpdateTrip(updatedTrip);
+    });
 
-    // Update local overlay state
     setOverlaySpotPhoto({
       ...overlaySpotPhoto,
       item: { ...overlaySpotPhoto.item, googlePhotosUrl: finalUrl || undefined },
@@ -525,21 +538,22 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     items: [],
   };
 
+  const activeDayGeoCount = useMemo(
+    () => (activeDay.items || []).filter((it) => isValidCoordinate(it.lat, it.lng)).length,
+    [activeDay.items]
+  );
+
+  // Safe clamped insertion midpoint time (NEVER outputs 24:xx!)
   const getBetweenTime = (prevItem: ItineraryItem, nextItem?: ItineraryItem): string => {
     if (!nextItem) return getSuggestedNextStartTime([prevItem]);
     const prevEnd = parseTimeToMinutes(prevItem.endTime || prevItem.startTime);
     const nextStart = parseTimeToMinutes(nextItem.startTime);
     if (prevEnd !== 99999 && nextStart !== 99999 && nextStart > prevEnd) {
       const midMinutes = Math.floor((prevEnd + nextStart) / 2 / 15) * 15;
-      const h = Math.floor(midMinutes / 60);
-      const m = midMinutes % 60;
-      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      return formatMinutesToHHMM(Math.min(23 * 60 + 55, midMinutes));
     }
     if (prevEnd !== 99999) {
-      const midMinutes = prevEnd + 30;
-      const h = Math.floor(midMinutes / 60);
-      const m = midMinutes % 60;
-      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+      return formatMinutesToHHMM(Math.min(23 * 60 + 55, prevEnd + 30));
     }
     return '12:00';
   };
@@ -549,37 +563,34 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
   const handleSelectDay = (dayNum: number, dir?: 'left' | 'right') => {
     if (dayNum === selectedDayNumber) return;
-    if (dir) {
-      setSlideDirection(dir);
-    } else {
-      setSlideDirection(dayNum > selectedDayNumber ? 'left' : 'right');
-    }
+    setSlideDirection(dir || (dayNum > selectedDayNumber ? 'left' : 'right'));
     setSelectedDayNumber(dayNum);
     setSelectedItemId(null);
+    setIsEditingDayHeader(false);
   };
 
   const handlePrevDay = () => {
     if (selectedDayNumber > 1) {
-      triggerHaptic(12);
+      triggerHaptic(10);
       handleSelectDay(selectedDayNumber - 1, 'right');
     }
   };
 
   const handleNextDay = () => {
     if (selectedDayNumber < trip.days.length) {
-      triggerHaptic(12);
+      triggerHaptic(10);
       handleSelectDay(selectedDayNumber + 1, 'left');
     }
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length !== 1) return;
+    if (isInsideHorizontalScroller(e.target)) {
+      touchStartRef.current = null;
+      return;
+    }
     const touch = e.touches[0];
-    touchStartRef.current = {
-      x: touch.clientX,
-      y: touch.clientY,
-      time: Date.now(),
-    };
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
@@ -593,15 +604,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     const absX = Math.abs(deltaX);
     const absY = Math.abs(deltaY);
 
-    // Intent check: horizontal distance must be >= 45px and dominant over vertical scrolling
-    if (absX >= 45 && absX > absY * 1.35 && (deltaTime < 750 || absX > 80)) {
-      if (deltaX < 0) {
-        // Swiped left (finger moved right to left) -> Next Day
-        handleNextDay();
-      } else {
-        // Swiped right (finger moved left to right) -> Previous Day
-        handlePrevDay();
-      }
+    if (absX >= 52 && absX > absY * 1.45 && (deltaTime < 700 || absX > 90)) {
+      if (deltaX < 0) handleNextDay();
+      else handlePrevDay();
     }
   };
 
@@ -611,9 +616,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       e.stopPropagation();
     }
     if (!canEdit) return;
-    if (requireAuth && !requireAuth(() => handleToggleComplete(itemId), lang === 'zh' ? '標記景點完成狀態' : 'Mark spot completed')) {
+    if (requireAuth && !requireAuth(() => handleToggleComplete(itemId), isZh ? '標記景點完成狀態' : 'Mark spot completed')) {
       return;
     }
+    triggerHaptic(8);
     const updatedDays = trip.days.map((day) => ({
       ...day,
       items: day.items.map((it) => (it.id === itemId ? { ...it, completed: !it.completed } : it)),
@@ -621,11 +627,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     onUpdateTrip({ ...trip, days: updatedDays, updatedAt: Date.now() });
   };
 
-  const handleDeleteItem = (itemId: string) => {
+  const executeDeleteItem = (itemId: string) => {
     if (!canEdit) return;
-    if (requireAuth && !requireAuth(() => handleDeleteItem(itemId), lang === 'zh' ? '刪除景點活動' : 'Delete spot')) {
-      return;
-    }
     const now = Date.now();
     const removedMemIds = (trip.memories || []).filter((m) => m.spotId === itemId).map((m) => m.id);
     const deletedItemIds: Record<string, number> = {
@@ -636,7 +639,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       deletedItemIds[id] = now;
     });
     const updatedDays = trip.days.map((day) => {
-      if (day.dayNumber !== selectedDayNumber) return day;
+      if (day.dayNumber !== activeDay.dayNumber) return day;
       return {
         ...day,
         items: day.items.filter((it) => it.id !== itemId),
@@ -651,14 +654,20 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       updatedAt: now,
     };
     onUpdateTrip(updatedTrip);
+    setConfirmDeleteItem(null);
     garbageCollectOrphanedMedia(
-      getStoredTrips().map((t) => (t.id === updatedTrip.id ? updatedTrip : t))
+      getStoredTrips().map((stored) => (stored.id === updatedTrip.id ? updatedTrip : stored))
     ).catch(() => {});
   };
 
+  /**
+   * Smart duration-preserving reorder:
+   * - If both items have different valid startTimes, swaps their startTimes while preserving EACH item's own duration.
+   * - If only one or neither has a startTime (or same startTime), swaps their relative order cleanly.
+   */
   const handleMoveItem = (index: number, direction: 'up' | 'down') => {
     if (!canEdit) return;
-    if (requireAuth && !requireAuth(() => handleMoveItem(index, direction), lang === 'zh' ? '調整景點順序' : 'Reorder spots')) {
+    if (requireAuth && !requireAuth(() => handleMoveItem(index, direction), isZh ? '調整景點順序' : 'Reorder spots')) {
       return;
     }
     const items = [...activeDay.items];
@@ -668,36 +677,214 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     const cur = { ...items[index] };
     const target = { ...items[targetIdx] };
 
-    // If both have start times and they differ, swap their time slots so chronological ordering is preserved
-    if (cur.startTime && target.startTime && cur.startTime !== target.startTime) {
-      const tempStartTime = cur.startTime;
-      const tempEndTime = cur.endTime;
-      cur.startTime = target.startTime;
-      cur.endTime = target.endTime;
-      target.startTime = tempStartTime;
-      target.endTime = tempEndTime;
+    const curStart = parseTimeToMinutes(cur.startTime);
+    const targetStart = parseTimeToMinutes(target.startTime);
+
+    const calcDuration = (it: ItineraryItem, sM: number): number | null => {
+      const eM = parseTimeToMinutes(it.endTime);
+      if (sM === 99999 || eM === 99999) return null;
+      if (isOvernightTimeRange(sM, eM)) return 24 * 60 - sM + eM;
+      return eM >= sM ? eM - sM : null;
+    };
+
+    if (curStart !== 99999 && targetStart !== 99999 && curStart !== targetStart) {
+      const curDur = calcDuration(cur, curStart);
+      const targetDur = calcDuration(target, targetStart);
+
+      cur.startTime = formatMinutesToHHMM(targetStart);
+      if (curDur !== null) {
+        cur.endTime = formatMinutesToHHMM(Math.min(23 * 60 + 59, targetStart + curDur));
+      }
+
+      target.startTime = formatMinutesToHHMM(curStart);
+      if (targetDur !== null) {
+        target.endTime = formatMinutesToHHMM(Math.min(23 * 60 + 59, curStart + targetDur));
+      }
     }
 
     items[index] = target;
     items[targetIdx] = cur;
 
     const sorted = sortItineraryItemsByTime(items);
-
     const updatedDays = trip.days.map((day) => {
-      if (day.dayNumber !== selectedDayNumber) return day;
+      if (day.dayNumber !== activeDay.dayNumber) return day;
       return { ...day, items: sorted };
     });
+    triggerHaptic(8);
     onUpdateTrip({ ...trip, days: updatedDays, updatedAt: Date.now() });
+  };
+
+  /**
+   * Drag-and-drop arbitrary reorder: moves item from `fromIndex` to `toIndex`,
+   * reassigning existing startTime slots across the affected slice while preserving each item's own duration.
+   */
+  const handleReorderItem = (fromIndex: number, toIndex: number) => {
+    if (!canEdit || fromIndex === toIndex) return;
+    if (requireAuth && !requireAuth(() => handleReorderItem(fromIndex, toIndex), isZh ? '拖曳調整景點順序' : 'Reorder spots')) {
+      return;
+    }
+    const items = [...activeDay.items];
+    if (fromIndex < 0 || fromIndex >= items.length || toIndex < 0 || toIndex >= items.length) return;
+
+    const minIdx = Math.min(fromIndex, toIndex);
+    const maxIdx = Math.max(fromIndex, toIndex);
+    const originalStarts = items.slice(minIdx, maxIdx + 1).map((it) => parseTimeToMinutes(it.startTime));
+    const allHaveValidTimes = originalStarts.every((m) => m !== 99999);
+
+    const calcDuration = (it: ItineraryItem): number | null => {
+      const sM = parseTimeToMinutes(it.startTime);
+      const eM = parseTimeToMinutes(it.endTime);
+      if (sM === 99999 || eM === 99999) return null;
+      if (isOvernightTimeRange(sM, eM)) return 24 * 60 - sM + eM;
+      return eM >= sM ? eM - sM : null;
+    };
+
+    const [moved] = items.splice(fromIndex, 1);
+    items.splice(toIndex, 0, moved);
+
+    if (allHaveValidTimes) {
+      for (let i = minIdx; i <= maxIdx; i++) {
+        const slotStart = originalStarts[i - minIdx];
+        const dur = calcDuration(items[i]);
+        items[i] = {
+          ...items[i],
+          startTime: formatMinutesToHHMM(slotStart),
+          endTime: dur !== null ? formatMinutesToHHMM(Math.min(23 * 60 + 59, slotStart + dur)) : items[i].endTime,
+        };
+      }
+    }
+
+    const updatedDays = trip.days.map((day) =>
+      day.dayNumber === activeDay.dayNumber ? { ...day, items } : day
+    );
+    triggerHaptic(12);
+    onUpdateTrip({ ...trip, days: updatedDays, updatedAt: Date.now() });
+  };
+
+  // Pointer drag-to-reorder listener lifecycle (works seamlessly on Desktop mouse + iOS Safari touch)
+  const beginDragReorder = (fromIndex: number) => {
+    if (!canEdit || activeDay.items.length < 2) return;
+    triggerHaptic(14);
+    const initial = { fromIndex, overIndex: fromIndex };
+    dragStateRef.current = initial;
+    setDragState(initial);
+
+    const onPointerMove = (ev: PointerEvent) => {
+      const current = dragStateRef.current;
+      if (!current) return;
+      // Locate which spot card the pointer Y currently sits over
+      const cards = document.querySelectorAll<HTMLElement>('[data-timeline-spot-index]');
+      let nextOver = current.overIndex;
+      cards.forEach((el) => {
+        const idx = Number(el.dataset.timelineSpotIndex);
+        if (!Number.isFinite(idx)) return;
+        const rect = el.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+        if (ev.clientY >= rect.top - 16 && ev.clientY <= rect.bottom + 16) {
+          nextOver = ev.clientY < midY ? idx : Math.min(cards.length - 1, idx);
+        }
+      });
+      if (nextOver !== current.overIndex) {
+        triggerHaptic(6);
+        const updated = { ...current, overIndex: nextOver };
+        dragStateRef.current = updated;
+        setDragState(updated);
+      }
+    };
+
+    const onPointerEnd = () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerEnd);
+      window.removeEventListener('pointercancel', onPointerEnd);
+      const finalState = dragStateRef.current;
+      dragStateRef.current = null;
+      setDragState(null);
+      if (finalState && finalState.fromIndex !== finalState.overIndex) {
+        handleReorderItem(finalState.fromIndex, finalState.overIndex);
+      }
+    };
+
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    window.addEventListener('pointerup', onPointerEnd);
+    window.addEventListener('pointercancel', onPointerEnd);
+  };
+
+  const clearLongPress = () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  // Commercial Workflow: Duplicate spot
+  const handleDuplicateItem = (source: ItineraryItem) => {
+    if (!canEdit) return;
+    const sM = parseTimeToMinutes(source.startTime);
+    const eM = parseTimeToMinutes(source.endTime);
+    const newStartTime = sM !== 99999 ? formatMinutesToHHMM(Math.min(23 * 60 + 45, sM + 30)) : source.startTime;
+    const dur = sM !== 99999 && eM !== 99999 && eM >= sM ? eM - sM : null;
+    const newEndTime =
+      dur !== null && sM !== 99999
+        ? formatMinutesToHHMM(Math.min(23 * 60 + 59, Math.min(23 * 60 + 45, sM + 30) + dur))
+        : source.endTime;
+
+    const copyItem: ItineraryItem = {
+      ...source,
+      id: `item-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title: `${source.title} (${isZh ? '複本' : 'Copy'})`,
+      startTime: newStartTime,
+      endTime: newEndTime,
+      completed: false,
+      memoryPhotos: undefined,
+      memoryNotes: undefined,
+    };
+
+    const updatedDays = trip.days.map((d) =>
+      d.dayNumber === activeDay.dayNumber
+        ? { ...d, items: sortItineraryItemsByTime([...d.items, copyItem]) }
+        : d
+    );
+    triggerHaptic(10);
+    onUpdateTrip({ ...trip, days: updatedDays, updatedAt: Date.now() });
+  };
+
+  // Commercial Workflow: Move spot to another Day
+  const handleMoveItemToDay = (item: ItineraryItem, targetDayNumber: number) => {
+    if (!canEdit || targetDayNumber === activeDay.dayNumber) {
+      setMoveDayItem(null);
+      return;
+    }
+    const updatedDays = trip.days.map((d) => {
+      if (d.dayNumber === activeDay.dayNumber) {
+        return { ...d, items: d.items.filter((it) => it.id !== item.id) };
+      }
+      if (d.dayNumber === targetDayNumber) {
+        return { ...d, items: sortItineraryItemsByTime([...d.items, item]) };
+      }
+      return d;
+    });
+    const updatedMemories = (trip.memories || []).map((m) =>
+      m.spotId === item.id ? { ...m, dayNumber: targetDayNumber } : m
+    );
+    triggerHaptic(12);
+    onUpdateTrip({
+      ...trip,
+      days: updatedDays,
+      memories: updatedMemories,
+      updatedAt: Date.now(),
+    });
+    setMoveDayItem(null);
+    setSelectedDayNumber(targetDayNumber);
   };
 
   const handleAddDay = () => {
     if (!canEdit) return;
-    if (requireAuth && !requireAuth(handleAddDay, lang === 'zh' ? '增加行程天數' : 'Add day')) {
+    if (requireAuth && !requireAuth(handleAddDay, isZh ? '增加行程天數' : 'Add day')) {
       return;
     }
     const newDayNum = trip.days.length + 1;
     const lastDay = trip.days[trip.days.length - 1];
-    let nextDate = trip.endDate;
+    let nextDate = trip.endDate || trip.startDate;
     if (lastDay) {
       nextDate = addDaysLocal(lastDay.date, 1);
     }
@@ -706,7 +893,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       id: `day-${Date.now()}-${newDayNum}`,
       dayNumber: newDayNum,
       date: nextDate,
-      theme: lang === 'zh' ? `第 ${newDayNum} 天行程` : `Day ${newDayNum} Schedule`,
+      theme: isZh ? `第 ${newDayNum} 天行程` : `Day ${newDayNum} Schedule`,
       items: [],
     };
 
@@ -719,17 +906,91 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     setSelectedDayNumber(newDayNum);
   };
 
+  // Commercial Workflow: Delete Day (renumbers days & dates cleanly + tracks tombstones)
+  const executeDeleteDay = (dayToDelete: DayPlan) => {
+    if (!canEdit || trip.days.length <= 1) {
+      setConfirmDeleteDay(null);
+      return;
+    }
+    const now = Date.now();
+    const deletedItemIds: Record<string, number> = { ...(trip.deletedItemIds || {}) };
+    const removedSpotIds = new Set(dayToDelete.items.map((i) => i.id));
+    removedSpotIds.forEach((id) => {
+      deletedItemIds[id] = now;
+    });
+    (trip.memories || []).forEach((m) => {
+      if (m.spotId && removedSpotIds.has(m.spotId)) {
+        deletedItemIds[m.id] = now;
+      }
+    });
+
+    const baseStart = normalizeDateKey(trip.startDate) || normalizeDateKey(trip.days[0]?.date);
+    const remainingDays = trip.days
+      .filter((d) => d.id !== dayToDelete.id)
+      .map((d, idx) => ({
+        ...d,
+        dayNumber: idx + 1,
+        date: baseStart ? addDaysLocal(baseStart, idx) : d.date,
+      }));
+
+    const deletedDayNum = dayToDelete.dayNumber;
+    const updatedMemories = (trip.memories || [])
+      .filter((m) => !(m.spotId && removedSpotIds.has(m.spotId)))
+      .map((m) => {
+        if (!m.dayNumber) return m;
+        if (m.dayNumber === deletedDayNum) return { ...m, dayNumber: undefined };
+        if (m.dayNumber > deletedDayNum) return { ...m, dayNumber: m.dayNumber - 1 };
+        return m;
+      });
+
+    const newEndDate = remainingDays[remainingDays.length - 1]?.date || trip.endDate;
+    const updatedTrip: Trip = {
+      ...trip,
+      days: remainingDays,
+      memories: updatedMemories,
+      endDate: newEndDate,
+      deletedItemIds,
+      updatedAt: now,
+    };
+    onUpdateTrip(updatedTrip);
+    setConfirmDeleteDay(null);
+    setSelectedDayNumber(Math.min(deletedDayNum, remainingDays.length));
+    garbageCollectOrphanedMedia(
+      getStoredTrips().map((stored) => (stored.id === updatedTrip.id ? updatedTrip : stored))
+    ).catch(() => {});
+  };
+
+  // Inline Day Theme & Notes save
+  const handleStartEditDayHeader = () => {
+    if (!canEdit) return;
+    setDayThemeDraft(activeDay.theme || '');
+    setDayNotesDraft(activeDay.notes || '');
+    setIsEditingDayHeader(true);
+  };
+
+  const handleSaveDayHeader = () => {
+    if (!canEdit) return;
+    const updatedDays = trip.days.map((d) =>
+      d.dayNumber === activeDay.dayNumber
+        ? {
+            ...d,
+            theme: dayThemeDraft.trim() || undefined,
+            notes: dayNotesDraft.trim() || undefined,
+          }
+        : d
+    );
+    onUpdateTrip({ ...trip, days: updatedDays, updatedAt: Date.now() });
+    setIsEditingDayHeader(false);
+  };
+
   const isPureMemoryArchive =
     trip.tripMode === 'memory' &&
     (trip.days || []).every((d) => (d.items || []).length === 0);
 
   if (isPureMemoryArchive) {
     const memoriesCount = (trip.memories || []).length;
-    const gpsPinCount = (trip.memories || []).filter(
-      (m) => typeof m.lat === 'number' && typeof m.lng === 'number'
-    ).length;
-    const hasCityCoord =
-      typeof trip.destinationLat === 'number' && typeof trip.destinationLng === 'number';
+    const gpsPinCount = (trip.memories || []).filter((m) => isValidCoordinate(m.lat, m.lng)).length;
+    const hasCityCoord = isValidCoordinate(trip.destinationLat, trip.destinationLng);
 
     return (
       <div className="py-6 sm:py-10 px-2">
@@ -740,10 +1001,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             </div>
             <div className="min-w-0 space-y-1">
               <h3 className="font-bold text-slate-900 dark:text-white text-base sm:text-lg">
-                {lang === 'zh' ? '回憶相簿模式' : 'Photo Memory Archive'}
+                {isZh ? '回憶相簿模式' : 'Photo Memory Archive'}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                {lang === 'zh'
+                {isZh
                   ? '這趟過往旅程以保存相片與足跡為主，已為您省略繁瑣的逐日空白行程表。'
                   : 'This past trip focuses on photos and map footprints without an empty day-by-day schedule.'}
               </p>
@@ -779,7 +1040,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 className="flex-1 min-h-[44px] px-5 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs shadow-xs flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer"
               >
                 <Camera className="w-4 h-4" />
-                <span>{lang === 'zh' ? '開啟回憶相簿' : 'Open Photo Gallery'}</span>
+                <span>{isZh ? '開啟回憶相簿' : 'Open Photo Gallery'}</span>
               </button>
             )}
             {canEdit && (
@@ -795,7 +1056,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 className="min-h-[44px] px-4 py-2.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-teal-600 text-slate-700 dark:text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
               >
                 <Calendar className="w-4 h-4 text-teal-700 dark:text-teal-400" />
-                <span>{lang === 'zh' ? '切換為完整行程規劃' : 'Switch to Full Planner'}</span>
+                <span>{isZh ? '切換為完整行程規劃' : 'Switch to Full Planner'}</span>
               </button>
             )}
           </div>
@@ -804,399 +1065,234 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     );
   }
 
+  const activeDayWeather = dayWeatherMap[activeDay.dayNumber];
+
   return (
-    <div className="space-y-3.5">
-      {/* 水平捲動日期/天數篩選列 (Horizontal Day & Date Filter Bar with Scroll Detection & Compact Mode) */}
+    <div className="space-y-2.5">
+      {/* 1. Ultra-Clean Sticky Horizontal Day Pill Strip (Commercial Above-the-Fold Design) */}
       <div
         className={`sticky ${
           isNavHidden
             ? 'max-sm:top-[env(safe-area-inset-top,0px)] sm:top-14'
             : 'top-[calc(3.5rem+env(safe-area-inset-top,0px))] sm:top-14'
-        } z-20 group/filter bg-white/95 dark:bg-[#111827]/95 backdrop-blur-md rounded-2xl border border-[#E5E2DC] dark:border-slate-800 transition-all duration-300 ease-in-out ${
-          isCompact ? 'py-1 px-1.5 shadow-md' : 'p-1.5 sm:p-2 shadow-2xs'
+        } z-20 group/filter bg-white/95 dark:bg-[#111827]/95 backdrop-blur-md rounded-2xl border border-[#E5E2DC] dark:border-slate-800 transition-all duration-200 ${
+          isCompact ? 'py-1 px-1.5 shadow-md' : 'p-1.5 shadow-2xs'
         }`}
         style={{ overflowAnchor: 'none' }}
       >
-        {/* Header bar with Section Label & Return to Today button */}
-        <div
-          className={`flex items-center justify-between px-1 transition-all duration-300 ease-in-out overflow-hidden ${
-            isCompact
-              ? 'max-h-0 opacity-0 mb-0 pointer-events-none pb-0 pt-0'
-              : 'max-h-10 opacity-100 mb-0.5 sm:mb-1 pb-1 pt-0.5'
-          }`}
-        >
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-1">
-              <Calendar className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-              <span>{lang === 'zh' ? '行程日程' : 'Itinerary Days'}</span>
-            </span>
-            <span className="text-[11px] font-mono tabular-nums text-slate-400">
-              · {trip.days.length} 天
-            </span>
-          </div>
+        <div className="relative flex items-center">
+          {/* Desktop-only hover scroll arrows (never obstruct mobile pills!) */}
+          {canScrollLeft && (
+            <button
+              type="button"
+              onClick={() => handleScrollDays('left')}
+              className="hidden sm:flex absolute left-0.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-[#E5E2DC] dark:border-slate-700 items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer opacity-0 group-hover/filter:opacity-100"
+              aria-label="往左捲動天數"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+          )}
 
-          {/* 返回今日小按鈕 */}
-          <motion.button
-            type="button"
-            whileTap={{ scale: 0.96 }}
-            onClick={handleJumpToToday}
-            className={`px-2.5 py-0.5 min-h-[32px] sm:min-h-[30px] rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              isCurrentToday
-                ? 'bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 border border-teal-300/80 dark:border-teal-700/60'
-                : 'bg-[#FAF9F6] dark:bg-slate-800 hover:bg-teal-50/70 dark:hover:bg-teal-950/40 text-slate-700 dark:text-slate-200 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-500/60'
-            }`}
-            title={lang === 'zh' ? '快速捲動至今日行程' : 'Jump to Today'}
-            aria-label="返回今日"
+          <div
+            ref={scrollContainerRef}
+            data-no-day-swipe="true"
+            className="flex items-center gap-1.5 overflow-x-auto scrollbar-none snap-x snap-mandatory px-0.5 py-0.5 w-full"
           >
-            <span>{lang === 'zh' ? '返回今日' : 'Today'}</span>
-            {targetTodayDay && (
-              <span className="text-[10px] font-mono tabular-nums opacity-80 font-normal">
-                · D{targetTodayDay.dayNumber}
-              </span>
-            )}
-          </motion.button>
-        </div>
+            {/* Overview pill */}
+            <button
+              type="button"
+              id="day-filter-chip-overview"
+              onClick={() => {
+                triggerHaptic(8);
+                setTimelineViewMode('overview');
+                scrollToCenterChip('day-filter-chip-overview');
+              }}
+              className={`rounded-xl shrink-0 snap-center cursor-pointer select-none transition-all duration-150 ${
+                isCompact
+                  ? 'px-2.5 h-8 flex items-center gap-1 text-[11px] font-bold'
+                  : 'px-3 h-[46px] flex flex-col justify-center items-start min-w-[66px]'
+              } ${
+                timelineViewMode === 'overview'
+                  ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                  : 'bg-[#FAF9F6] dark:bg-slate-800/70 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700/80'
+              }`}
+            >
+              {isCompact ? (
+                <>
+                  <Calendar className="w-3 h-3 shrink-0" />
+                  <span>{isZh ? '總覽' : 'All'}</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-[11px] font-bold flex items-center gap-1 leading-tight">
+                    <Calendar className="w-3 h-3" />
+                    <span>{isZh ? '總覽' : 'All'}</span>
+                  </span>
+                  <span className="text-[10px] opacity-75 font-mono tabular-nums mt-0.5 leading-tight">
+                    {trip.days.length} 天
+                  </span>
+                </>
+              )}
+            </button>
 
-        {/* Left scroll arrow button */}
-        {canScrollLeft && (
-          <button
-            type="button"
-            onClick={() => handleScrollDays('left')}
-            className={`absolute left-1.5 top-1/2 -translate-y-1/2 z-10 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-[#E5E2DC] dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer ${
-              isCompact ? 'w-7 h-7' : 'w-8 h-8'
-            }`}
-            aria-label="往左捲動天數"
-          >
-            <ChevronLeft className={isCompact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
-          </button>
-        )}
+            {/* Individual Day Chips */}
+            {trip.days.map((day) => {
+              const isCurrent = timelineViewMode === 'daily' && day.dayNumber === selectedDayNumber;
+              const totalCount = day.items.length;
+              const dateStr = formatMonthDaySlash(day.date);
+              const isToday = isDateToday(day.date, destTzInfo.tz);
+              const chipWeather = dayWeatherMap[day.dayNumber];
+              const chipForecast = chipWeather?.status === 'ok' ? chipWeather.forecast : undefined;
+              const chipWeatherIcon = chipForecast ? getWeatherDescription(chipForecast.weatherCode, lang).icon : null;
 
-        {/* Scrollable Container with Scroll Snap */}
-        <div
-          ref={scrollContainerRef}
-          className={`flex items-center gap-2 overflow-x-auto scrollbar-none snap-x snap-mandatory scroll-px-4 sm:scroll-px-6 transition-all duration-300 ${
-            isCompact ? 'px-1 py-0.5' : 'px-2 py-1.5'
-          }`}
-        >
-          {/* Overview button option */}
-          <motion.button
-            type="button"
-            id="day-filter-chip-overview"
-            whileTap={{ scale: 0.98 }}
-            animate={
-              timelineViewMode === 'overview'
-                ? { scale: 1.02, y: -1 }
-                : { scale: 1, y: 0 }
-            }
-            transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-            onClick={() => {
-              triggerHaptic(10);
-              setTimelineViewMode('overview');
-              scrollToCenterChip('day-filter-chip-overview');
-            }}
-            className={`rounded-xl text-left shrink-0 snap-center snap-always cursor-pointer select-none transition-all duration-200 ${
-              isCompact
-                ? 'min-w-[76px] px-2.5 py-1.5 h-9 flex items-center justify-center gap-1.5'
-                : 'min-w-[84px] px-3.5 py-2.5 h-[56px] flex flex-col justify-between'
-            } ${
-              timelineViewMode === 'overview'
-                ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-sm z-1'
-                : 'bg-[#FAF9F6] dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700/80'
-            }`}
-          >
-            {isCompact ? (
-              <>
-                <Calendar className="w-3.5 h-3.5 shrink-0" />
-                <span className="text-[11px] font-bold whitespace-nowrap">
-                  {lang === 'zh' ? '總覽' : 'All'}
-                </span>
-                <span className="text-[10px] opacity-75 font-mono tabular-nums whitespace-nowrap">
-                  ({trip.days.length})
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="text-[11px] font-bold flex items-center gap-1">
-                  <Calendar className="w-3.5 h-3.5" />
-                  {lang === 'zh' ? '行程總覽' : 'Overview'}
-                </span>
-                <span className="text-[10px] opacity-75 font-mono tabular-nums mt-0.5">
-                  {trip.days.length} 天日程
-                </span>
-              </>
-            )}
-          </motion.button>
-
-          {/* Individual Day Chips */}
-          {trip.days.map((day) => {
-            const isCurrent = timelineViewMode === 'daily' && day.dayNumber === selectedDayNumber;
-            const completedCount = day.items.filter((i) => i.completed).length;
-            const totalCount = day.items.length;
-            const weekday = getDayOfWeek(day.date, lang);
-            const dateStr = formatMonthDaySlash(day.date);
-            const isToday = isDateToday(day.date);
-            const isEmpty = totalCount === 0;
-            const chipWeather = dayWeatherMap[day.dayNumber];
-            const chipForecast = chipWeather?.status === 'ok' ? chipWeather.forecast : undefined;
-            const chipWeatherIcon = chipForecast ? getWeatherDescription(chipForecast.weatherCode, lang).icon : null;
-
-            return (
-              <motion.button
-                key={day.id}
-                id={`day-filter-chip-${day.dayNumber}`}
-                type="button"
-                whileTap={{ scale: 0.98 }}
-                animate={
-                  isCurrent
-                    ? { scale: 1.02, y: -1 }
-                    : { scale: 1, y: 0 }
-                }
-                transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-                onClick={() => {
-                  triggerHaptic(10);
-                  handleSelectDay(day.dayNumber);
-                  setTimelineViewMode('daily');
-                  scrollToCenterChip(`day-filter-chip-${day.dayNumber}`);
-                  setTimeout(() => {
-                    const scheduleEl = document.getElementById('day-schedule-section');
-                    if (scheduleEl) {
-                      scheduleEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    }
-                  }, 60);
-                }}
-                className={`rounded-xl text-left shrink-0 snap-center snap-always cursor-pointer select-none transition-all duration-200 relative ${
-                  isCompact
-                    ? 'min-w-[88px] px-2.5 py-1.5 h-9 flex items-center justify-between gap-1.5'
-                    : 'min-w-[116px] px-3.5 py-2.5 h-[56px] flex flex-col justify-between'
-                } ${
-                  isCurrent
-                    ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-sm z-1'
-                    : isToday
-                    ? 'bg-teal-50/70 dark:bg-teal-950/30 hover:bg-teal-100/70 dark:hover:bg-teal-900/40 text-slate-900 dark:text-slate-100 border border-teal-500/70 dark:border-teal-500/60 shadow-2xs'
-                    : isEmpty
-                    ? 'bg-[#FAF9F6]/60 dark:bg-slate-900/30 hover:bg-[#FAF9F6] dark:hover:bg-slate-800/60 text-slate-500 dark:text-slate-400 border border-dashed border-[#E5E2DC] dark:border-slate-700 opacity-85 hover:opacity-100'
-                    : 'bg-[#FAF9F6] dark:bg-slate-800/60 hover:bg-teal-50/50 dark:hover:bg-teal-950/30 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700/80'
-                }`}
-              >
-                {isCompact ? (
-                  <>
-                    <div className="flex items-center gap-1 shrink-0">
+              return (
+                <button
+                  key={day.id}
+                  id={`day-filter-chip-${day.dayNumber}`}
+                  type="button"
+                  onClick={() => {
+                    triggerHaptic(8);
+                    handleSelectDay(day.dayNumber);
+                    setTimelineViewMode('daily');
+                    scrollToCenterChip(`day-filter-chip-${day.dayNumber}`);
+                  }}
+                  className={`rounded-xl text-left shrink-0 snap-center cursor-pointer select-none transition-all duration-150 ${
+                    isCompact
+                      ? 'px-2.5 h-8 flex items-center gap-1.5'
+                      : 'min-w-[90px] px-2.5 h-[46px] flex flex-col justify-center'
+                  } ${
+                    isCurrent
+                      ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                      : isToday
+                        ? 'bg-teal-50/80 dark:bg-teal-950/35 text-slate-900 dark:text-slate-100 border border-teal-500/70 dark:border-teal-500/60'
+                        : 'bg-[#FAF9F6] dark:bg-slate-800/60 hover:bg-teal-50/50 dark:hover:bg-teal-950/30 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-700/80'
+                  }`}
+                >
+                  {isCompact ? (
+                    <>
                       <span className={`text-xs font-black font-mono tabular-nums ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
                         D{day.dayNumber}
                       </span>
-                      {isToday && (
-                        <span className={`text-[9px] font-bold ${isCurrent ? 'text-teal-200' : 'text-teal-700 dark:text-teal-400'}`}>
-                          ·今
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1 text-[10px] font-mono tabular-nums shrink-0">
-                      <span className={isCurrent ? 'text-teal-100' : 'text-slate-500 dark:text-slate-400'}>
+                      <span className={`text-[10px] font-mono tabular-nums ${isCurrent ? 'text-teal-100' : 'text-slate-500 dark:text-slate-400'}`}>
                         {dateStr}
                       </span>
-                      <span className={isCurrent ? 'text-teal-100 font-bold' : 'text-slate-400'}>
-                        {isEmpty ? '(空)' : `·${totalCount}`}
-                      </span>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between gap-1.5">
-                      <div className="flex items-center gap-1 min-w-0">
-                        <span className={`text-xs font-black font-mono tabular-nums ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
-                          Day {day.dayNumber}
-                        </span>
-                      </div>
-                      {totalCount > 0 ? (
-                        <span
-                          className={`text-[10px] font-mono tabular-nums font-semibold ${
-                            isCurrent
-                              ? 'text-teal-100'
-                              : completedCount === totalCount
-                              ? 'text-teal-700 dark:text-teal-400'
-                              : 'text-slate-500 dark:text-slate-400'
-                          }`}
-                        >
-                          {completedCount > 0 ? `✓ ${completedCount}/${totalCount}` : `${totalCount}站`}
-                        </span>
-                      ) : (
-                        <span
-                          className={`text-[10px] font-mono ${
-                            isCurrent ? 'text-teal-200' : 'text-slate-400 dark:text-slate-500'
-                          }`}
-                        >
-                          {lang === 'zh' ? '空' : 'Empty'}
-                        </span>
+                      {isToday && (
+                        <span className={`w-1.5 h-1.5 rounded-full ${isCurrent ? 'bg-teal-200' : 'bg-teal-600 dark:bg-teal-400'}`} />
                       )}
-                    </div>
-
-                    <div className="flex items-center justify-between gap-1.5 mt-1 text-[10px] font-mono tabular-nums opacity-90">
-                      <div className="flex items-center gap-1 truncate">
-                        <span>{dateStr}</span>
-                        {weekday && <span>({weekday})</span>}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between gap-1.5 leading-tight">
+                        <span className={`text-xs font-black font-mono tabular-nums ${isCurrent ? 'text-white' : 'text-slate-900 dark:text-white'}`}>
+                          D{day.dayNumber}
+                        </span>
+                        <span className={`text-[10px] font-mono tabular-nums ${isCurrent ? 'text-teal-100' : 'text-slate-400 dark:text-slate-500'}`}>
+                          {totalCount > 0 ? `${totalCount}站` : '空'}
+                        </span>
                       </div>
-                      {chipForecast ? (
-                        <span className={`text-[10px] font-mono tabular-nums shrink-0 ${isCurrent ? 'text-teal-100' : 'text-slate-500 dark:text-slate-400'}`}>
-                          {chipWeatherIcon} {chipForecast.maxTemp}°
-                        </span>
-                      ) : isToday ? (
-                        <span className={`text-[9px] font-bold shrink-0 ${isCurrent ? 'text-teal-200' : 'text-teal-700 dark:text-teal-400'}`}>
-                          {lang === 'zh' ? '今日' : 'Today'}
-                        </span>
-                      ) : null}
-                    </div>
-                  </>
-                )}
-              </motion.button>
-            );
-          })}
+                      <div className="flex items-center justify-between gap-1 mt-0.5 text-[10px] font-mono tabular-nums leading-tight opacity-90">
+                        <span>{dateStr}</span>
+                        {chipForecast ? (
+                          <span className={`shrink-0 ${isCurrent ? 'text-teal-100' : 'text-slate-500 dark:text-slate-400'}`}>
+                            {chipWeatherIcon}{chipForecast.maxTemp}°
+                          </span>
+                        ) : isToday ? (
+                          <span className={`font-bold text-[9px] ${isCurrent ? 'text-teal-200' : 'text-teal-700 dark:text-teal-400'}`}>
+                            今
+                          </span>
+                        ) : null}
+                      </div>
+                    </>
+                  )}
+                </button>
+              );
+            })}
 
-          {/* Add Day button */}
-          {canEdit && (
-            <motion.button
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic(8);
+                  handleAddDay();
+                }}
+                className={`rounded-xl border border-dashed border-teal-600/50 hover:border-teal-600 text-teal-700 dark:text-teal-400 hover:bg-teal-50/70 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center justify-center gap-1 shrink-0 snap-center transition cursor-pointer ${
+                  isCompact ? 'h-8 px-2.5' : 'h-[46px] px-3'
+                }`}
+                title={isZh ? '增加一天' : 'Add Day'}
+                aria-label="增加一天"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="text-[11px] whitespace-nowrap">{isZh ? '加天' : '+Day'}</span>
+              </button>
+            )}
+          </div>
+
+          {canScrollRight && (
+            <button
               type="button"
-              whileTap={{ scale: 0.98 }}
-              transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-              onClick={() => {
-                triggerHaptic(10);
-                handleAddDay();
-              }}
-              className={`rounded-xl border border-dashed border-teal-600/60 hover:border-teal-600 text-teal-700 dark:text-teal-400 hover:bg-teal-50/70 dark:hover:bg-teal-950/30 text-xs font-semibold flex items-center justify-center gap-1 shrink-0 snap-center transition-all cursor-pointer ${
-                isCompact ? 'h-9 px-2.5' : 'h-[56px] px-3'
-              }`}
-              title={lang === 'zh' ? '增加一天' : 'Add Day'}
-              aria-label="增加一天"
+              onClick={() => handleScrollDays('right')}
+              className="hidden sm:flex absolute right-0.5 top-1/2 -translate-y-1/2 z-10 w-7 h-7 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-[#E5E2DC] dark:border-slate-700 items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer opacity-0 group-hover/filter:opacity-100"
+              aria-label="往右捲動天數"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span className="text-[11px] whitespace-nowrap">{lang === 'zh' ? '加一天' : '+Day'}</span>
-            </motion.button>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
           )}
         </div>
-
-        {/* Right scroll arrow button */}
-        {canScrollRight && (
-          <button
-            type="button"
-            onClick={() => handleScrollDays('right')}
-            className={`absolute right-1.5 top-1/2 -translate-y-1/2 z-10 rounded-full bg-white/95 dark:bg-slate-800/95 shadow-md border border-[#E5E2DC] dark:border-slate-700 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer ${
-              isCompact ? 'w-7 h-7' : 'w-8 h-8'
-            }`}
-            aria-label="往右捲動天數"
-          >
-            <ChevronRight className={isCompact ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
-          </button>
-        )}
-
-        {/* 細長水平進度條 (Slim Horizontal Travel Progress Bar with Today Micro Marker) */}
-        {trip.days.length > 0 && (
-          <div className={`transition-all duration-300 ${isCompact ? 'mt-1 px-1 pb-0.5' : 'mt-1.5 px-1.5 pb-0.5'}`}>
-            <div
-              className={`flex items-center justify-between text-[10px] font-mono tabular-nums text-slate-400 dark:text-slate-500 overflow-hidden transition-all duration-300 ${
-                isCompact
-                  ? 'max-h-0 opacity-0 mb-0 pointer-events-none'
-                  : 'max-h-6 opacity-100 mb-1'
-              }`}
-            >
-              <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-slate-600 dark:text-slate-300">
-                  {lang === 'zh' ? '行程進度' : 'Progress'}
-                </span>
-                <span className="text-teal-700 dark:text-teal-400 font-bold">
-                  {timelineViewMode === 'overview'
-                    ? (lang === 'zh' ? '全景總覽 (100%)' : 'All Days (100%)')
-                    : `${Math.round(todayProgressInfo?.selectedPercent ?? 0)}% (Day ${selectedDayNumber}/${trip.days.length})`}
-                </span>
-              </div>
-
-              {todayProgressInfo?.isTodayInTrip && (
-                <button
-                  type="button"
-                  onClick={handleJumpToToday}
-                  className="flex items-center gap-1 text-teal-700 dark:text-teal-400 font-semibold hover:underline cursor-pointer"
-                  title={lang === 'zh' ? '點擊跳轉至今日' : 'Click to jump to today'}
-                >
-                  <span>
-                    {lang === 'zh'
-                      ? `今日 · Day ${todayProgressInfo.todayDayNumber}`
-                      : `Today · Day ${todayProgressInfo.todayDayNumber}`}
-                  </span>
-                </button>
-              )}
-            </div>
-
-            {/* The progress track container */}
-            <div
-              className="relative w-full h-1.5 bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC]/60 dark:border-slate-700/60 rounded-full overflow-visible select-none"
-              title={
-                lang === 'zh'
-                  ? `當前進度：${Math.round(todayProgressInfo?.selectedPercent ?? 0)}%`
-                  : `Progress: ${Math.round(todayProgressInfo?.selectedPercent ?? 0)}%`
-              }
-            >
-              <motion.div
-                className="absolute left-0 top-0 bottom-0 bg-teal-700 dark:bg-teal-500 rounded-full"
-                initial={false}
-                animate={{ width: `${todayProgressInfo?.selectedPercent ?? 0}%` }}
-                transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-              />
-
-              {trip.days.length > 1 &&
-                Array.from({ length: trip.days.length - 1 }).map((_, idx) => (
-                  <div
-                    key={idx}
-                    className="absolute top-0 bottom-0 w-[1.5px] -ml-[0.75px] bg-white/80 dark:bg-[#111827]/80 z-1 pointer-events-none"
-                    style={{ left: `${((idx + 1) / trip.days.length) * 100}%` }}
-                  />
-                ))}
-
-              {todayProgressInfo && todayProgressInfo.todayPercent !== null && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleJumpToToday();
-                  }}
-                  className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 flex items-center justify-center group cursor-pointer p-1 bg-transparent border-none"
-                  style={{ left: `${todayProgressInfo.todayPercent}%` }}
-                  title={
-                    lang === 'zh'
-                      ? `今日位置 (Day ${todayProgressInfo.todayDayNumber}) - 點擊定位`
-                      : `Today (Day ${todayProgressInfo.todayDayNumber}) - Click to jump`
-                  }
-                  aria-label="今日位置"
-                >
-                  <span className="inline-flex rounded-full h-2.5 w-2.5 bg-teal-600 dark:bg-teal-400 ring-2 ring-white dark:ring-[#111827] shadow-xs group-hover:scale-125 transition-transform" />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* 行程全景點即時搜尋列 (Instant Spot & Place Search) */}
-      <div className="relative">
-        <div className="flex items-center gap-2 px-3.5 py-2.5 min-h-[44px] rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs focus-within:ring-2 focus-within:ring-teal-500/40 focus-within:border-teal-600 transition">
-          <Search className="w-4 h-4 text-slate-400 shrink-0" />
+      {/* 2. Single Compact Utility Row: Search + Today Jump + Map Toggle */}
+      <div className="relative flex items-center gap-2">
+        <div className="flex-1 min-w-0 flex items-center gap-2 px-3 min-h-[40px] rounded-xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs focus-within:ring-2 focus-within:ring-teal-500/35 focus-within:border-teal-600 transition">
+          <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           <input
             type="text"
             value={spotSearchQuery}
             onChange={(e) => setSpotSearchQuery(e.target.value)}
-            placeholder={lang === 'zh' ? '搜尋景點、地點或備註...' : 'Search spots or notes...'}
-            className="w-full bg-transparent text-[16px] sm:text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden"
+            placeholder={isZh ? '搜尋全程景點或備註...' : 'Search spots or notes...'}
+            className="w-full bg-transparent text-[15px] sm:text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden"
           />
           {spotSearchQuery && (
             <button
               type="button"
               onClick={() => setSpotSearchQuery('')}
-              className="min-w-[44px] min-h-[44px] sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0 cursor-pointer"
+              className="w-7 h-7 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition shrink-0 cursor-pointer"
               aria-label="清除搜尋"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
 
-        {/* 即時搜尋結果浮層 (Search Dropdown / Results Preview) */}
+        {todayDay && (timelineViewMode !== 'daily' || selectedDayNumber !== todayDay.dayNumber) && (
+          <button
+            type="button"
+            onClick={handleJumpToToday}
+            className="min-h-[40px] px-3 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-300/70 dark:border-teal-700/60 text-teal-800 dark:text-teal-300 text-xs font-bold shrink-0 cursor-pointer transition active:scale-95"
+          >
+            {isZh ? '今日' : 'Today'}
+          </button>
+        )}
+
+        {timelineViewMode === 'daily' && trip.days.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setIsMapExpanded((prev) => !prev)}
+            className={`min-h-[40px] flex items-center gap-1.5 px-3 rounded-xl border text-xs font-bold shrink-0 transition cursor-pointer ${
+              isMapExpanded
+                ? 'bg-teal-700 dark:bg-teal-600 text-white border-teal-700 dark:border-teal-600'
+                : 'border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-[#111827] hover:bg-[#FAF9F6] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
+            }`}
+          >
+            <MapIcon className={`w-3.5 h-3.5 ${isMapExpanded ? 'text-white' : 'text-teal-700 dark:text-teal-400'}`} />
+            <span>{isMapExpanded ? (isZh ? '收合' : 'Hide') : (isZh ? '地圖' : 'Map')}</span>
+            {activeDayGeoCount > 0 && !isMapExpanded && (
+              <span className="font-mono text-[10px] opacity-75">({activeDayGeoCount})</span>
+            )}
+            {isMapExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+        )}
+
+        {/* Instant Search Results Dropdown */}
         {spotSearchQuery.trim() && (
           <div className="absolute top-full left-0 right-0 mt-1.5 z-30 max-h-80 overflow-y-auto rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-xl p-2 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
             <div className="px-2.5 py-1 text-[11px] font-bold text-slate-400 flex items-center justify-between border-b border-[#E5E2DC] dark:border-slate-800 pb-1.5">
@@ -1209,7 +1305,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               </div>
             ) : (
               matchingSpots.map(({ dayNumber, item }) => {
-                const cat = CATEGORY_MAP[item.category] || CATEGORY_MAP.spot;
+                const cat = CATEGORY_MAP[item.category] || CATEGORY_MAP.other;
                 const CatIcon = cat.icon;
                 return (
                   <button
@@ -1219,12 +1315,12 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     className="w-full text-left p-2.5 rounded-xl hover:bg-teal-50/80 dark:hover:bg-teal-950/40 flex items-center justify-between gap-3 transition group cursor-pointer"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 flex items-center justify-center shrink-0 text-slate-600 dark:text-slate-300 group-hover:bg-teal-100 dark:group-hover:bg-teal-900/60 group-hover:text-teal-700 dark:group-hover:text-teal-300 transition">
+                      <div className="w-8 h-8 rounded-lg bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 flex items-center justify-center shrink-0 text-slate-600 dark:text-slate-300">
                         <CatIcon className="w-4 h-4" />
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate group-hover:text-teal-700 dark:group-hover:text-teal-300">
+                          <span className="text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
                             {item.title}
                           </span>
                           <span className="text-[10px] font-mono tabular-nums font-medium text-slate-500 dark:text-slate-400">
@@ -1238,7 +1334,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                         )}
                       </div>
                     </div>
-                    <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400 shrink-0 opacity-0 group-hover:opacity-100 transition">
+                    <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400 shrink-0">
                       跳轉 →
                     </span>
                   </button>
@@ -1249,49 +1345,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
         )}
       </div>
 
-      {/* View Mode Switcher: 每日時序 vs 全程總覽大表 */}
-      <div className="flex items-center justify-between gap-2 pb-1">
-        <div className="inline-flex p-1 bg-[#FAF9F6] dark:bg-slate-900 rounded-2xl border border-[#E5E2DC] dark:border-slate-800 text-xs font-semibold">
-          <button
-            type="button"
-            onClick={() => setTimelineViewMode('daily')}
-            className={`min-h-[44px] sm:min-h-[36px] px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer ${
-              timelineViewMode === 'daily'
-                ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <Route className="w-3.5 h-3.5" />
-            <span>{lang === 'zh' ? '每日時序' : 'Daily'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setTimelineViewMode('overview')}
-            className={`min-h-[44px] sm:min-h-[36px] px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer ${
-              timelineViewMode === 'overview'
-                ? 'bg-white dark:bg-[#111827] text-teal-700 dark:text-teal-300 font-bold shadow-2xs border border-[#E5E2DC]/80 dark:border-slate-700'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <Calendar className="w-3.5 h-3.5" />
-            <span>{lang === 'zh' ? '行程總覽' : 'Overview'}</span>
-          </button>
-        </div>
-
-        {timelineViewMode === 'daily' && (
-          <button
-            type="button"
-            onClick={() => setIsMapExpanded(!isMapExpanded)}
-            className="min-h-[44px] sm:min-h-[40px] flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-[#111827] hover:bg-[#FAF9F6] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold shrink-0 transition cursor-pointer"
-          >
-            <MapIcon className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-            <span>{isMapExpanded ? (lang === 'zh' ? '收合' : 'Hide') : (lang === 'zh' ? '地圖' : 'Map')}</span>
-            {isMapExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-          </button>
-        )}
-      </div>
-
-      {/* If zero days: show inviting empty state */}
+      {/* 3. Main View Body */}
       {trip.days.length === 0 ? (
         <div className="py-14 px-6 text-center rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs max-w-md mx-auto my-6 space-y-4">
           <div className="w-14 h-14 rounded-2xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-400 flex items-center justify-center mx-auto">
@@ -1299,10 +1353,12 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           </div>
           <div className="space-y-1">
             <h3 className="font-bold text-slate-900 dark:text-white text-base">
-              {lang === 'zh' ? '尚未規劃任何天數' : 'No itinerary days yet'}
+              {isZh ? '尚未規劃任何天數' : 'No itinerary days yet'}
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              {lang === 'zh' ? '目前這趟旅程還沒有任何天數，立即建立第 1 天開始安排精彩景點！' : 'This trip has no days planned yet. Create Day 1 to start adding spots!'}
+              {isZh
+                ? '目前這趟旅程還沒有任何天數，立即建立第 1 天開始安排精彩景點！'
+                : 'This trip has no days planned yet. Create Day 1 to start adding spots!'}
             </p>
           </div>
           {canEdit && (
@@ -1312,7 +1368,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               className="min-h-[44px] inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs shadow-sm active:scale-95 transition cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>{lang === 'zh' ? '建立第 1 天行程' : 'Create Day 1'}</span>
+              <span>{isZh ? '建立第 1 天行程' : 'Create Day 1'}</span>
             </button>
           )}
         </div>
@@ -1329,189 +1385,202 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
         />
       ) : (
         <>
-          {/* Interactive Map (When expanded) */}
+          {/* Interactive Map (Auto-expanded on Pick Mode or Locate click) */}
           {isMapExpanded && (
-            <LeafletMap
-              items={activeDay.items}
-              selectedItemId={selectedItemId}
-              onSelectItem={(it) => setSelectedItemId(it.id)}
-              isPickMode={isPickMode}
-              onPickLocation={onPickLocation}
-              pickedLocation={pickedCoords}
-            />
+            <div id="timeline-day-map" className="scroll-mt-24">
+              <LeafletMap
+                items={activeDay.items}
+                selectedItemId={selectedItemId}
+                onSelectItem={(it) => setSelectedItemId(it.id)}
+                isPickMode={isPickMode}
+                onPickLocation={onPickLocation}
+                pickedLocation={pickedCoords}
+              />
+            </div>
           )}
 
-          {/* Swipeable Daily Content Area with Touch Gesture Support */}
+          {/* Swipeable Daily Schedule Body */}
           <div
-            className="space-y-4 touch-pan-y"
+            className="space-y-3 touch-pan-y"
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >
             <motion.div
               key={activeDay.dayNumber}
               initial={{
-                opacity: 0.88,
-                x: slideDirection === 'left' ? 24 : slideDirection === 'right' ? -24 : 0,
+                opacity: 0.9,
+                x: slideDirection === 'left' ? 20 : slideDirection === 'right' ? -20 : 0,
               }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="space-y-4"
+              transition={{ duration: 0.18, ease: 'easeOut' }}
+              className="space-y-3"
             >
-              {/* Day Memories Banner (if any exist) */}
+              {/* Streamlined Day Header Card with Integrated Weather + Inline Day Edit/Delete */}
+              <div
+                id="day-schedule-section"
+                className="bg-white dark:bg-[#111827] rounded-2xl p-3.5 sm:p-4 border border-[#E5E2DC] dark:border-slate-800 shadow-2xs scroll-mt-24"
+              >
+                {isEditingDayHeader ? (
+                  <div className="space-y-2.5 text-xs animate-in fade-in duration-100">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-teal-700 dark:text-teal-400">
+                        編輯 Day {activeDay.dayNumber} 主題與備註
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingDayHeader(false)}
+                        className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 px-2 py-1 cursor-pointer"
+                      >
+                        取消
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={dayThemeDraft}
+                      onChange={(e) => setDayThemeDraft(e.target.value)}
+                      placeholder="今日主題（例如：金澤兼六園・東茶屋街漫步）"
+                      className="w-full min-h-[42px] px-3 py-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[15px] sm:text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-teal-600"
+                    />
+                    <textarea
+                      rows={2}
+                      value={dayNotesDraft}
+                      onChange={(e) => setDayNotesDraft(e.target.value)}
+                      placeholder="當日提醒事項或住宿／票券備註..."
+                      className="w-full px-3 py-2 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[15px] sm:text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-teal-600 resize-none"
+                    />
+                    <div className="flex items-center justify-between gap-2">
+                      {trip.days.length > 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingDayHeader(false);
+                            setConfirmDeleteDay(activeDay);
+                          }}
+                          className="min-h-[38px] px-3 py-1.5 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 font-bold text-xs flex items-center gap-1 cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>刪除此天</span>
+                        </button>
+                      ) : (
+                        <span />
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleSaveDayHeader}
+                        className="min-h-[38px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs flex items-center gap-1 cursor-pointer"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>儲存</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      {/* Meta row: Day N · MM/DD (週X) · Compact Inline Weather */}
+                      <div className="flex items-center gap-1.5 flex-wrap text-xs text-slate-500 dark:text-slate-400">
+                        <span className="font-extrabold font-mono tabular-nums text-teal-700 dark:text-teal-400">
+                          Day {activeDay.dayNumber}
+                        </span>
+                        <span>·</span>
+                        <span className="font-mono tabular-nums">
+                          {formatMonthDaySlash(activeDay.date)} ({getDayOfWeek(activeDay.date, lang)})
+                        </span>
+
+                        {activeDayWeather?.status === 'ok' && activeDayWeather.forecast && (
+                          <>
+                            <span>·</span>
+                            <span
+                              className="inline-flex items-center gap-1 font-mono tabular-nums text-slate-700 dark:text-slate-200 font-semibold"
+                              title={`${activeDayWeather.forecast.locationName} (${activeDayWeather.forecast.source === 'archive' ? '歷史氣候' : 'Open-Meteo'})`}
+                            >
+                              <span>{getWeatherDescription(activeDayWeather.forecast.weatherCode, lang).icon}</span>
+                              <span>
+                                {activeDayWeather.forecast.minTemp}°~{activeDayWeather.forecast.maxTemp}°
+                              </span>
+                              {activeDayWeather.forecast.rainProbability > 0 && (
+                                <span className="inline-flex items-center gap-0.5 text-teal-700 dark:text-teal-400 text-[11px]">
+                                  <Umbrella className="w-3 h-3" />
+                                  {activeDayWeather.forecast.rainProbability}%
+                                </span>
+                              )}
+                            </span>
+                          </>
+                        )}
+
+                        {activeDayWeather?.status === 'too_far_future' && (
+                          <>
+                            <span>·</span>
+                            <span className="inline-flex items-center gap-1 text-[11px] text-slate-400">
+                              <CloudSun className="w-3 h-3" />
+                              <span>{activeDayWeather.daysUntilForecast}天後開放預報</span>
+                            </span>
+                          </>
+                        )}
+
+                        {isWeatherLoading && !activeDayWeather && (
+                          <span className="text-[10px] text-slate-400">· 氣象更新中</span>
+                        )}
+                      </div>
+
+                      {/* Day Theme + Subtle Edit Trigger */}
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <h3 className="font-bold text-slate-900 dark:text-white text-[15px] sm:text-base leading-snug truncate">
+                          {activeDay.theme || t.day.replace('{n}', String(activeDay.dayNumber))}
+                        </h3>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={handleStartEditDayHeader}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-teal-700 dark:hover:text-teal-400 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0 transition cursor-pointer"
+                            title="編輯當日主題、備註或刪除天數"
+                            aria-label="編輯當日主題"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {activeDay.notes && (
+                        <p className="text-slate-600 dark:text-slate-400 text-xs mt-1 leading-relaxed">
+                          {activeDay.notes}
+                        </p>
+                      )}
+                    </div>
+
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
+                        className="min-h-[40px] px-3.5 py-2 bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0 cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>{t.addSpot}</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Day Memories Compact Banner (if any exist) */}
               {(() => {
                 const dayMems = (trip.memories || []).filter((m) => m.dayNumber === activeDay.dayNumber);
                 if (dayMems.length === 0) return null;
                 return (
-                  <div
+                  <button
+                    type="button"
                     onClick={() => onOpenMemories?.()}
-                    className="rounded-2xl p-3.5 bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between cursor-pointer hover:border-teal-600/50 dark:hover:border-teal-500/50 transition shadow-2xs group"
+                    className="w-full rounded-xl px-3.5 py-2.5 bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between cursor-pointer hover:border-teal-600/50 transition group"
                   >
                     <div className="flex items-center gap-2 text-xs">
-                      <Camera className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                      <Camera className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                       <span className="font-bold text-slate-900 dark:text-slate-100 font-mono tabular-nums">
-                        Day {activeDay.dayNumber} 相片 ({dayMems.length})
+                        Day {activeDay.dayNumber} 相片回憶 ({dayMems.length})
                       </span>
                     </div>
-                    <span className="text-xs font-semibold text-teal-700 dark:text-teal-400 group-hover:translate-x-0.5 transition flex items-center gap-1">
-                      <span>相簿</span>
-                      <span>→</span>
-                    </span>
-                  </div>
+                    <span className="text-xs font-semibold text-teal-700 dark:text-teal-400">相簿 →</span>
+                  </button>
                 );
-              })()}
-
-              {/* Active Day Header Bar */}
-              <div id="day-schedule-section" className="bg-white dark:bg-[#111827] rounded-2xl p-4 sm:p-5 border border-[#E5E2DC] dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 scroll-mt-20">
-                <div>
-                  <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="font-bold font-mono tabular-nums text-teal-700 dark:text-teal-400">
-                      {t.day.replace('{n}', String(activeDay.dayNumber))}
-                    </span>
-                    <span>·</span>
-                    <span className="flex items-center gap-1 font-mono tabular-nums">
-                      <Calendar className="w-3.5 h-3.5" />
-                      {formatDateSlash(activeDay.date)}
-                    </span>
-                    {trip.days.length > 1 && (
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500 font-normal sm:hidden">
-                        · 左右滑動切換天數
-                      </span>
-                    )}
-                  </div>
-                  <h3 className="font-bold text-slate-900 dark:text-white text-base mt-1">
-                    {activeDay.theme || t.day.replace('{n}', String(activeDay.dayNumber))}
-                  </h3>
-                  {activeDay.notes && (
-                    <p className="text-slate-600 dark:text-slate-400 text-xs mt-1">
-                      {activeDay.notes}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2 shrink-0">
-                  {trip.days.length > 1 && (
-                    <div className="flex items-center gap-1 bg-[#FAF9F6] dark:bg-slate-900 rounded-xl p-1 border border-[#E5E2DC] dark:border-slate-800">
-                      <button
-                        type="button"
-                        disabled={selectedDayNumber <= 1}
-                        onClick={handlePrevDay}
-                        aria-label="前一天"
-                        title="前一天"
-                        className="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
-                      >
-                        <ChevronLeft className="w-4 h-4" />
-                      </button>
-                      <span className="text-xs font-mono tabular-nums font-semibold px-1.5 text-slate-600 dark:text-slate-400 select-none">
-                        {activeDay.dayNumber} / {trip.days.length}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={selectedDayNumber >= trip.days.length}
-                        onClick={handleNextDay}
-                        aria-label="後一天"
-                        title="後一天"
-                        className="w-11 h-11 sm:w-8 sm:h-8 flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
-                      >
-                        <ChevronRight className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
-
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
-                      className="min-h-[44px] sm:min-h-[38px] px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition active:scale-95 shrink-0 cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>{t.addSpot}</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Per-Day Open-Meteo Weather Strip (Zero API key, city-aware per day) */}
-              {(() => {
-                const dayWeather = dayWeatherMap[activeDay.dayNumber];
-                if (!dayWeather && !isWeatherLoading) return null;
-
-                if (isWeatherLoading && !dayWeather) {
-                  return (
-                    <div className="rounded-2xl px-4 py-2.5 bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 flex items-center gap-2 text-xs text-slate-400">
-                      <CloudSun className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
-                      <span>{lang === 'zh' ? '正在取得當日城市天氣預報...' : 'Fetching daily city weather...'}</span>
-                    </div>
-                  );
-                }
-
-                if (dayWeather?.status === 'ok' && dayWeather.forecast) {
-                  const f = dayWeather.forecast;
-                  const desc = getWeatherDescription(f.weatherCode, lang);
-                  return (
-                    <div className="rounded-2xl px-4 py-2.5 bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
-                      <div className="flex items-center gap-2 flex-wrap text-slate-700 dark:text-slate-300">
-                        <span className="text-base leading-none select-none">{desc.icon}</span>
-                        <span className="font-bold text-slate-900 dark:text-white">{desc.label}</span>
-                        <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">·</span>
-                        <span className="font-mono tabular-nums font-bold text-slate-900 dark:text-slate-100">
-                          {f.minTemp}° ~ {f.maxTemp}°C
-                        </span>
-                        {f.source === 'forecast' && (
-                          <>
-                            <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">·</span>
-                            <span className="inline-flex items-center gap-1 font-mono tabular-nums text-teal-700 dark:text-teal-400 font-semibold">
-                              <Umbrella className="w-3.5 h-3.5" />
-                              <span>{lang === 'zh' ? `降雨 ${f.rainProbability}%` : `${f.rainProbability}% rain`}</span>
-                            </span>
-                          </>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-                        <MapPin className="w-3 h-3 shrink-0" />
-                        <span className="truncate max-w-[180px]">{f.locationName}</span>
-                        <span>·</span>
-                        <span>{f.source === 'archive' ? (lang === 'zh' ? '歷史氣候實測' : 'Historical') : 'Open-Meteo'}</span>
-                      </div>
-                    </div>
-                  );
-                }
-
-                if (dayWeather?.status === 'too_far_future') {
-                  return (
-                    <div className="rounded-2xl px-4 py-2 bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                      <span className="flex items-center gap-1.5">
-                        <CloudSun className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
-                        <span>
-                          {lang === 'zh'
-                            ? `出發前 16 天開放免費每日天氣預報（預計約 ${dayWeather.daysUntilForecast} 天後可查詢）`
-                            : `Daily forecast unlocks 16 days prior (${dayWeather.daysUntilForecast}d left)`}
-                        </span>
-                      </span>
-                    </div>
-                  );
-                }
-
-                return null;
               })()}
 
               {/* Subtle, Dismissible Schedule Time Overlap Strip */}
@@ -1521,17 +1590,15 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                 const key = getConflictKey(activeDay.dayNumber, report);
                 if (dismissedConflictKeys[key]) return null;
                 return (
-                  <div className="rounded-2xl px-3.5 py-2.5 bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                  <div className="rounded-xl px-3.5 py-2.5 bg-amber-50/70 dark:bg-amber-950/25 border border-amber-200/80 dark:border-amber-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
                     <div className="flex items-start sm:items-center gap-2 min-w-0">
                       <AlertTriangle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
-                      <p className="text-slate-600 dark:text-slate-300 truncate">
-                        <span className="font-semibold text-slate-800 dark:text-slate-100">
-                          {report.conflicts.length === 1
-                            ? report.conflicts[0].message
-                            : lang === 'zh'
+                      <p className="text-amber-950 dark:text-amber-200 font-medium truncate">
+                        {report.conflicts.length === 1
+                          ? report.conflicts[0].message
+                          : isZh
                             ? `有 ${report.conflicts.length} 組時段重疊（如：${report.conflicts[0].message}）`
                             : `${report.conflicts.length} overlapping times (e.g. ${report.conflicts[0].message})`}
-                        </span>
                       </p>
                     </div>
 
@@ -1540,656 +1607,819 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                         <button
                           type="button"
                           onClick={() => handleAutoResolveDayConflicts(activeDay.dayNumber)}
-                          className="min-h-[32px] px-2.5 py-1 rounded-lg border border-[#E5E2DC] dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-teal-50 dark:hover:bg-teal-950/40 text-teal-700 dark:text-teal-300 font-semibold text-[11px] flex items-center gap-1 transition cursor-pointer"
+                          className="min-h-[32px] px-2.5 py-1 rounded-lg border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-900 hover:bg-teal-50 text-teal-700 dark:text-teal-300 font-bold text-[11px] flex items-center gap-1 transition cursor-pointer"
                         >
                           <Wand2 className="w-3 h-3" />
-                          <span>{lang === 'zh' ? '自動順延' : 'Auto-Shift'}</span>
+                          <span>{isZh ? '自動順延' : 'Auto-Shift'}</span>
                         </button>
                       )}
                       <button
                         type="button"
                         onClick={() => handleDismissDayConflict(activeDay.dayNumber, report)}
-                        className="min-h-[32px] px-2 py-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] flex items-center gap-1 transition cursor-pointer"
-                        title={lang === 'zh' ? '忽略此提醒' : 'Dismiss'}
-                        aria-label={lang === 'zh' ? '忽略此提醒' : 'Dismiss'}
+                        className="min-h-[32px] px-2 py-1 rounded-lg text-amber-700/70 dark:text-amber-300/70 hover:text-amber-900 dark:hover:text-amber-100 text-[11px] flex items-center gap-1 transition cursor-pointer"
+                        aria-label="忽略此提醒"
                       >
                         <X className="w-3.5 h-3.5" />
-                        <span className="hidden xs:inline">{lang === 'zh' ? '略過' : 'Hide'}</span>
                       </button>
                     </div>
                   </div>
                 );
               })()}
 
-      {/* Timeline Items List */}
-      {activeDay.items.length === 0 ? (
-        <div className="p-8 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 text-center">
-          <p className="text-slate-500 dark:text-slate-400 text-xs">
-            {lang === 'zh' ? '尚無行程安排' : 'No schedule yet.'}
-          </p>
-          {canEdit && (
-            <button
-              type="button"
-              onClick={() => onOpenAddItem(activeDay.dayNumber, '09:00')}
-              className="mt-3 min-h-[44px] px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>{t.addSpot}</span>
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {activeDay.items.map((item, index) => {
-            const cat = CATEGORY_MAP[item.category] || CATEGORY_MAP.other;
-            const catLabel = (t as any)[cat.labelKey] || cat.labelKey;
-            const isSelected = item.id === selectedItemId;
-            const pinColor = CATEGORY_COLORS[item.category] || '#0d9488';
+              {/* Timeline Items List */}
+              {activeDay.items.length === 0 ? (
+                <div className="p-8 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 text-center">
+                  <p className="text-slate-500 dark:text-slate-400 text-xs">
+                    {isZh ? '這一天尚無行程安排' : 'No schedule yet.'}
+                  </p>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenAddItem(activeDay.dayNumber, '09:00')}
+                      className="mt-3 min-h-[44px] px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>{t.addSpot}</span>
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {activeDay.items.map((item, index) => {
+                    const cat = CATEGORY_MAP[item.category] || CATEGORY_MAP.other;
+                    const catLabel = (t as any)[cat.labelKey] || cat.fallbackLabel;
+                    const isSelected = item.id === selectedItemId;
+                    const pinColor = CATEGORY_COLORS[item.category] || '#0d9488';
 
-            // Distance & Travel time to next spot
-            const nextItem = activeDay.items[index + 1];
-            let distanceInfo = null;
-            if (
-              typeof item.lat === 'number' &&
-              typeof item.lng === 'number' &&
-              !isNaN(item.lat) &&
-              !isNaN(item.lng) &&
-              nextItem &&
-              typeof nextItem.lat === 'number' &&
-              typeof nextItem.lng === 'number' &&
-              !isNaN(nextItem.lat) &&
-              !isNaN(nextItem.lng)
-            ) {
-              const km = calculateDistanceKm(
-                { lat: item.lat, lng: item.lng },
-                { lat: nextItem.lat, lng: nextItem.lng }
-              );
-              const times = estimateTravelTime(km);
-              distanceInfo = {
-                distStr: formatDistance(km),
-                walkingMin: times.walkingMin,
-                transitMin: times.transitMin,
-              };
-            }
+                    const nextItem = activeDay.items[index + 1];
+                    let distanceInfo: { distStr: string; walkingMin: number; transitMin: number } | null = null;
+                    if (
+                      isValidCoordinate(item.lat, item.lng) &&
+                      nextItem &&
+                      isValidCoordinate(nextItem.lat, nextItem.lng)
+                    ) {
+                      const km = calculateDistanceKm(
+                        { lat: item.lat!, lng: item.lng! },
+                        { lat: nextItem.lat!, lng: nextItem.lng! }
+                      );
+                      const times = estimateTravelTime(km);
+                      distanceInfo = {
+                        distStr: formatDistance(km, lang),
+                        walkingMin: times.walkingMin,
+                        transitMin: times.transitMin,
+                      };
+                    }
 
-            return (
-              <div key={item.id} className="space-y-2">
-                {/* Spot Card */}
-                <div
-                  id={`spot-card-${item.id}`}
-                  onClick={() => setSelectedItemId(item.id)}
-                  className={`rounded-2xl p-4 sm:p-5 transition shadow-2xs border cursor-pointer ${
-                    isSelected
-                      ? 'border-teal-600 ring-2 ring-teal-500/20 shadow-md bg-white dark:bg-[#111827]'
-                      : item.completed
-                      ? 'border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/50'
-                      : 'border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-[#111827] hover:border-teal-600/50 dark:hover:border-teal-500/50'
-                  }`}
-                >
-                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3.5">
-                    {/* Left Info with Map Pin Twin Badge */}
-                    <div className="flex items-start gap-3.5 flex-1 min-w-0">
-                      {/* Map Pin Matcher Button */}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedItemId(item.id);
-                          if (typeof window !== 'undefined' && window.innerWidth < 768) {
-                            window.scrollTo({ top: 0, behavior: 'smooth' });
-                          }
-                        }}
-                        title={lang === 'zh' ? `點擊在地圖定位第 ${index + 1} 站` : `Locate stop #${index + 1} on map`}
-                        className="relative shrink-0 flex flex-col items-center group/pin transition-transform active:scale-95 cursor-pointer mt-0.5 select-none"
+                    const isDraggingThis = dragState?.fromIndex === index;
+                    const isDropTarget =
+                      dragState !== null &&
+                      dragState.fromIndex !== index &&
+                      dragState.overIndex === index;
+                    const routeUrl = nextItem ? getGoogleMapsRouteUrl(item, nextItem) : null;
+
+                    return (
+                      <div
+                        key={item.id}
+                        data-timeline-spot-index={index}
+                        className="space-y-2 relative"
                       >
-                        <div
-                          style={{ backgroundColor: pinColor }}
-                          className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full text-white flex items-center justify-center font-black text-xs shadow-md border-2 border-white dark:border-slate-800 transition-all ${
-                            isSelected
-                              ? 'ring-4 ring-teal-400 scale-110 shadow-lg'
-                              : 'group-hover/pin:scale-105'
-                          }`}
-                        >
-                          <span>{index + 1}</span>
-                        </div>
-                        <div
-                          style={{ borderTopColor: pinColor }}
-                          className="w-0 h-0 border-l-[3.5px] border-l-transparent border-r-[3.5px] border-r-transparent border-t-[4.5px] -mt-0.5"
-                        />
-                      </button>
-
-                      {/* Text details */}
-                      <div className="space-y-1.5 flex-1 min-w-0">
-                        {/* Quiet unboxed metadata */}
-                        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 font-medium flex-wrap">
-                          <span className="flex items-center gap-1 font-mono tabular-nums text-teal-700 dark:text-teal-400 font-semibold">
-                            <Clock className="w-3.5 h-3.5" />
-                            {item.startTime}
-                            {item.endTime ? ` - ${item.endTime}` : ''}
-                          </span>
-                          <span aria-hidden="true">·</span>
-                          <span className={`flex items-center gap-1 ${cat.text}`}>
-                            <cat.icon className="w-3.5 h-3.5 shrink-0" />
-                            <span>{catLabel}</span>
-                          </span>
-                          {item.bookingCode && (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span className="font-mono tabular-nums text-slate-600 dark:text-slate-300 font-semibold">
-                                #{item.bookingCode}
-                              </span>
-                            </>
-                          )}
-                          {(() => {
-                            const report = dayConflictReports[activeDay.dayNumber];
-                            const key = getConflictKey(activeDay.dayNumber, report);
-                            if (!report || dismissedConflictKeys[key] || !report.conflictedItemIds.includes(item.id)) return null;
-                            return (
-                              <>
-                                <span aria-hidden="true">·</span>
-                                <span className="inline-flex items-center gap-1 font-medium text-amber-700 dark:text-amber-400">
-                                  <AlertTriangle className="w-3 h-3 shrink-0" />
-                                  <span>{lang === 'zh' ? '時段重疊' : 'Overlap'}</span>
-                                </span>
-                              </>
-                            );
-                          })()}
-                        </div>
-
-                        {/* Spot Title */}
-                        <h4
-                          className={`text-base sm:text-lg font-bold tracking-tight ${
-                            item.completed
-                              ? 'text-slate-500 dark:text-slate-400'
-                              : 'text-slate-900 dark:text-white'
-                          }`}
-                        >
-                          {item.title}
-                        </h4>
-
-                        {/* Location Address */}
-                        {(item.locationName || item.address) && (
-                          <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                            <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span className="truncate">{item.locationName || item.address}</span>
-                          </p>
+                        {isDropTarget && dragState.fromIndex > index && (
+                          <div className="h-1 rounded-full bg-teal-600 dark:bg-teal-400 mx-2 animate-pulse" />
                         )}
-
-                      {/* Notes / Transport info (Flattened Hairline Sections) */}
-                      {(item.transportNote || item.notes) && (
-                        <div className="mt-2 pt-2 border-t border-[#E5E2DC]/70 dark:border-slate-800 space-y-1.5">
-                          {item.transportNote && (
-                            <p className="text-xs text-teal-800 dark:text-teal-300 flex items-start gap-1.5 leading-relaxed">
-                              <Bus className="w-3.5 h-3.5 shrink-0 mt-0.5 text-teal-700 dark:text-teal-400" />
-                              <span>{item.transportNote}</span>
-                            </p>
-                          )}
-
-                          {item.notes && (
-                            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">
-                              {item.notes}
-                            </p>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Spot Memory Photos Thumbnail Badges & Google Photos Original Link */}
-                      {((item.memoryPhotos && item.memoryPhotos.length > 0) || item.googlePhotosUrl) && (
-                        <div className="flex items-center gap-2.5 pt-1.5 flex-wrap">
-                          {item.memoryPhotos && item.memoryPhotos.length > 0 && (
-                            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 select-none">
-                              {item.memoryPhotos.map((photo, pIdx) => (
+                        {/* Spot Card */}
+                        <div
+                          id={`spot-card-${item.id}`}
+                          onClick={() => {
+                            if (!dragState) setSelectedItemId(item.id);
+                          }}
+                          className={`rounded-2xl p-3.5 sm:p-4 transition shadow-2xs border cursor-pointer ${
+                            isDraggingThis
+                              ? 'border-teal-600 ring-2 ring-teal-500/40 shadow-lg scale-[1.01] opacity-90 bg-teal-50/40 dark:bg-teal-950/30 select-none'
+                              : isSelected
+                              ? 'border-teal-600 ring-2 ring-teal-500/20 shadow-md bg-white dark:bg-[#111827]'
+                              : item.completed
+                                ? 'border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900/50'
+                                : 'border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-[#111827] hover:border-teal-600/50 dark:hover:border-teal-500/50'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2.5">
+                            {/* Left Info with Drag Handle & Map Pin Twin Badge */}
+                            <div className="flex items-start gap-2.5 sm:gap-3 flex-1 min-w-0">
+                              {canEdit && activeDay.items.length > 1 && (
                                 <button
-                                  key={pIdx}
+                                  type="button"
+                                  data-no-day-swipe="true"
+                                  onClick={(e) => e.stopPropagation()}
+                                  onPointerDown={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    beginDragReorder(index);
+                                  }}
+                                  className="touch-none self-center -ml-1.5 w-7 h-10 rounded-lg flex items-center justify-center text-slate-300 hover:text-teal-600 dark:text-slate-600 dark:hover:text-teal-400 active:text-teal-700 cursor-grab active:cursor-grabbing shrink-0 transition"
+                                  title={isZh ? '按住拖曳調整景點順序' : 'Drag to reorder spot'}
+                                  aria-label={isZh ? '按住拖曳調整景點順序' : 'Drag to reorder'}
+                                >
+                                  <GripVertical className="w-4 h-4" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onPointerDown={(e) => {
+                                  if (!canEdit || activeDay.items.length < 2) return;
+                                  clearLongPress();
+                                  const targetEl = e.currentTarget;
+                                  longPressTimerRef.current = window.setTimeout(() => {
+                                    longPressTimerRef.current = null;
+                                    targetEl.blur();
+                                    beginDragReorder(index);
+                                  }, 380);
+                                }}
+                                onPointerUp={clearLongPress}
+                                onPointerLeave={clearLongPress}
+                                onPointerCancel={clearLongPress}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (dragState) return;
+                                  setSelectedItemId(item.id);
+                                  setIsMapExpanded(true);
+                                  setTimeout(() => {
+                                    document.getElementById('timeline-day-map')?.scrollIntoView({
+                                      behavior: 'smooth',
+                                      block: 'center',
+                                    });
+                                  }, 80);
+                                }}
+                                title={isZh ? `點擊定位第 ${index + 1} 站（長按可拖曳排序）` : `Locate stop #${index + 1} (long-press to reorder)`}
+                                className="relative shrink-0 flex flex-col items-center group/pin transition-transform active:scale-95 cursor-pointer mt-0.5 select-none"
+                              >
+                                <div
+                                  style={{ backgroundColor: pinColor }}
+                                  className={`w-8 h-8 rounded-full text-white flex items-center justify-center font-black text-xs shadow-sm border-2 border-white dark:border-slate-800 transition-all ${
+                                    isSelected
+                                      ? 'ring-4 ring-teal-400 scale-110'
+                                      : 'group-hover/pin:scale-105'
+                                  }`}
+                                >
+                                  <span>{index + 1}</span>
+                                </div>
+                                <div
+                                  style={{ borderTopColor: pinColor }}
+                                  className="w-0 h-0 border-l-[3.5px] border-l-transparent border-r-[3.5px] border-r-transparent border-t-[4.5px] -mt-0.5"
+                                />
+                              </button>
+
+                              <div className="space-y-1 flex-1 min-w-0">
+                                {/* Metadata Line */}
+                                <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium flex-wrap">
+                                  {item.startTime && (
+                                    <>
+                                      <span className="flex items-center gap-1 font-mono tabular-nums text-teal-700 dark:text-teal-400 font-bold">
+                                        <Clock className="w-3 h-3" />
+                                        {item.startTime}
+                                        {item.endTime ? ` - ${item.endTime}` : ''}
+                                      </span>
+                                      <span aria-hidden="true">·</span>
+                                    </>
+                                  )}
+                                  <span className={`flex items-center gap-1 font-semibold ${cat.text}`}>
+                                    <cat.icon className="w-3 h-3 shrink-0" />
+                                    <span>{catLabel}</span>
+                                  </span>
+                                  {item.bookingCode && (
+                                    <>
+                                      <span aria-hidden="true">·</span>
+                                      <span className="font-mono tabular-nums text-slate-700 dark:text-slate-300 font-semibold">
+                                        #{item.bookingCode}
+                                      </span>
+                                    </>
+                                  )}
+                                  {(() => {
+                                    const report = dayConflictReports[activeDay.dayNumber];
+                                    const key = getConflictKey(activeDay.dayNumber, report);
+                                    if (!report || dismissedConflictKeys[key] || !report.conflictedItemIds.includes(item.id)) return null;
+                                    return (
+                                      <>
+                                        <span aria-hidden="true">·</span>
+                                        <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-400">
+                                          <AlertTriangle className="w-3 h-3 shrink-0" />
+                                          <span>{isZh ? '時段重疊' : 'Overlap'}</span>
+                                        </span>
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+
+                                <h4
+                                  className={`text-[15px] sm:text-base font-bold tracking-tight leading-snug ${
+                                    item.completed
+                                      ? 'line-through text-slate-400 dark:text-slate-500'
+                                      : 'text-slate-900 dark:text-white'
+                                  }`}
+                                >
+                                  {item.title}
+                                </h4>
+
+                                {(item.locationName || item.address) && (
+                                  <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                                    <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                    <span className="truncate">{item.locationName || item.address}</span>
+                                  </p>
+                                )}
+
+                                {(item.transportNote || item.notes) && (
+                                  <div className="mt-1.5 pt-1.5 border-t border-[#E5E2DC]/70 dark:border-slate-800 space-y-1">
+                                    {item.transportNote && (
+                                      <p className="text-xs text-teal-800 dark:text-teal-300 flex items-start gap-1.5 leading-relaxed">
+                                        <Bus className="w-3.5 h-3.5 shrink-0 mt-0.5 text-teal-700 dark:text-teal-400" />
+                                        <span>{item.transportNote}</span>
+                                      </p>
+                                    )}
+                                    {item.notes && (
+                                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">
+                                        {item.notes}
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Spot Memory Thumbnails */}
+                                {((item.memoryPhotos && item.memoryPhotos.length > 0) || item.googlePhotosUrl) && (
+                                  <div className="flex items-center gap-2 pt-1.5 flex-wrap" data-no-day-swipe="true">
+                                    {item.memoryPhotos && item.memoryPhotos.length > 0 && (
+                                      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 select-none">
+                                        {item.memoryPhotos.map((photo, pIdx) => (
+                                          <button
+                                            key={pIdx}
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setOverlaySpotPhoto({ item, photoIndex: pIdx });
+                                            }}
+                                            className="relative cursor-pointer transition hover:scale-105 active:scale-95 shrink-0"
+                                            title="點擊開啟高畫質大圖檢視"
+                                          >
+                                            <MediaImage
+                                              tripId={trip.id}
+                                              ownerId={trip.ownerId}
+                                              collabId={trip.collabId}
+                                              src={photo}
+                                              alt="Spot memory"
+                                              className="w-10 h-10 rounded-lg object-cover border border-[#E5E2DC] dark:border-slate-700 shadow-xs"
+                                            />
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {item.googlePhotosUrl && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setOverlaySpotPhoto({ item, photoIndex: 0 });
+                                        }}
+                                        className="min-h-[34px] px-2 inline-flex items-center gap-1 text-teal-700 dark:text-teal-300 text-xs font-semibold hover:underline cursor-pointer"
+                                      >
+                                        <ExternalLink className="w-3.5 h-3.5" />
+                                        <span>相簿原圖</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+
+                                {typeof item.cost === 'number' && item.cost > 0 && (
+                                  <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 font-mono tabular-nums pt-0.5">
+                                    <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                                    <span>
+                                      {trip.currency} {item.cost.toLocaleString()}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400">
+                                      · {item.costPaid ? (isZh ? '已付款' : 'Paid') : (isZh ? '現場付' : 'Unpaid')}
+                                    </span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Right Control Actions — Clean iOS Touch Targets */}
+                            {canEdit ? (
+                              <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleToggleComplete(item.id, e)}
+                                  className={`w-10 h-10 sm:w-9 sm:h-9 rounded-xl transition cursor-pointer flex items-center justify-center ${
+                                    item.completed
+                                      ? 'bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-400 border border-teal-300/70 dark:border-teal-800'
+                                      : 'bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 border border-[#E5E2DC] dark:border-slate-700'
+                                  }`}
+                                  title={item.completed ? '已打勾（點擊取消）' : '點擊打勾'}
+                                  aria-label={item.completed ? '已打勾' : '未打勾'}
+                                >
+                                  {item.completed ? (
+                                    <CheckCircle2 className="w-4 h-4 text-teal-700 dark:text-teal-400 stroke-[2.4]" />
+                                  ) : (
+                                    <Circle className="w-4 h-4" />
+                                  )}
+                                </button>
+
+                                {/* Desktop Quick Reorder & Edit */}
+                                <div className="hidden sm:flex items-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    disabled={index === 0}
+                                    onClick={() => handleMoveItem(index, 'up')}
+                                    className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-25 transition cursor-pointer"
+                                    title="上移"
+                                  >
+                                    <ArrowUp className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={index === activeDay.items.length - 1}
+                                    onClick={() => handleMoveItem(index, 'down')}
+                                    className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-25 transition cursor-pointer"
+                                    title="下移"
+                                  >
+                                    <ArrowDown className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenEditItem(item, activeDay.dayNumber)}
+                                    className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                                    title="編輯"
+                                  >
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+
+                                {/* Universal iOS Action Sheet Trigger (Move / Duplicate / Move Day / Edit / Safe Delete) */}
+                                <button
+                                  type="button"
+                                  onClick={() => setActionMenuItem({ item, index })}
+                                  className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-[#E5E2DC] sm:border-transparent dark:border-slate-700 sm:dark:border-transparent transition cursor-pointer"
+                                  title="更多操作（編輯、移動天數、複製、刪除）"
+                                  aria-label="更多景點操作"
+                                >
+                                  <MoreHorizontal className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ) : item.completed ? (
+                              <div className="shrink-0 p-2 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800">
+                                <CheckCircle2 className="w-4 h-4 stroke-[2.4]" />
+                              </div>
+                            ) : null}
+                          </div>
+
+                          {/* Card Footer Bar: Navigation, Memories, Locate */}
+                          <div className="mt-3 pt-2.5 border-t border-[#E5E2DC]/80 dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-1.5">
+                              <a
+                                href={getGoogleMapsNavigationUrl(item)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs transition active:scale-95"
+                              >
+                                <Navigation className="w-3.5 h-3.5" />
+                                <span>{t.navGoogle}</span>
+                              </a>
+
+                              {onOpenMemories && (
+                                <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setOverlaySpotPhoto({ item, photoIndex: pIdx });
+                                    onOpenMemories(item.id);
                                   }}
-                                  className="relative group/thumb cursor-pointer transition hover:scale-105 active:scale-95 shrink-0"
-                                  title="點擊開啟高畫質大圖檢視"
+                                  className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 text-teal-700 dark:text-teal-400 font-semibold text-xs flex items-center gap-1 hover:bg-teal-50 dark:hover:bg-teal-950/50 transition border border-[#E5E2DC] dark:border-slate-700 cursor-pointer"
                                 >
-                                  <MediaImage
-                                    tripId={trip.id}
-                                    ownerId={trip.ownerId}
-                                    collabId={trip.collabId}
-                                    src={photo}
-                                    alt="Spot memory"
-                                    className="w-10 h-10 rounded-lg object-cover border border-[#E5E2DC] dark:border-slate-700 shadow-xs"
-                                  />
+                                  <Camera className="w-3.5 h-3.5" />
+                                  <span>
+                                    {item.memoryPhotos && item.memoryPhotos.length > 0
+                                      ? `${item.memoryPhotos.length} 張`
+                                      : isZh ? '相片' : 'Photos'}
+                                  </span>
                                 </button>
-                              ))}
+                              )}
+                            </div>
+
+                            {isValidCoordinate(item.lat, item.lng) && (
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setOverlaySpotPhoto({ item, photoIndex: 0 });
+                                  setSelectedItemId(item.id);
+                                  setIsMapExpanded(true);
+                                  setTimeout(() => {
+                                    document.getElementById('timeline-day-map')?.scrollIntoView({
+                                      behavior: 'smooth',
+                                      block: 'center',
+                                    });
+                                  }, 80);
                                 }}
-                                className="min-h-[40px] px-2 text-xs font-mono tabular-nums text-teal-700 dark:text-teal-400 font-bold shrink-0 flex items-center gap-1 hover:underline transition active:scale-95 cursor-pointer"
-                                title="點擊開啟相片檢視大圖"
+                                className="min-h-[38px] px-2.5 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
                               >
-                                <Camera className="w-3.5 h-3.5" />
-                                <span>{item.memoryPhotos.length} 張</span>
+                                <MapPin className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                                <span>{t.locateMap}</span>
                               </button>
-                            </div>
-                          )}
-
-                          {item.googlePhotosUrl && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOverlaySpotPhoto({ item, photoIndex: 0 });
-                              }}
-                              className="min-h-[40px] px-2 inline-flex items-center gap-1 text-teal-700 dark:text-teal-300 text-xs font-semibold hover:underline transition active:scale-95 cursor-pointer"
-                              title="點擊開啟 Google 相簿原始高畫質照片"
-                            >
-                              <ExternalLink className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                              <span>Google 相簿原圖</span>
-                            </button>
-                          )}
+                            )}
+                          </div>
                         </div>
-                      )}
 
-                      {typeof item.cost === 'number' && item.cost > 0 && (
-                        <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400 font-mono tabular-nums pt-0.5">
-                          <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                          <span>{trip.currency} {item.cost.toLocaleString()}</span>
-                          <span className="text-[10px] text-slate-400">
-                            · {item.costPaid ? (lang === 'zh' ? '已付款' : 'Paid') : (lang === 'zh' ? '現場付' : 'Unpaid')}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                        {isDropTarget && dragState.fromIndex < index && (
+                          <div className="h-1 rounded-full bg-teal-600 dark:bg-teal-400 mx-2 animate-pulse" />
+                        )}
 
-                    {/* Right Control Actions */}
-                    {canEdit ? (
-                      <div className="flex items-center sm:flex-col gap-1.5 self-end sm:self-start shrink-0">
-                        <button
-                          type="button"
-                          onClick={(e) => handleToggleComplete(item.id, e)}
-                          className={`w-10 h-10 sm:w-9 sm:h-9 rounded-xl transition cursor-pointer flex items-center justify-center ${
-                            item.completed
-                              ? 'bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-400 border border-teal-300/70 dark:border-teal-800'
-                              : 'bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 border border-[#E5E2DC] dark:border-slate-700'
-                          }`}
-                          title={item.completed ? (lang === 'zh' ? '已打勾（點擊取消）' : 'Completed') : (lang === 'zh' ? '點擊打勾' : 'Mark completed')}
-                          aria-label={item.completed ? '已打勾' : '未打勾'}
-                        >
-                          {item.completed ? (
-                            <CheckCircle2 className="w-4 h-4 text-teal-700 dark:text-teal-400 stroke-[2.4]" />
-                          ) : (
-                            <Circle className="w-4 h-4 text-slate-400" />
-                          )}
-                        </button>
-
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            disabled={index === 0}
-                            onClick={() => handleMoveItem(index, 'up')}
-                            className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition cursor-pointer"
-                            title={lang === 'zh' ? '上移' : 'Move up'}
-                          >
-                            <ArrowUp className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            type="button"
-                            disabled={index === activeDay.items.length - 1}
-                            onClick={() => handleMoveItem(index, 'down')}
-                            className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-20 transition cursor-pointer"
-                            title={lang === 'zh' ? '下移' : 'Move down'}
-                          >
-                            <ArrowDown className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => onOpenEditItem(item, selectedDayNumber)}
-                            className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                            title={lang === 'zh' ? '編輯' : 'Edit'}
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteItem(item.id)}
-                            className="min-w-[44px] min-h-[44px] sm:min-w-[32px] sm:min-h-[32px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
-                            title={lang === 'zh' ? '刪除' : 'Delete'}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                        {/* Two-Point Route Connector (origin -> destination) & Inline Spot Insert */}
+                        {index < activeDay.items.length - 1 && (
+                          <div className="py-1 px-2 flex flex-wrap items-center justify-center gap-2 group/connector">
+                            {routeUrl && (
+                              <a
+                                href={routeUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                title={isZh ? `開啟「${item.title} → ${nextItem.title}」Google Maps 路線規劃` : `Route from ${item.title} to ${nextItem.title}`}
+                                className="min-h-[32px] inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white dark:bg-[#111827] hover:bg-teal-50 dark:hover:bg-teal-950/50 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-500/60 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 shadow-2xs transition"
+                              >
+                                <Footprints className="w-3 h-3 text-teal-700 dark:text-teal-400 shrink-0" />
+                                {distanceInfo ? (
+                                  <span className="font-mono tabular-nums">
+                                    {distanceInfo.distStr} · {t.walkMin.replace('{m}', String(distanceInfo.walkingMin))} · {t.driveMin.replace('{m}', String(distanceInfo.transitMin))}
+                                  </span>
+                                ) : (
+                                  <span>{isZh ? '前往下一站' : 'Next leg'}</span>
+                                )}
+                                <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">|</span>
+                                <span className="font-bold text-teal-700 dark:text-teal-400 inline-flex items-center gap-0.5">
+                                  <span>{isZh ? '路線規劃' : 'Route'}</span>
+                                  <ArrowRight className="w-3 h-3" />
+                                </span>
+                              </a>
+                            )}
+                            {canEdit && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenAddItem(activeDay.dayNumber, getBetweenTime(item, nextItem))}
+                                className="opacity-85 sm:opacity-0 sm:group-hover/connector:opacity-100 hover:opacity-100 transition-all duration-150 min-h-[32px] inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#FAF9F6] hover:bg-teal-50 dark:bg-slate-800/80 dark:hover:bg-teal-950/60 text-[11px] font-semibold text-slate-500 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 border border-[#E5E2DC] dark:border-slate-700 cursor-pointer"
+                              >
+                                <Plus className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                                <span>{isZh ? '插入' : 'Insert'}</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    ) : item.completed ? (
-                      <div className="shrink-0 self-start p-2 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800">
-                        <CheckCircle2 className="w-4 h-4 stroke-[2.4]" />
-                      </div>
-                    ) : null}
-                  </div>
+                    );
+                  })}
 
-                  {/* Navigation and Location Bar */}
-                  <div className="mt-3.5 pt-3 border-t border-[#E5E2DC] dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={getGoogleMapsNavigationUrl(item)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="min-h-[44px] sm:min-h-[40px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-semibold text-xs flex items-center gap-1.5 shadow-2xs transition active:scale-95"
-                      >
-                        <Navigation className="w-3.5 h-3.5" />
-                        <span>{t.navGoogle}</span>
-                      </a>
-
-                      {onOpenMemories && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOpenMemories(item.id);
-                          }}
-                          className="min-h-[44px] sm:min-h-[40px] px-3 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 text-teal-700 dark:text-teal-400 font-semibold text-xs flex items-center gap-1.5 hover:bg-teal-50 dark:hover:bg-teal-950/50 transition active:scale-95 border border-[#E5E2DC] dark:border-slate-700 cursor-pointer"
-                          title="上傳或查看此景點回憶照片"
-                        >
-                          <Camera className="w-3.5 h-3.5" />
-                          <span>
-                            {item.memoryPhotos && item.memoryPhotos.length > 0
-                              ? `${item.memoryPhotos.length} 張回憶`
-                              : (lang === 'zh' ? '回憶相片' : 'Memories')}
-                          </span>
-                        </button>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedItemId(item.id);
-                        setIsMapExpanded(true);
-                      }}
-                      className="min-h-[44px] sm:min-h-[40px] px-3 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-800 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-                    >
-                      <MapPin className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                      <span>{t.locateMap}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Transit Step Connector & Inline Spot Insertion between cards */}
-                {index < activeDay.items.length - 1 && (
-                  <div className="py-1.5 px-4 flex flex-col items-center justify-center gap-1.5 group/connector">
-                    {distanceInfo && (
-                      <div className="flex items-center gap-2 text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 font-medium">
-                        <Footprints className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                        <span>{t.distToNext} {distanceInfo.distStr}</span>
-                        <span aria-hidden="true">·</span>
-                        <span>{t.walkMin.replace('{m}', String(distanceInfo.walkingMin))}</span>
-                        <span aria-hidden="true">·</span>
-                        <span>{t.driveMin.replace('{m}', String(distanceInfo.transitMin))}</span>
-                      </div>
-                    )}
-                    {canEdit && (
+                  {canEdit && (
+                    <div className="pt-1 text-center">
                       <button
                         type="button"
-                        onClick={() => onOpenAddItem(activeDay.dayNumber, getBetweenTime(item, nextItem))}
-                        className="opacity-85 sm:opacity-0 sm:group-hover/connector:opacity-100 hover:opacity-100 transition-all duration-200 min-h-[44px] sm:min-h-[32px] inline-flex items-center gap-1.5 px-3.5 py-1 rounded-xl bg-[#FAF9F6] hover:bg-teal-50 dark:bg-slate-800/80 dark:hover:bg-teal-950/60 text-xs sm:text-[11px] font-semibold text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-500 shadow-2xs active:scale-95 cursor-pointer"
-                        title={lang === 'zh' ? `在「${item.title}」與「${nextItem.title}」之間插入行程（依時間自動排入）` : 'Insert spot here'}
+                        onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
+                        className="w-full min-h-[44px] py-3 px-4 rounded-2xl border-2 border-dashed border-[#E5E2DC] dark:border-slate-800 hover:border-teal-500 dark:hover:border-teal-600 hover:bg-teal-50/40 dark:hover:bg-teal-950/20 text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 font-bold text-xs flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer"
                       >
-                        <Plus className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                        <span>{lang === 'zh' ? '在此處插入景點' : 'Insert spot here'}</span>
+                        <Plus className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                        <span>{isZh ? `新增第 ${activeDay.items.length + 1} 站` : 'Add next spot'}</span>
                       </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Quick Add Next Spot Button at Bottom of List */}
-          {canEdit && (
-            <div className="pt-2 text-center">
-              <button
-                type="button"
-                onClick={() => onOpenAddItem(activeDay.dayNumber, getSuggestedNextStartTime(activeDay.items))}
-                className="w-full min-h-[44px] py-3 px-4 rounded-2xl border-2 border-dashed border-[#E5E2DC] dark:border-slate-800 hover:border-teal-500 dark:hover:border-teal-600 hover:bg-teal-50/40 dark:hover:bg-teal-950/20 text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 font-semibold text-xs flex items-center justify-center gap-2 transition active:scale-[0.99] cursor-pointer"
-              >
-                <Plus className="w-4 h-4 text-teal-700 dark:text-teal-400" />
-                <span>{lang === 'zh' ? `新增第 ${activeDay.items.length + 1} 站` : 'Add next spot'}</span>
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </motion.div>
           </div>
-    </>
-  )}
+        </>
+      )}
 
-  {/* High-Resolution Photo Overlay for Timeline */}
-  {overlaySpotPhoto && (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center px-2 sm:p-6 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] bg-black/95 backdrop-blur-md animate-in fade-in duration-150"
-      onClick={() => setOverlaySpotPhoto(null)}
-    >
-      <div
-        className="max-w-4xl w-full bg-[#111827] rounded-3xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-full sm:max-h-[95dvh] relative"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Top Close Button & Action Bar */}
-        <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
-          {canEdit && (
-            <button
-              type="button"
-              onClick={() => setIsEditingOverlayGoogleUrl(!isEditingOverlayGoogleUrl)}
-              className="min-h-[40px] px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/90 text-teal-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-white/20 shadow-sm cursor-pointer"
-              title="編輯此景點的 Google 相簿連結"
-            >
-              <Edit2 className="w-3 h-3" />
-              <span className="hidden sm:inline">{isEditingOverlayGoogleUrl ? '收合編輯' : '修改原圖連結'}</span>
-            </button>
-          )}
+      {/* Spot More Actions Sheet */}
+      {actionMenuItem && (
+        <IosActionSheet
+          onClose={() => setActionMenuItem(null)}
+          title={actionMenuItem.item.title}
+          message={
+            actionMenuItem.item.startTime
+              ? `Day ${activeDay.dayNumber} · ${actionMenuItem.item.startTime}${actionMenuItem.item.endTime ? ` ~ ${actionMenuItem.item.endTime}` : ''}`
+              : `Day ${activeDay.dayNumber}`
+          }
+          options={[
+            {
+              label: isZh ? '編輯景點資訊' : 'Edit Spot',
+              tone: 'primary',
+              onClick: () => {
+                const target = actionMenuItem.item;
+                setActionMenuItem(null);
+                onOpenEditItem(target, activeDay.dayNumber);
+              },
+            },
+            ...(actionMenuItem.index > 0
+              ? [
+                  {
+                    label: isZh ? '往前移一站（上移）' : 'Move Up',
+                    onClick: () => {
+                      const idx = actionMenuItem.index;
+                      setActionMenuItem(null);
+                      handleMoveItem(idx, 'up');
+                    },
+                  },
+                ]
+              : []),
+            ...(actionMenuItem.index < activeDay.items.length - 1
+              ? [
+                  {
+                    label: isZh ? '往後移一站（下移）' : 'Move Down',
+                    onClick: () => {
+                      const idx = actionMenuItem.index;
+                      setActionMenuItem(null);
+                      handleMoveItem(idx, 'down');
+                    },
+                  },
+                ]
+              : []),
+            {
+              label: isZh ? '複製此景點' : 'Duplicate Spot',
+              onClick: () => {
+                const target = actionMenuItem.item;
+                setActionMenuItem(null);
+                handleDuplicateItem(target);
+              },
+            },
+            ...(trip.days.length > 1
+              ? [
+                  {
+                    label: isZh ? '移動至其他天' : 'Move to Another Day',
+                    onClick: () => {
+                      const target = actionMenuItem.item;
+                      setActionMenuItem(null);
+                      setMoveDayItem(target);
+                    },
+                  },
+                ]
+              : []),
+            {
+              label: isZh ? '刪除景點' : 'Delete Spot',
+              tone: 'destructive',
+              onClick: () => {
+                const target = actionMenuItem.item;
+                setActionMenuItem(null);
+                setConfirmDeleteItem(target);
+              },
+            },
+          ]}
+        />
+      )}
 
-          {sanitizeExternalUrl(overlaySpotPhoto.item.googlePhotosUrl) && (
-            <a
-              href={sanitizeExternalUrl(overlaySpotPhoto.item.googlePhotosUrl)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="min-h-[40px] px-3 py-1.5 rounded-full bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold transition flex items-center gap-1.5 border border-white/20 shadow-md backdrop-blur-md active:scale-95"
-              title="開啟 Google 相簿檢視 4K / 原始超高畫質相片"
-            >
-              <ExternalLink className="w-3.5 h-3.5 text-white" />
-              <span className="hidden sm:inline">在 Google 相簿開啟 (4K)</span>
-              <span className="sm:hidden">4K 原圖</span>
-            </a>
-          )}
+      {/* Move Spot to Another Day Sheet */}
+      {moveDayItem && (
+        <IosActionSheet
+          onClose={() => setMoveDayItem(null)}
+          title={isZh ? '移動景點至哪一天？' : 'Move Spot to Day'}
+          message={moveDayItem.title}
+          options={trip.days
+            .filter((d) => d.dayNumber !== activeDay.dayNumber)
+            .map((d) => ({
+              label: `Day ${d.dayNumber} · ${formatMonthDaySlash(d.date)}${d.theme ? ` (${d.theme})` : ''}`,
+              onClick: () => handleMoveItemToDay(moveDayItem, d.dayNumber),
+            }))}
+        />
+      )}
 
-          <button
-            type="button"
-            onClick={() => setOverlaySpotPhoto(null)}
-            className="w-10 h-10 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/90 transition shadow-sm cursor-pointer"
-            title="關閉"
+      {/* Confirm Delete Spot Sheet (protects attached memories from accidental 1-tap loss!) */}
+      {confirmDeleteItem && (
+        <IosActionSheet
+          onClose={() => setConfirmDeleteItem(null)}
+          title={isZh ? `確定要刪除「${confirmDeleteItem.title}」？` : `Delete "${confirmDeleteItem.title}"?`}
+          message={
+            (trip.memories || []).some((m) => m.spotId === confirmDeleteItem.id)
+              ? isZh
+                ? '此景點包含關聯回憶照片，刪除後會一併移除。'
+                : 'Attached memory photos for this spot will also be removed.'
+              : isZh
+                ? '刪除後無法復原。'
+                : 'This action cannot be undone.'
+          }
+          options={[
+            {
+              label: isZh ? '確認刪除景點' : 'Delete Spot',
+              tone: 'destructive',
+              onClick: () => executeDeleteItem(confirmDeleteItem.id),
+            },
+          ]}
+        />
+      )}
+
+      {/* Confirm Delete Day Sheet */}
+      {confirmDeleteDay && (
+        <IosActionSheet
+          onClose={() => setConfirmDeleteDay(null)}
+          title={isZh ? `確定要刪除 Day ${confirmDeleteDay.dayNumber}？` : `Delete Day ${confirmDeleteDay.dayNumber}?`}
+          message={
+            isZh
+              ? `將移除該天排定的 ${confirmDeleteDay.items.length} 個景點，並自動重新編號後續天數與日期。`
+              : `This removes ${confirmDeleteDay.items.length} spot(s) and renumbers subsequent days.`
+          }
+          options={[
+            {
+              label: isZh ? `確認刪除 Day ${confirmDeleteDay.dayNumber}` : `Delete Day ${confirmDeleteDay.dayNumber}`,
+              tone: 'destructive',
+              onClick: () => executeDeleteDay(confirmDeleteDay),
+            },
+          ]}
+        />
+      )}
+
+      {/* High-Resolution Photo Overlay */}
+      {overlaySpotPhoto && (
+        <div
+          className="fixed inset-0 z-[75] flex items-center justify-center px-2 sm:p-6 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-[max(0.75rem,env(safe-area-inset-bottom,0px))] bg-black/95 backdrop-blur-md animate-in fade-in duration-150"
+          onClick={() => setOverlaySpotPhoto(null)}
+        >
+          <div
+            className="max-w-4xl w-full bg-[#111827] rounded-3xl overflow-hidden shadow-2xl border border-slate-800 flex flex-col max-h-full sm:max-h-[95dvh] relative"
+            onClick={(e) => e.stopPropagation()}
           >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+            <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingOverlayGoogleUrl(!isEditingOverlayGoogleUrl)}
+                  className="min-h-[40px] px-3 py-1.5 rounded-full bg-black/60 hover:bg-black/90 text-teal-300 hover:text-white text-xs font-semibold transition flex items-center gap-1.5 border border-white/20 shadow-sm cursor-pointer"
+                >
+                  <Edit2 className="w-3 h-3" />
+                  <span className="hidden sm:inline">{isEditingOverlayGoogleUrl ? '收合編輯' : '修改原圖連結'}</span>
+                </button>
+              )}
 
-        {/* Quick Inline Edit Bar for Google Photos URL */}
-        {isEditingOverlayGoogleUrl && (
-          <div className="p-3 bg-slate-900 border-b border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 z-20 mt-14">
-            <input
-              type="url"
-              value={overlayEditUrl}
-              onChange={(e) => setOverlayEditUrl(e.target.value)}
-              placeholder="貼上 Google 相簿分享或原始照片連結 (如 https://photos.app.goo.gl/...)"
-              className="flex-1 min-h-[44px] sm:min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-[16px] sm:text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-500"
-            />
-            <div className="flex items-center gap-2 justify-end">
+              {sanitizeExternalUrl(overlaySpotPhoto.item.googlePhotosUrl) && (
+                <a
+                  href={sanitizeExternalUrl(overlaySpotPhoto.item.googlePhotosUrl)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-h-[40px] px-3 py-1.5 rounded-full bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold transition flex items-center gap-1.5 border border-white/20 shadow-md"
+                >
+                  <ExternalLink className="w-3.5 h-3.5 text-white" />
+                  <span className="hidden sm:inline">在 Google 相簿開啟</span>
+                  <span className="sm:hidden">原圖</span>
+                </a>
+              )}
+
               <button
                 type="button"
-                onClick={handleSaveOverlayGoogleUrl}
-                className="min-h-[40px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                onClick={() => setOverlaySpotPhoto(null)}
+                className="w-10 h-10 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/90 transition cursor-pointer"
+                aria-label="關閉"
               >
-                <Check className="w-3.5 h-3.5" />
-                <span>儲存連結</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsEditingOverlayGoogleUrl(false)}
-                className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition cursor-pointer"
-              >
-                取消
+                <X className="w-5 h-5" />
               </button>
             </div>
-          </div>
-        )}
 
-        {/* Main Image Area with High-Resolution Source */}
-        <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden min-h-[300px] select-none p-2 sm:p-4">
-          {overlaySpotPhoto.item.memoryPhotos && overlaySpotPhoto.item.memoryPhotos.length > 1 && (
-            <button
-              type="button"
-              onClick={() => {
-                const photos = overlaySpotPhoto.item.memoryPhotos!;
-                const nextIdx = (overlaySpotPhoto.photoIndex - 1 + photos.length) % photos.length;
-                setOverlaySpotPhoto({ ...overlaySpotPhoto, photoIndex: nextIdx });
-              }}
-              className="absolute left-2 sm:left-4 z-10 w-11 h-11 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition active:scale-90 border border-white/10 cursor-pointer"
-              title="上一張"
-            >
-              <ChevronLeft className="w-6 h-6" />
-            </button>
-          )}
-
-          {(() => {
-            const currentLocal = overlaySpotPhoto.item.memoryPhotos?.[overlaySpotPhoto.photoIndex];
-            const highResUrl = sanitizeExternalUrl(overlaySpotPhoto.item.googlePhotosUrl);
-            const canUseHighRes = Boolean(highResUrl) && !overlayHighResFailed;
-            const activeSrc = canUseHighRes ? highResUrl! : (currentLocal || highResUrl || '');
-
-            return (
-              <div className="relative flex items-center justify-center max-h-[65vh]">
-                <MediaImage
-                  tripId={trip.id}
-                  ownerId={trip.ownerId}
-                  collabId={trip.collabId}
-                  src={activeSrc}
-                  alt={overlaySpotPhoto.item.title}
-                  onError={() => {
-                    if (canUseHighRes) setOverlayHighResFailed(true);
-                  }}
-                  className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl"
+            {isEditingOverlayGoogleUrl && (
+              <div className="p-3 bg-slate-900 border-b border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 z-20 mt-14">
+                <input
+                  type="url"
+                  value={overlayEditUrl}
+                  onChange={(e) => setOverlayEditUrl(e.target.value)}
+                  placeholder="貼上 Google 相簿分享連結 (https://photos.app.goo.gl/...)"
+                  className="flex-1 min-h-[44px] sm:min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-[16px] sm:text-xs outline-none focus:ring-2 focus:ring-teal-500 placeholder:text-slate-500"
                 />
-                {canUseHighRes ? (
-                  <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-md text-[11px] font-bold text-teal-300 border border-teal-500/30 shadow-sm">
-                    Google 相簿高畫質原圖
-                  </div>
-                ) : highResUrl ? (
-                  <div className="absolute bottom-2 left-2 px-2.5 py-1 rounded-lg bg-black/75 backdrop-blur-md text-[11px] font-bold text-slate-200 border border-white/20 flex items-center gap-1.5 shadow-sm">
-                    <ExternalLink className="w-3 h-3 text-teal-400" />
-                    <span>已連結 Google 相簿</span>
-                  </div>
-                ) : null}
+                <div className="flex items-center gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSaveOverlayGoogleUrl}
+                    className="min-h-[40px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-600 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>儲存連結</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingOverlayGoogleUrl(false)}
+                    className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition cursor-pointer"
+                  >
+                    取消
+                  </button>
+                </div>
               </div>
-            );
-          })()}
+            )}
 
-          {overlaySpotPhoto.item.memoryPhotos && overlaySpotPhoto.item.memoryPhotos.length > 1 && (
-            <button
-              type="button"
-              onClick={() => {
-                const photos = overlaySpotPhoto.item.memoryPhotos!;
-                const nextIdx = (overlaySpotPhoto.photoIndex + 1) % photos.length;
-                setOverlaySpotPhoto({ ...overlaySpotPhoto, photoIndex: nextIdx });
-              }}
-              className="absolute right-2 sm:right-4 z-10 w-11 h-11 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition active:scale-90 border border-white/10 cursor-pointer"
-              title="下一張"
-            >
-              <ChevronRight className="w-6 h-6" />
-            </button>
-          )}
-        </div>
+            <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden min-h-[280px] select-none p-2 sm:p-4">
+              {overlaySpotPhoto.item.memoryPhotos && overlaySpotPhoto.item.memoryPhotos.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const photos = overlaySpotPhoto.item.memoryPhotos!;
+                    const nextIdx = (overlaySpotPhoto.photoIndex - 1 + photos.length) % photos.length;
+                    setOverlaySpotPhoto({ ...overlaySpotPhoto, photoIndex: nextIdx });
+                  }}
+                  className="absolute left-2 sm:left-4 z-10 w-11 h-11 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition border border-white/10 cursor-pointer"
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
+              )}
 
-        {/* Thumbnail Strip if multiple photos */}
-        {overlaySpotPhoto.item.memoryPhotos && overlaySpotPhoto.item.memoryPhotos.length > 1 && (
-          <div className="px-4 py-2 bg-slate-950/90 border-t border-slate-800 flex items-center justify-center gap-2 overflow-x-auto">
-            {overlaySpotPhoto.item.memoryPhotos.map((photo, pIdx) => (
-              <button
-                key={pIdx}
-                type="button"
-                onClick={() => setOverlaySpotPhoto({ ...overlaySpotPhoto, photoIndex: pIdx })}
-                className={`relative w-12 h-12 rounded-xl overflow-hidden shrink-0 transition border-2 cursor-pointer ${
-                  pIdx === overlaySpotPhoto.photoIndex
-                    ? 'border-teal-400 scale-105 shadow-md'
-                    : 'border-transparent opacity-60 hover:opacity-100'
-                }`}
-              >
-                <MediaImage
-                  tripId={trip.id}
-                  ownerId={trip.ownerId}
-                  collabId={trip.collabId}
-                  src={photo}
-                  alt=""
-                  className="w-full h-full object-cover"
-                />
-              </button>
-            ))}
-          </div>
-        )}
+              {(() => {
+                const currentLocal = overlaySpotPhoto.item.memoryPhotos?.[overlaySpotPhoto.photoIndex];
+                const highResUrl = sanitizeExternalUrl(overlaySpotPhoto.item.googlePhotosUrl);
+                const canUseHighRes = Boolean(highResUrl) && !overlayHighResFailed && !currentLocal;
+                const activeSrc = currentLocal || (canUseHighRes ? highResUrl! : '');
 
-        {/* Bottom Info Bar */}
-        <div className="p-3.5 sm:p-4 bg-[#111827] text-white flex items-center justify-between gap-3 border-t border-slate-800">
-          <div className="space-y-0.5 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-base">{overlaySpotPhoto.item.memoryMood || '✨'}</span>
-              <h4 className="font-bold text-sm text-white truncate">
-                {overlaySpotPhoto.item.title}
-              </h4>
-              {overlaySpotPhoto.item.startTime && (
-                <>
-                  <span aria-hidden="true" className="text-slate-600">·</span>
-                  <span className="text-xs font-mono tabular-nums text-teal-400 shrink-0">
-                    {overlaySpotPhoto.item.startTime}
-                  </span>
-                </>
+                return (
+                  <div className="relative flex items-center justify-center max-h-[65vh]">
+                    <MediaImage
+                      tripId={trip.id}
+                      ownerId={trip.ownerId}
+                      collabId={trip.collabId}
+                      src={activeSrc}
+                      alt={overlaySpotPhoto.item.title}
+                      onError={() => {
+                        if (canUseHighRes) setOverlayHighResFailed(true);
+                      }}
+                      className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl"
+                    />
+                  </div>
+                );
+              })()}
+
+              {overlaySpotPhoto.item.memoryPhotos && overlaySpotPhoto.item.memoryPhotos.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const photos = overlaySpotPhoto.item.memoryPhotos!;
+                    const nextIdx = (overlaySpotPhoto.photoIndex + 1) % photos.length;
+                    setOverlaySpotPhoto({ ...overlaySpotPhoto, photoIndex: nextIdx });
+                  }}
+                  className="absolute right-2 sm:right-4 z-10 w-11 h-11 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center transition border border-white/10 cursor-pointer"
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
               )}
             </div>
-            {(overlaySpotPhoto.item.notes || overlaySpotPhoto.item.memoryNotes) && (
-              <p className="text-xs text-slate-300 italic whitespace-pre-wrap break-words line-clamp-2 sm:line-clamp-none">
-                「{overlaySpotPhoto.item.memoryNotes || overlaySpotPhoto.item.notes}」
-              </p>
-            )}
-          </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            {onOpenMemories && (
-              <button
-                type="button"
-                onClick={() => {
-                  const id = overlaySpotPhoto.item.id;
-                  setOverlaySpotPhoto(null);
-                  onOpenMemories(id);
-                }}
-                className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold shrink-0 transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <Camera className="w-3.5 h-3.5 text-teal-400" />
-                <span>相簿專區</span>
-              </button>
+            {overlaySpotPhoto.item.memoryPhotos && overlaySpotPhoto.item.memoryPhotos.length > 1 && (
+              <div className="px-4 py-2 bg-slate-950/90 border-t border-slate-800 flex items-center justify-center gap-2 overflow-x-auto">
+                {overlaySpotPhoto.item.memoryPhotos.map((photo, pIdx) => (
+                  <button
+                    key={pIdx}
+                    type="button"
+                    onClick={() => setOverlaySpotPhoto({ ...overlaySpotPhoto, photoIndex: pIdx })}
+                    className={`relative w-12 h-12 rounded-xl overflow-hidden shrink-0 transition border-2 cursor-pointer ${
+                      pIdx === overlaySpotPhoto.photoIndex
+                        ? 'border-teal-400 scale-105'
+                        : 'border-transparent opacity-60 hover:opacity-100'
+                    }`}
+                  >
+                    <MediaImage
+                      tripId={trip.id}
+                      ownerId={trip.ownerId}
+                      collabId={trip.collabId}
+                      src={photo}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
             )}
-            <button
-              type="button"
-              onClick={() => setOverlaySpotPhoto(null)}
-              className="min-h-[40px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-600 text-xs font-bold shrink-0 transition shadow-xs cursor-pointer"
-            >
-              關閉
-            </button>
+
+            <div className="p-3.5 sm:p-4 bg-[#111827] text-white flex items-center justify-between gap-3 border-t border-slate-800">
+              <div className="space-y-0.5 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">{overlaySpotPhoto.item.memoryMood || '✨'}</span>
+                  <h4 className="font-bold text-sm text-white truncate">{overlaySpotPhoto.item.title}</h4>
+                </div>
+                {(overlaySpotPhoto.item.notes || overlaySpotPhoto.item.memoryNotes) && (
+                  <p className="text-xs text-slate-300 italic line-clamp-2 sm:line-clamp-none">
+                    「{overlaySpotPhoto.item.memoryNotes || overlaySpotPhoto.item.notes}」
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {onOpenMemories && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const id = overlaySpotPhoto.item.id;
+                      setOverlaySpotPhoto(null);
+                      onOpenMemories(id);
+                    }}
+                    className="min-h-[40px] px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold shrink-0 transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-teal-400" />
+                    <span>相簿</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setOverlaySpotPhoto(null)}
+                  className="min-h-[40px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-600 text-xs font-bold shrink-0 transition cursor-pointer"
+                >
+                  關閉
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
-  )}
-</div>
-);
+  );
 };

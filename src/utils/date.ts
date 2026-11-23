@@ -21,20 +21,31 @@ export function formatMonthDaySlash(dateStr?: string): string {
 }
 
 /**
- * Get weekday label for date string
+ * Normalize a date string to YYYY-MM-DD
+ */
+export function normalizeDateKey(dateStr?: string): string {
+  if (!dateStr) return '';
+  return dateStr.trim().slice(0, 10).replace(/\//g, '-');
+}
+
+/**
+ * Get weekday label for date string (supports YYYY-MM-DD and YYYY/MM/DD)
  */
 export function getDayOfWeek(dateStr?: string, lang: string = 'zh'): string {
   if (!dateStr) return '';
-  const d = new Date(dateStr.slice(0, 10) + 'T00:00:00');
+  const normalized = normalizeDateKey(dateStr);
+  const d = new Date(`${normalized}T00:00:00`);
   if (isNaN(d.getTime())) return '';
   const dayIndex = d.getDay();
   const zhDays = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'];
+  const zhCnDays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
   const jaDays = ['日', '月', '火', '水', '木', '金', '土'];
   const enDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const koDays = ['일', '월', '화', '수', '목', '금', '토'];
   if (lang === 'en') return enDays[dayIndex];
   if (lang === 'ja') return jaDays[dayIndex];
   if (lang === 'ko') return koDays[dayIndex];
+  if (lang === 'zh-CN') return zhCnDays[dayIndex];
   return zhDays[dayIndex];
 }
 
@@ -50,10 +61,61 @@ export function getTodayLocal(): string {
 }
 
 /**
+ * Return today's date string (YYYY-MM-DD) in a specific IANA timezone,
+ * falling back cleanly to device local time if timezone is omitted or unsupported.
+ */
+export function getTodayInTimezone(tz?: string): string {
+  if (!tz) return getTodayLocal();
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date());
+    const year = parts.find((p) => p.type === 'year')?.value;
+    const month = parts.find((p) => p.type === 'month')?.value;
+    const day = parts.find((p) => p.type === 'day')?.value;
+    if (year && month && day) {
+      return `${year}-${month}-${day}`;
+    }
+  } catch {
+    // Unsupported timezone identifier
+  }
+  return getTodayLocal();
+}
+
+/**
+ * Return current minutes since midnight (0..1439) in a specific IANA timezone,
+ * falling back to local device time if timezone is omitted or unsupported.
+ */
+export function getCurrentMinutesInTimezone(tz?: string): number {
+  const now = new Date();
+  if (!tz) return now.getHours() * 60 + now.getMinutes();
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(now);
+    const hourRaw = Number(parts.find((p) => p.type === 'hour')?.value);
+    const minuteRaw = Number(parts.find((p) => p.type === 'minute')?.value);
+    if (Number.isFinite(hourRaw) && Number.isFinite(minuteRaw)) {
+      const hour = hourRaw === 24 ? 0 : hourRaw;
+      return hour * 60 + minuteRaw;
+    }
+  } catch {
+    // Fallback below
+  }
+  return now.getHours() * 60 + now.getMinutes();
+}
+
+/**
  * Add or subtract days to a YYYY-MM-DD date string safely in local timezone
  */
 export function addDaysLocal(baseDateStr: string, offsetDays: number): string {
-  const clean = (baseDateStr || '').slice(0, 10).replace(/\//g, '-');
+  const clean = normalizeDateKey(baseDateStr);
   const match = clean.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   const base = match
     ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + offsetDays)
@@ -68,16 +130,16 @@ export function addDaysLocal(baseDateStr: string, offsetDays: number): string {
 }
 
 /**
- * Check if a date string matches today's local date (YYYY-MM-DD or YYYY/MM/DD)
+ * Check if a date string matches today's date (in target timezone if provided, else local)
  */
-export function isDateToday(dateStr?: string): boolean {
+export function isDateToday(dateStr?: string, tz?: string): boolean {
   if (!dateStr) return false;
-  const clean = dateStr.slice(0, 10).replace(/\//g, '-');
-  return clean === getTodayLocal();
+  const clean = normalizeDateKey(dateStr);
+  return clean === getTodayInTimezone(tz);
 }
 
 /**
- * Parse time string (e.g. "09:30", "9:30", "14:00") into minutes from midnight.
+ * Parse time string (e.g. "09:30", "9:30", "14:00") into minutes from midnight (0..1439).
  * Returns 99999 if time is empty or invalid, so unscheduled items appear at the end.
  */
 export function parseTimeToMinutes(timeStr?: string): number {
@@ -86,11 +148,19 @@ export function parseTimeToMinutes(timeStr?: string): number {
   if (match) {
     const hours = parseInt(match[1], 10);
     const minutes = parseInt(match[2], 10);
-    if (!isNaN(hours) && !isNaN(minutes)) {
+    if (!isNaN(hours) && !isNaN(minutes) && hours >= 0 && hours < 24 && minutes >= 0 && minutes < 60) {
       return hours * 60 + minutes;
     }
   }
   return 99999;
+}
+
+/**
+ * Determine whether an event starting in the evening and ending in early morning
+ * represents a legitimate overnight activity (e.g., 22:00 ~ 01:30 or red-eye flight).
+ */
+export function isOvernightTimeRange(startM: number, endM: number): boolean {
+  return startM !== 99999 && endM !== 99999 && startM >= 18 * 60 && endM <= 6 * 60 && endM < startM;
 }
 
 /**
@@ -121,12 +191,11 @@ export function findInsertionPosition<T extends { title?: string; startTime?: st
   newItemTime?: string
 ): {
   targetIndex: number;
-  beforeItem?: T; // Item immediately following the new item (i.e. new item is placed before this one)
-  afterItem?: T;  // Item immediately preceding the new item (i.e. new item is placed after this one)
+  beforeItem?: T;
+  afterItem?: T;
 } {
   const newMinutes = parseTimeToMinutes(newItemTime);
 
-  // If new item has no specified time, place at the very end
   if (newMinutes === 99999 || items.length === 0) {
     const afterItem = items.length > 0 ? items[items.length - 1] : undefined;
     return {
@@ -136,18 +205,15 @@ export function findInsertionPosition<T extends { title?: string; startTime?: st
     };
   }
 
-  // Find the first item whose scheduled time is strictly greater than the new item's time
   let targetIndex = -1;
   for (let i = 0; i < items.length; i++) {
     const itemMinutes = parseTimeToMinutes(items[i].startTime);
-    // If the item has a valid time greater than newMinutes, or if it has no time (99999) while new item does have time:
     if (itemMinutes > newMinutes) {
       targetIndex = i;
       break;
     }
   }
 
-  // If all existing items are earlier, insert at the end
   if (targetIndex === -1) {
     targetIndex = items.length;
   }
@@ -164,7 +230,7 @@ export function findInsertionPosition<T extends { title?: string; startTime?: st
 
 /**
  * Calculates a reasonable suggested start time for a new spot.
- * If there are existing items, picks a time after the last item's endTime or startTime + 1h.
+ * If there are existing items, picks a time after the last item's endTime or startTime + 45m.
  * Defaults to "09:00" if no items exist.
  */
 export function getSuggestedNextStartTime<T extends { startTime?: string; endTime?: string }>(
@@ -174,9 +240,12 @@ export function getSuggestedNextStartTime<T extends { startTime?: string; endTim
 
   let maxMinutes = -1;
   for (const it of items) {
-    const endM = parseTimeToMinutes(it.endTime);
     const startM = parseTimeToMinutes(it.startTime);
-    const effectiveM = endM !== 99999 ? endM : startM;
+    const endM = parseTimeToMinutes(it.endTime);
+    let effectiveM = startM;
+    if (endM !== 99999) {
+      effectiveM = isOvernightTimeRange(startM, endM) ? 23 * 60 + 30 : Math.max(startM === 99999 ? -1 : startM, endM);
+    }
     if (effectiveM !== 99999 && effectiveM > maxMinutes) {
       maxMinutes = effectiveM;
     }
@@ -209,7 +278,7 @@ export interface DayConflictReport {
   hasFixableOverlap: boolean;
 }
 
-function formatMinutesToHHMM(totalMinutes: number): string {
+export function formatMinutesToHHMM(totalMinutes: number): string {
   const clamped = Math.max(0, Math.min(23 * 60 + 59, Math.round(totalMinutes)));
   const h = Math.floor(clamped / 60);
   const m = clamped % 60;
@@ -225,9 +294,15 @@ export interface SchedulableItemLike {
   lng?: number;
 }
 
+function isZhLang(lang: string): boolean {
+  return lang === 'zh' || lang === 'zh-CN';
+}
+
 /**
  * Analyze a single day's sorted itinerary items for invalid time ranges
- * and genuine overlapping time windows (touching boundaries like 08:00-10:00 -> 10:00 are valid).
+ * and genuine overlapping time windows — including non-adjacent overlaps
+ * (e.g. a long 09:00-15:00 tour overlapping multiple short spots inside it).
+ * Legitimate overnight items (18:00+ -> <=06:00) are respected without false alerts.
  */
 export function detectDayTimeConflicts<T extends SchedulableItemLike>(
   items: T[],
@@ -237,72 +312,87 @@ export function detectDayTimeConflicts<T extends SchedulableItemLike>(
     return { conflicts: [], conflictedItemIds: [], hasFixableOverlap: false };
   }
 
+  const zh = isZhLang(lang);
   const sorted = sortItineraryItemsByTime(items);
   const conflicts: ScheduleConflict[] = [];
   const conflictedSet = new Set<string>();
   let hasFixableOverlap = false;
 
-  for (let i = 0; i < sorted.length; i++) {
-    const curr = sorted[i];
-    const startM = parseTimeToMinutes(curr.startTime);
-    const endM = parseTimeToMinutes(curr.endTime);
+  const parsed = sorted.map((it) => {
+    const startM = parseTimeToMinutes(it.startTime);
+    const endM = parseTimeToMinutes(it.endTime);
+    const overnight = isOvernightTimeRange(startM, endM);
+    const effectiveEndM =
+      startM === 99999
+        ? 99999
+        : overnight
+          ? 24 * 60
+          : endM !== 99999 && endM >= startM
+            ? endM
+            : startM;
+    return { item: it, startM, endM, overnight, effectiveEndM };
+  });
 
-    if (startM !== 99999 && endM !== 99999 && endM < startM) {
-      conflictedSet.add(curr.id);
+  for (let i = 0; i < parsed.length; i++) {
+    const curr = parsed[i];
+
+    // Check genuinely inverted time range (excluding intentional overnight spans)
+    if (curr.startM !== 99999 && curr.endM !== 99999 && curr.endM < curr.startM && !curr.overnight) {
+      conflictedSet.add(curr.item.id);
       conflicts.push({
-        id: `invalid-${curr.id}`,
+        id: `invalid-${curr.item.id}`,
         type: 'invalid_range',
-        itemAId: curr.id,
-        itemATitle: curr.title,
-        message:
-          lang === 'zh'
-            ? `「${curr.title}」結束時間 (${curr.endTime}) 早於開始時間 (${curr.startTime})`
-            : `"${curr.title}" end time (${curr.endTime}) is before start time (${curr.startTime})`,
+        itemAId: curr.item.id,
+        itemATitle: curr.item.title,
+        message: zh
+          ? `「${curr.item.title}」結束時間 (${curr.item.endTime}) 早於開始時間 (${curr.item.startTime})`
+          : `"${curr.item.title}" end time (${curr.item.endTime}) is before start time (${curr.item.startTime})`,
       });
     }
 
-    if (i < sorted.length - 1) {
-      const next = sorted[i + 1];
-      const nextStartM = parseTimeToMinutes(next.startTime);
-      if (startM === 99999 || nextStartM === 99999) continue;
+    if (curr.startM === 99999) continue;
 
-      const effectiveEndM = endM !== 99999 && endM >= startM ? endM : startM;
+    // Compare against ALL subsequent scheduled items (catches non-adjacent overlaps too)
+    for (let j = i + 1; j < parsed.length; j++) {
+      const next = parsed[j];
+      if (next.startM === 99999) break;
 
-      if (endM !== 99999 && endM >= startM && nextStartM < effectiveEndM) {
-        const overlapMinutes = effectiveEndM - nextStartM;
-        conflictedSet.add(curr.id);
-        conflictedSet.add(next.id);
+      if (next.startM === curr.startM) {
+        conflictedSet.add(curr.item.id);
+        conflictedSet.add(next.item.id);
         hasFixableOverlap = true;
         conflicts.push({
-          id: `overlap-${curr.id}-${next.id}`,
+          id: `same-${curr.item.id}-${next.item.id}`,
           type: 'overlap',
-          itemAId: curr.id,
-          itemATitle: curr.title,
-          itemBId: next.id,
-          itemBTitle: next.title,
-          overlapMinutes,
-          message:
-            lang === 'zh'
-              ? `「${curr.title}」與「${next.title}」重疊 ${overlapMinutes} 分鐘`
-              : `"${curr.title}" overlaps with "${next.title}" by ${overlapMinutes} min`,
-        });
-      } else if (nextStartM === startM) {
-        conflictedSet.add(curr.id);
-        conflictedSet.add(next.id);
-        hasFixableOverlap = true;
-        conflicts.push({
-          id: `same-${curr.id}-${next.id}`,
-          type: 'overlap',
-          itemAId: curr.id,
-          itemATitle: curr.title,
-          itemBId: next.id,
-          itemBTitle: next.title,
+          itemAId: curr.item.id,
+          itemATitle: curr.item.title,
+          itemBId: next.item.id,
+          itemBTitle: next.item.title,
           overlapMinutes: 0,
-          message:
-            lang === 'zh'
-              ? `「${curr.title}」與「${next.title}」開始時間同為 ${curr.startTime}`
-              : `"${curr.title}" and "${next.title}" share start time ${curr.startTime}`,
+          message: zh
+            ? `「${curr.item.title}」與「${next.item.title}」開始時間同為 ${curr.item.startTime}`
+            : `"${curr.item.title}" and "${next.item.title}" share start time ${curr.item.startTime}`,
         });
+      } else if (curr.effectiveEndM > curr.startM && next.startM < curr.effectiveEndM) {
+        const overlapMinutes = curr.effectiveEndM - next.startM;
+        conflictedSet.add(curr.item.id);
+        conflictedSet.add(next.item.id);
+        hasFixableOverlap = true;
+        conflicts.push({
+          id: `overlap-${curr.item.id}-${next.item.id}`,
+          type: 'overlap',
+          itemAId: curr.item.id,
+          itemATitle: curr.item.title,
+          itemBId: next.item.id,
+          itemBTitle: next.item.title,
+          overlapMinutes,
+          message: zh
+            ? `「${curr.item.title}」與「${next.item.title}」重疊 ${overlapMinutes} 分鐘`
+            : `"${curr.item.title}" overlaps with "${next.item.title}" by ${overlapMinutes} min`,
+        });
+      } else {
+        // Since sorted by startM, no further item can start before curr.effectiveEndM
+        break;
       }
     }
   }
@@ -323,12 +413,14 @@ export function checkItemTimeOverlap<T extends SchedulableItemLike>(
   lang: string = 'zh'
 ): string[] {
   const warnings: string[] = [];
+  const zh = isZhLang(lang);
   const cStart = parseTimeToMinutes(candidate.startTime);
   const cEnd = parseTimeToMinutes(candidate.endTime);
+  const cOvernight = isOvernightTimeRange(cStart, cEnd);
 
-  if (cStart !== 99999 && cEnd !== 99999 && cEnd < cStart) {
+  if (cStart !== 99999 && cEnd !== 99999 && cEnd < cStart && !cOvernight) {
     warnings.push(
-      lang === 'zh'
+      zh
         ? `結束時間 (${candidate.endTime}) 早於開始時間 (${candidate.startTime})`
         : `End time (${candidate.endTime}) is earlier than start time (${candidate.startTime})`
     );
@@ -336,7 +428,7 @@ export function checkItemTimeOverlap<T extends SchedulableItemLike>(
 
   if (cStart === 99999) return warnings;
 
-  const effectiveCEnd = cEnd !== 99999 && cEnd >= cStart ? cEnd : cStart + 30;
+  const effectiveCEnd = cOvernight ? 24 * 60 : cEnd !== 99999 && cEnd >= cStart ? cEnd : cStart;
 
   for (const other of others) {
     if (candidate.id && other.id === candidate.id) continue;
@@ -346,26 +438,27 @@ export function checkItemTimeOverlap<T extends SchedulableItemLike>(
 
     if (oStart === cStart) {
       warnings.push(
-        lang === 'zh'
+        zh
           ? `與「${other.title}」開始時間相同 (${other.startTime})`
           : `Same start time as "${other.title}" (${other.startTime})`
       );
       continue;
     }
 
-    const effectiveOEnd = oEnd !== 99999 && oEnd >= oStart ? oEnd : oStart;
-    // Check true interval overlap (when at least one item specifies an endTime)
-    if (oEnd !== 99999 && cStart < effectiveOEnd && cStart >= oStart) {
+    const oOvernight = isOvernightTimeRange(oStart, oEnd);
+    const effectiveOEnd = oOvernight ? 24 * 60 : oEnd !== 99999 && oEnd >= oStart ? oEnd : oStart;
+
+    if (effectiveOEnd > oStart && cStart < effectiveOEnd && cStart >= oStart) {
       const overlap = effectiveOEnd - cStart;
       warnings.push(
-        lang === 'zh'
+        zh
           ? `與「${other.title}」(${other.startTime}-${other.endTime}) 重疊 ${overlap} 分鐘`
           : `Overlaps "${other.title}" (${other.startTime}-${other.endTime}) by ${overlap} min`
       );
-    } else if (cEnd !== 99999 && cEnd >= cStart && oStart >= cStart && oStart < effectiveCEnd) {
+    } else if (effectiveCEnd > cStart && oStart >= cStart && oStart < effectiveCEnd) {
       const overlap = effectiveCEnd - oStart;
       warnings.push(
-        lang === 'zh'
+        zh
           ? `與「${other.title}」(${other.startTime}) 重疊 ${overlap} 分鐘`
           : `Overlaps "${other.title}" (${other.startTime}) by ${overlap} min`
       );
@@ -377,7 +470,7 @@ export function checkItemTimeOverlap<T extends SchedulableItemLike>(
 
 /**
  * Shift overlapping items forward sequentially while keeping their original duration.
- * Only adjusts items whose startTime collides with the preceding item's endTime (or identical startTime).
+ * Avoids clamping pile-ups at 23:45 and leaves valid overnight activities intact.
  */
 export function autoShiftDayConflicts<T extends SchedulableItemLike>(
   items: T[],
@@ -394,13 +487,19 @@ export function autoShiftDayConflicts<T extends SchedulableItemLike>(
     if (startM === 99999) continue;
 
     const endM = parseTimeToMinutes(it.endTime);
-    const hasValidEnd = endM !== 99999 && endM >= startM;
+    const overnight = isOvernightTimeRange(startM, endM);
+    const hasValidEnd = !overnight && endM !== 99999 && endM >= startM;
     const duration = hasValidEnd ? endM - startM : 0;
 
     let newStartM = startM;
     if (cursorEndM !== -1 && newStartM <= cursorEndM) {
-      // Push past previous item's end (or same startTime) with buffer
-      newStartM = Math.min(23 * 60 + 45, cursorEndM + bufferMinutes);
+      // Only add buffer if there is enough room before midnight; otherwise sit tightly after previous end
+      const withBuffer = cursorEndM + bufferMinutes;
+      if (withBuffer <= 23 * 60 + 50) {
+        newStartM = withBuffer;
+      } else {
+        newStartM = Math.min(23 * 60 + 55, cursorEndM + 5);
+      }
     }
 
     if (newStartM !== startM) {
@@ -408,13 +507,18 @@ export function autoShiftDayConflicts<T extends SchedulableItemLike>(
       if (hasValidEnd) {
         it.endTime = formatMinutesToHHMM(Math.min(23 * 60 + 59, newStartM + duration));
       }
-    } else if (endM !== 99999 && endM < startM) {
-      // Fix inverted endTime cleanly to +60m
+    } else if (endM !== 99999 && endM < startM && !overnight) {
+      // Fix genuinely inverted endTime cleanly to +60m
       it.endTime = formatMinutesToHHMM(Math.min(23 * 60 + 59, startM + 60));
     }
 
     const updatedEndM = parseTimeToMinutes(it.endTime);
-    cursorEndM = updatedEndM !== 99999 && updatedEndM >= newStartM ? updatedEndM : newStartM;
+    const updatedOvernight = isOvernightTimeRange(newStartM, updatedEndM);
+    cursorEndM = updatedOvernight
+      ? 23 * 60 + 55
+      : updatedEndM !== 99999 && updatedEndM >= newStartM
+        ? updatedEndM
+        : newStartM;
   }
 
   return sorted;

@@ -26,6 +26,7 @@ import {
   FileText,
   DollarSign,
   SlidersHorizontal,
+  Ticket,
 } from 'lucide-react';
 
 interface PDFExportModalProps {
@@ -46,10 +47,11 @@ const CATEGORY_NAMES: Record<string, { zh: string; en: string; ja: string; ko: s
 
 export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onClose }) => {
   const t = TRANSLATIONS[lang];
+  const isZh = lang === 'zh' || lang === 'zh-CN';
   const printRef = useRef<HTMLDivElement>(null);
 
-  // Export options
   const [includeOverviewTable, setIncludeOverviewTable] = useState(true);
+  const [includeBookings, setIncludeBookings] = useState(Boolean(trip.bookings && trip.bookings.length > 0));
   const [includeDailyDetails, setIncludeDailyDetails] = useState(true);
   const [includeTodos, setIncludeTodos] = useState(false);
   const [includePacking, setIncludePacking] = useState(true);
@@ -63,6 +65,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
 
   const baseCurrency = trip.currency || 'JPY';
   const totalSpots = trip.days.reduce((sum, d) => sum + d.items.length, 0);
+  const nightsCount = Math.max(0, trip.days.length - 1);
   const totalSpent =
     trip.expenses?.reduce(
       (sum, e) =>
@@ -72,6 +75,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
 
   const enabledSectionsCount = [
     includeOverviewTable,
+    includeBookings,
     includeDailyDetails,
     includeTodos,
     includePacking,
@@ -97,15 +101,15 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
       const safeTitle = (trip.title || 'hiyori-itinerary').replace(/[\\/:*?"<>|]/g, '_');
       await exportElementToPDF(printRef.current, `${safeTitle}.pdf`);
     } catch (err: any) {
-      setPdfError(err?.message || (lang === 'zh' ? 'PDF 匯出失敗，請改用列印另存 PDF' : 'PDF export failed, try Print instead.'));
+      setPdfError(err?.message || (isZh ? 'PDF 匯出失敗，請改用列印另存 PDF' : 'PDF export failed, try Print instead.'));
     } finally {
       setIsExportingPdf(false);
     }
   };
 
-  // Quick 1-tap presets
   const applyPresetCompact = () => {
     setIncludeOverviewTable(true);
+    setIncludeBookings(Boolean(trip.bookings && trip.bookings.length > 0));
     setIncludeDailyDetails(false);
     setIncludeTodos(false);
     setIncludePacking(true);
@@ -116,6 +120,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
 
   const applyPresetDailyOnly = () => {
     setIncludeOverviewTable(false);
+    setIncludeBookings(Boolean(trip.bookings && trip.bookings.length > 0));
     setIncludeDailyDetails(true);
     setIncludeTodos(true);
     setIncludePacking(true);
@@ -126,22 +131,23 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
 
   const applyPresetFull = () => {
     setIncludeOverviewTable(true);
+    setIncludeBookings(true);
     setIncludeDailyDetails(true);
     setIncludeTodos(true);
     setIncludePacking(true);
     setIncludeEmergency(true);
-    setIncludeNotes(false);
-    setIncludeExpenses(false);
+    setIncludeNotes(true);
+    setIncludeExpenses(true);
   };
 
   const activePreset =
     includeOverviewTable && !includeDailyDetails && !includeTodos && includePacking && includeEmergency && !includeNotes && !includeExpenses
       ? 'compact'
       : !includeOverviewTable && includeDailyDetails && includeTodos && includePacking && includeEmergency && !includeNotes && !includeExpenses
-      ? 'daily'
-      : includeOverviewTable && includeDailyDetails && includeTodos && includePacking && includeEmergency && !includeNotes && !includeExpenses
-      ? 'full'
-      : 'custom';
+        ? 'daily'
+        : includeOverviewTable && includeBookings && includeDailyDetails && includeTodos && includePacking && includeEmergency && includeNotes && includeExpenses
+          ? 'full'
+          : 'custom';
 
   return (
     <IosModalSheet
@@ -151,40 +157,24 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
       fullHeightOnMobile
       ariaLabel={t.exportPDF}
     >
-      {/* Print-specific style for native browser printing */}
       <style>{`
-        @page {
-          size: A4 portrait;
-          margin: 10mm 12mm;
-        }
+        @page { size: A4 portrait; margin: 10mm 12mm; }
         @media print {
           html, body {
             background: #ffffff !important;
             color: #0f172a !important;
+            font-family: "Noto Sans TC", "PingFang TC", system-ui, sans-serif !important;
             font-size: 11pt !important;
             margin: 0 !important;
             padding: 0 !important;
             height: auto !important;
-            min-height: 100% !important;
             overflow: visible !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
-          * {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          .page-break-before {
-            page-break-before: always !important;
-            break-before: page !important;
-          }
-          .break-inside-avoid {
-            break-inside: avoid !important;
-            page-break-inside: avoid !important;
-          }
-          .no-print {
-            display: none !important;
-          }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          .break-inside-avoid { break-inside: avoid !important; page-break-inside: avoid !important; }
+          .no-print { display: none !important; }
         }
       `}</style>
 
@@ -200,10 +190,10 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
               onClick={handlePrint}
               disabled={isExportingPdf}
               className="min-h-[40px] px-2.5 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-40 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
-              title="列印或透過系統另存為 PDF"
+              title="列印或透過系統另存為向量 PDF"
             >
               <Printer className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">{lang === 'zh' ? '列印' : 'Print'}</span>
+              <span className="hidden sm:inline">{isZh ? '列印' : 'Print'}</span>
             </button>
             <button
               type="button"
@@ -219,8 +209,8 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
               )}
               <span>
                 {isExportingPdf
-                  ? (lang === 'zh' ? '產生中...' : 'Generating...')
-                  : (lang === 'zh' ? '下載 PDF' : 'PDF')}
+                  ? isZh ? '產生中...' : 'Generating...'
+                  : isZh ? '下載 PDF' : 'PDF'}
               </span>
             </button>
           </div>
@@ -233,7 +223,7 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
         </div>
       )}
 
-      {/* Compact Control Strip (Presets + Inline Collapsible Include Toggles) */}
+      {/* Control Strip */}
       <div className="px-3 sm:px-5 py-2.5 border-b border-[#E5E2DC]/80 dark:border-slate-800 bg-[#FAF9F6] dark:bg-[#0B1120] space-y-2 shrink-0 no-print">
         <div className="grid grid-cols-3 p-1 rounded-xl bg-[#EFECE5] dark:bg-slate-800/90 gap-1">
           <button
@@ -242,10 +232,10 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
             className={`min-h-[36px] sm:min-h-[32px] px-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
               activePreset === 'compact'
                 ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                : 'text-slate-600 dark:text-slate-400'
             }`}
           >
-            {lang === 'zh' ? '一頁精簡' : 'Compact'}
+            {isZh ? '一頁精簡' : 'Compact'}
           </button>
           <button
             type="button"
@@ -253,10 +243,10 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
             className={`min-h-[36px] sm:min-h-[32px] px-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
               activePreset === 'daily'
                 ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                : 'text-slate-600 dark:text-slate-400'
             }`}
           >
-            {lang === 'zh' ? '僅每日日程' : 'Daily Only'}
+            {isZh ? '僅每日日程' : 'Daily Only'}
           </button>
           <button
             type="button"
@@ -264,73 +254,45 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
             className={`min-h-[36px] sm:min-h-[32px] px-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
               activePreset === 'full'
                 ? 'bg-white dark:bg-[#111827] text-slate-900 dark:text-white shadow-xs font-bold'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                : 'text-slate-600 dark:text-slate-400'
             }`}
           >
-            {lang === 'zh' ? '完整手冊' : 'Full Guide'}
+            {isZh ? '完整手冊' : 'Full Guide'}
           </button>
         </div>
 
         <IosInsetGroup>
           <IosDisclosureRow
             icon={<SlidersHorizontal className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-            label={lang === 'zh' ? '自訂手冊收錄章節' : 'Included Sections'}
+            label={isZh ? '自訂手冊收錄章節' : 'Included Sections'}
             value={`已選 ${enabledSectionsCount} 項`}
             expanded={showOptionsPanel}
             onToggle={() => setShowOptionsPanel((v) => !v)}
           >
             <div className="divide-y divide-[#E5E2DC]/70 dark:divide-slate-800/80 max-h-56 overflow-y-auto">
-              <IosToggleRow
-                label={lang === 'zh' ? '行程總覽大表' : 'Master Overview'}
-                checked={includeOverviewTable}
-                onChange={setIncludeOverviewTable}
-              />
-              <IosToggleRow
-                label={lang === 'zh' ? '每日詳細日程' : 'Daily Schedule'}
-                checked={includeDailyDetails}
-                onChange={setIncludeDailyDetails}
-              />
-              <IosToggleRow
-                label={lang === 'zh' ? '票券與行前待辦' : 'Tickets & To-Do'}
-                checked={includeTodos}
-                onChange={setIncludeTodos}
-              />
-              <IosToggleRow
-                label={t.includePacking}
-                checked={includePacking}
-                onChange={setIncludePacking}
-              />
-              <IosToggleRow
-                label={t.includeEmergency}
-                checked={includeEmergency}
-                onChange={setIncludeEmergency}
-              />
-              <IosToggleRow
-                label={lang === 'zh' ? '附錄備忘' : t.includeNotes}
-                checked={includeNotes}
-                onChange={setIncludeNotes}
-              />
-              <IosToggleRow
-                label={lang === 'zh' ? '消費記帳摘要' : 'Expense Summary'}
-                checked={includeExpenses}
-                onChange={setIncludeExpenses}
-              />
+              <IosToggleRow label={isZh ? '行程總覽大表' : 'Master Overview'} checked={includeOverviewTable} onChange={setIncludeOverviewTable} />
+              <IosToggleRow label={isZh ? '訂位憑證編號' : 'Booking Vouchers'} checked={includeBookings} onChange={setIncludeBookings} />
+              <IosToggleRow label={isZh ? '每日詳細日程' : 'Daily Schedule'} checked={includeDailyDetails} onChange={setIncludeDailyDetails} />
+              <IosToggleRow label={isZh ? '票券與行前待辦' : 'Tickets & To-Do'} checked={includeTodos} onChange={setIncludeTodos} />
+              <IosToggleRow label={t.includePacking} checked={includePacking} onChange={setIncludePacking} />
+              <IosToggleRow label={t.includeEmergency} checked={includeEmergency} onChange={setIncludeEmergency} />
+              <IosToggleRow label={isZh ? '附錄備忘' : t.includeNotes} checked={includeNotes} onChange={setIncludeNotes} />
+              <IosToggleRow label={isZh ? '消費記帳摘要' : 'Expense Summary'} checked={includeExpenses} onChange={setIncludeExpenses} />
             </div>
           </IosDisclosureRow>
         </IosInsetGroup>
       </div>
 
-      {/* Document Preview Scroll Area (Always crisp white paper canvas for PDF consistency) */}
+      {/* Document Preview Scroll Area */}
       <div className="flex-1 min-h-0 overflow-y-auto bg-[#EFECE5] dark:bg-slate-950 p-3 sm:p-6 overscroll-contain touch-pan-y pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
-        {/* Printable Document Paper Sheet Container */}
         <div
           id="printable-itinerary-booklet"
           ref={printRef}
-          className="w-full max-w-4xl mx-auto space-y-7 text-xs leading-relaxed bg-white text-slate-900 p-5 sm:p-8 rounded-2xl shadow-sm overflow-visible print:shadow-none print:rounded-none print:bg-white print:text-black print:p-0"
-          style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}
+          className="w-full max-w-4xl mx-auto space-y-6 text-xs leading-relaxed bg-white text-slate-900 p-5 sm:p-8 rounded-2xl shadow-sm overflow-visible print:shadow-none print:rounded-none print:bg-white print:text-black print:p-0"
+          style={{ fontFamily: '"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif' }}
         >
-          {/* Cover / Header Section */}
-          <div className="border-b-2 border-slate-900 pb-5 space-y-2.5">
+          {/* Cover / Header Block */}
+          <div data-pdf-block="true" className="border-b-2 border-slate-900 pb-5 space-y-2.5 bg-white">
             <div className="flex items-center justify-between text-[11px] text-slate-500 uppercase tracking-widest font-mono">
               <span>Hiyori Travel Guidebook (日和手帳)</span>
               <span>Offline Edition</span>
@@ -352,66 +314,74 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
               </span>
               <span className="text-slate-300">•</span>
               <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded font-mono text-[11px]">
-                {trip.days.length} Days / {Math.max(1, trip.days.length - 1)} Nights · {totalSpots} Spots
+                {nightsCount > 0 ? `${trip.days.length} Days / ${nightsCount} Nights` : `${trip.days.length} Day`} · {totalSpots} Spots
               </span>
             </div>
           </div>
 
           {/* Section 1: Trip Master Overview Table */}
           {includeOverviewTable && (
-            <div className="space-y-3">
+            <div data-pdf-block="true" className="space-y-3 bg-white">
               <ItineraryOverviewTable trip={trip} lang={lang} isPrintMode={true} />
+            </div>
+          )}
+
+          {/* Section: Booking Vault Codes */}
+          {includeBookings && trip.bookings && trip.bookings.length > 0 && (
+            <div data-pdf-block="true" className="space-y-3 border-t-2 border-slate-200 pt-5 bg-white">
+              <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center justify-between border-b border-slate-200 pb-2">
+                <div className="flex items-center gap-2">
+                  <Ticket className="w-4 h-4 text-teal-700" />
+                  <span>訂位憑證與確認代號 (Booking Vault)</span>
+                </div>
+                <span className="text-[10px] font-mono text-slate-500 font-normal">
+                  {trip.bookings.length} 筆憑證
+                </span>
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {trip.bookings.map((b) => (
+                  <div key={b.id} className="p-2.5 rounded-xl border border-slate-200 bg-slate-50/80 space-y-1 break-inside-avoid">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-xs text-slate-900 truncate">{b.title}</span>
+                      {b.provider && <span className="text-[10px] text-slate-500 shrink-0">{b.provider}</span>}
+                    </div>
+                    <div className="font-mono font-bold text-xs text-teal-800 tracking-wider">
+                      {b.bookingCode}{b.secondaryCode ? ` · ${b.secondaryCode}` : ''}
+                    </div>
+                    {(b.startDate || b.timeLabel || b.location) && (
+                      <div className="text-[10px] text-slate-600 truncate">
+                        {[b.startDate, b.timeLabel, b.location].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
           {/* Section: To-Do & Tickets Checklist */}
           {includeTodos && trip.todos && trip.todos.length > 0 && (
-            <div className="space-y-3 border-t-2 border-slate-200 pt-5">
-              <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center justify-between border-b border-slate-200 pb-2 break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
+            <div data-pdf-block="true" className="space-y-3 border-t-2 border-slate-200 pt-5 bg-white">
+              <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center justify-between border-b border-slate-200 pb-2">
                 <div className="flex items-center gap-2">
                   <ListTodo className="w-4 h-4 text-teal-700" />
-                  <span>重要行前待辦與票券提醒 (Tickets & To-Do Checklist)</span>
+                  <span>行前待辦清單 (To-Do Checklist)</span>
                 </div>
                 <span className="text-[10px] font-mono text-slate-500 font-normal">
-                  {trip.todos.filter((todo) => todo.completed).length}/{trip.todos.length} 已備妥
+                  {trip.todos.filter((todo) => todo.completed).length}/{trip.todos.length} 已完成
                 </span>
               </h2>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {trip.todos.map((todo) => (
-                  <div
-                    key={todo.id}
-                    className="p-2.5 rounded-xl border border-slate-200 bg-slate-50/70 flex items-start gap-2.5 break-inside-avoid"
-                  >
-                    <div
-                      className={`w-4 h-4 rounded-md shrink-0 flex items-center justify-center border mt-0.5 ${
-                        todo.completed
-                          ? 'bg-teal-600 border-teal-600 text-white'
-                          : 'border-slate-300 bg-white'
-                      }`}
-                    >
+                  <div key={todo.id} className="p-2.5 rounded-xl border border-slate-200 bg-slate-50/70 flex items-start gap-2.5 break-inside-avoid">
+                    <div className={`w-4 h-4 rounded-md shrink-0 flex items-center justify-center border mt-0.5 ${todo.completed ? 'bg-teal-600 border-teal-600 text-white' : 'border-slate-300 bg-white'}`}>
                       {todo.completed && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span
-                          className={`font-bold text-xs ${
-                            todo.completed ? 'line-through text-slate-400' : 'text-slate-900'
-                          }`}
-                        >
-                          {todo.title}
-                        </span>
-                        {todo.dueDate && (
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            ({formatDateSlash(todo.dueDate)})
-                          </span>
-                        )}
-                      </div>
-                      {todo.notes && (
-                        <p className="text-[10px] text-slate-600 mt-1 leading-relaxed">
-                          {todo.notes}
-                        </p>
-                      )}
+                      <span className={`font-bold text-xs ${todo.completed ? 'line-through text-slate-400' : 'text-slate-900'}`}>
+                        {todo.title}
+                      </span>
+                      {todo.notes && <p className="text-[10px] text-slate-600 mt-0.5">{todo.notes}</p>}
                     </div>
                   </div>
                 ))}
@@ -419,151 +389,123 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
             </div>
           )}
 
-          {/* Section 2: Day-by-Day Section */}
+          {/* Section 2: Day-by-Day Schedule (Each Day Banner + Each Spot Card is an atomic PDF block!) */}
           {includeDailyDetails && (
-            <div className="space-y-6">
-              <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center gap-2 border-b border-slate-200 pb-2 break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
-                <Route className="w-4 h-4 text-teal-700" />
-                <span>每日詳細行程 (Daily Itinerary Schedule)</span>
-              </h2>
+            <div className="space-y-4">
+              <div data-pdf-block="true" className="border-b border-slate-200 pb-2 bg-white">
+                <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center gap-2">
+                  <Route className="w-4 h-4 text-teal-700" />
+                  <span>每日詳細行程 (Daily Itinerary Schedule)</span>
+                </h2>
+              </div>
 
               {trip.days.map((day) => (
-                <div key={day.id} className="space-y-3">
-                  {/* Day Banner */}
-                  <div className="bg-slate-900 text-white px-4 py-2 rounded-xl flex items-center justify-between break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold font-mono text-sm">
-                        Day {day.dayNumber}
-                      </span>
-                      <span>·</span>
-                      <span className="font-medium text-slate-300 font-mono">
-                        {formatDateSlash(day.date)}
-                      </span>
-                      {day.theme && (
-                        <>
-                          <span>·</span>
-                          <span className="font-bold text-white">{day.theme}</span>
-                        </>
-                      )}
+                <React.Fragment key={day.id}>
+                  <div data-pdf-block="true" className="space-y-1.5 pt-2 bg-white">
+                    <div className="bg-slate-900 text-white px-4 py-2 rounded-xl flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold font-mono text-sm">Day {day.dayNumber}</span>
+                        <span>·</span>
+                        <span className="font-medium text-slate-300 font-mono">{formatDateSlash(day.date)}</span>
+                        {day.theme && (
+                          <>
+                            <span>·</span>
+                            <span className="font-bold text-white">{day.theme}</span>
+                          </>
+                        )}
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-300">{day.items.length} 個景點</span>
                     </div>
-                    <span className="text-[10px] font-mono text-slate-300">
-                      {day.items.length} 個景點
-                    </span>
+                    {day.notes && <p className="text-[11px] text-slate-600 italic px-2">{day.notes}</p>}
+                    {day.items.length === 0 && (
+                      <p className="text-slate-400 italic text-[11px] px-2">當日尚無行程安排。</p>
+                    )}
                   </div>
 
-                  {day.notes && (
-                    <p className="text-[11px] text-slate-600 italic px-2">
-                      {day.notes}
-                    </p>
-                  )}
+                  {day.items.map((item, itemIdx) => {
+                    const cat = CATEGORY_NAMES[item.category] || CATEGORY_NAMES.other;
+                    const catLabel = cat[lang] || cat.en;
 
-                  {/* Day Spots List */}
-                  {day.items.length === 0 ? (
-                    <p className="text-slate-400 italic text-[11px] px-2">當日尚無行程安排。</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {day.items.map((item, itemIdx) => {
-                        const cat = CATEGORY_NAMES[item.category] || CATEGORY_NAMES.other;
-                        const catLabel = cat[lang] || cat.en;
-
-                        return (
-                          <div
-                            key={item.id}
-                            className="p-3 rounded-xl border border-slate-200 bg-white space-y-1.5 break-inside-avoid"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="space-y-0.5 flex-1">
-                                <div className="flex items-center gap-2 font-mono text-[11px] text-slate-500">
-                                  <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.2 rounded">
-                                    #{itemIdx + 1}
-                                  </span>
-                                  <span className="font-semibold text-teal-800">
-                                    {item.startTime}{item.endTime ? ` - ${item.endTime}` : ''}
-                                  </span>
+                    return (
+                      <div
+                        key={item.id}
+                        data-pdf-block="true"
+                        className="p-3 rounded-xl border border-slate-200 bg-white space-y-1.5 break-inside-avoid"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="space-y-0.5 flex-1">
+                            <div className="flex items-center gap-2 font-mono text-[11px] text-slate-500 flex-wrap">
+                              <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.2 rounded">
+                                #{itemIdx + 1}
+                              </span>
+                              <span className="font-semibold text-teal-800">
+                                {item.startTime}{item.endTime ? ` - ${item.endTime}` : ''}
+                              </span>
+                              <span>·</span>
+                              <span className="text-slate-600">{catLabel}</span>
+                              {item.bookingCode && (
+                                <>
                                   <span>·</span>
-                                  <span className="text-slate-600">{catLabel}</span>
-                                  {item.bookingCode && (
-                                    <>
-                                      <span>·</span>
-                                      <span className="text-amber-800 font-bold">預約代碼 #{item.bookingCode}</span>
-                                    </>
-                                  )}
-                                </div>
-
-                                <h3 className="font-bold text-slate-950 text-sm">
-                                  {item.title}
-                                </h3>
-
-                                {(item.locationName || item.address) && (
-                                  <p className="text-[11px] text-slate-600 flex items-center gap-1">
-                                    <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                                    <span>{item.locationName || item.address}</span>
-                                  </p>
-                                )}
-                              </div>
-
-                              {/* Price / Cost */}
-                              {typeof item.cost === 'number' && item.cost > 0 && (
-                                <div className="text-right shrink-0 font-mono text-[11px]">
-                                  <span className="font-bold text-slate-900">
-                                    {trip.currency || 'JPY'} {item.cost.toLocaleString()}
-                                  </span>
-                                  <span className="block text-[10px] text-slate-400">
-                                    {item.costPaid ? '已付款' : '現場支付'}
-                                  </span>
-                                </div>
+                                  <span className="text-amber-800 font-bold">預約代碼 #{item.bookingCode}</span>
+                                </>
                               )}
                             </div>
 
-                            {/* Transport / Walk Note */}
-                            {item.transportNote && (
-                              <p className="text-[11px] text-teal-900 bg-teal-50/70 p-2 rounded-lg border border-teal-100">
-                                <span className="font-semibold text-teal-800">[交通方式]</span> {item.transportNote}
-                              </p>
-                            )}
+                            <h3 className="font-bold text-slate-950 text-sm">{item.title}</h3>
 
-                            {/* Item Notes */}
-                            {item.notes && (
-                              <p className="text-[11px] text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
-                                <span className="font-semibold text-slate-700">[備忘提醒]</span> {item.notes}
+                            {(item.locationName || item.address) && (
+                              <p className="text-[11px] text-slate-600 flex items-center gap-1">
+                                <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span>{item.locationName || item.address}</span>
                               </p>
                             )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+
+                          {typeof item.cost === 'number' && item.cost > 0 && (
+                            <div className="text-right shrink-0 font-mono text-[11px]">
+                              <span className="font-bold text-slate-900">
+                                {trip.currency || 'JPY'} {item.cost.toLocaleString()}
+                              </span>
+                              <span className="block text-[10px] text-slate-400">
+                                {item.costPaid ? '已付款' : '現場支付'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {item.transportNote && (
+                          <p className="text-[11px] text-teal-900 bg-teal-50/70 p-2 rounded-lg border border-teal-100">
+                            <span className="font-semibold text-teal-800">[交通方式]</span> {item.transportNote}
+                          </p>
+                        )}
+
+                        {item.notes && (
+                          <p className="text-[11px] text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                            <span className="font-semibold text-slate-700">[備忘提醒]</span> {item.notes}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
               ))}
             </div>
           )}
 
-          {/* Essential Packing Checklist Section */}
+          {/* Packing Checklist Section */}
           {includePacking && trip.packingList && trip.packingList.length > 0 && (
-            <div className="space-y-3 border-t-2 border-slate-200 pt-5">
-              <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center gap-2 break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
+            <div data-pdf-block="true" className="space-y-3 border-t-2 border-slate-200 pt-5 bg-white">
+              <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center gap-2">
                 <Luggage className="w-4 h-4 text-teal-700" />
                 <span>行李打包準備清單 (Packing Checklist)</span>
               </h2>
-
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {trip.packingList.map((item) => (
-                  <div
-                    key={item.id}
-                    className="p-2 rounded-lg border border-slate-200 flex items-center gap-2 bg-slate-50/60 break-inside-avoid"
-                  >
-                    <div
-                      className={`w-4 h-4 rounded-md border shrink-0 flex items-center justify-center ${
-                        item.packed
-                          ? 'bg-teal-600 border-teal-600 text-white'
-                          : 'border-slate-300 bg-white'
-                      }`}
-                    >
+                  <div key={item.id} className="p-2 rounded-lg border border-slate-200 flex items-center gap-2 bg-slate-50/60 break-inside-avoid">
+                    <div className={`w-4 h-4 rounded-md border shrink-0 flex items-center justify-center ${item.packed ? 'bg-teal-600 border-teal-600 text-white' : 'border-slate-300 bg-white'}`}>
                       {item.packed && <Check className="w-2.5 h-2.5 text-white stroke-[3]" />}
                     </div>
-                    <span className="truncate text-[11px] font-medium text-slate-800">
-                      {item.name}
-                    </span>
+                    <span className="truncate text-[11px] font-medium text-slate-800">{item.name}</span>
                   </div>
                 ))}
               </div>
@@ -572,25 +514,19 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
 
           {/* Emergency Contacts Section */}
           {includeEmergency && trip.emergencyContacts && trip.emergencyContacts.length > 0 && (
-            <div className="space-y-3 border-t-2 border-slate-200 pt-5">
-              <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center gap-2 break-inside-avoid" style={{ breakAfter: 'avoid', pageBreakAfter: 'avoid' }}>
+            <div data-pdf-block="true" className="space-y-3 border-t-2 border-slate-200 pt-5 bg-white">
+              <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center gap-2">
                 <Phone className="w-4 h-4 text-rose-600" />
                 <span>緊急聯絡電話與救助資訊 (Emergency Contacts)</span>
               </h2>
-
               <div className="grid grid-cols-2 gap-2">
                 {trip.emergencyContacts.map((contact) => (
-                  <div
-                    key={contact.id}
-                    className="p-2.5 rounded-xl border border-slate-200 bg-rose-50/30 flex items-center justify-between break-inside-avoid"
-                  >
-                    <div>
-                      <span className="font-bold text-slate-900 block text-xs">{contact.name}</span>
-                      {contact.address && (
-                        <span className="text-[10px] text-slate-500 block truncate">{contact.address}</span>
-                      )}
+                  <div key={contact.id} className="p-2.5 rounded-xl border border-slate-200 bg-rose-50/30 flex items-center justify-between break-inside-avoid">
+                    <div className="min-w-0 pr-2">
+                      <span className="font-bold text-slate-900 block text-xs truncate">{contact.name}</span>
+                      {contact.address && <span className="text-[10px] text-slate-500 block truncate">{contact.address}</span>}
                     </div>
-                    <span className="font-mono font-bold text-sm text-rose-700 bg-white px-2 py-0.5 rounded border border-rose-200">
+                    <span className="font-mono font-bold text-xs text-rose-700 bg-white px-2 py-0.5 rounded border border-rose-200 shrink-0">
                       {contact.phone}
                     </span>
                   </div>
@@ -601,35 +537,27 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
 
           {/* Expense Breakdown Summary */}
           {includeExpenses && trip.expenses && trip.expenses.length > 0 && (
-            <div className="space-y-3 break-inside-avoid border-t-2 border-slate-200 pt-5">
+            <div data-pdf-block="true" className="space-y-3 border-t-2 border-slate-200 pt-5 bg-white">
               <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center justify-between border-b border-slate-200 pb-2">
                 <div className="flex items-center gap-2">
                   <DollarSign className="w-4 h-4 text-teal-700" />
                   <span>旅程消費記帳摘要 (Expense Summary)</span>
                 </div>
                 <span className="text-xs font-mono font-bold text-slate-900">
-                  總記帳支出: {baseCurrency} {Math.round(totalSpent).toLocaleString()}
+                  總支出: {baseCurrency} {Math.round(totalSpent).toLocaleString()}
                 </span>
               </h2>
-
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 {Object.entries(
                   trip.expenses.reduce((acc, exp) => {
                     const cat = exp.category || 'other';
-                    const converted = convertAmount(
-                      exp.amount,
-                      exp.currency || baseCurrency,
-                      baseCurrency,
-                      trip.customExchangeRates
-                    );
+                    const converted = convertAmount(exp.amount, exp.currency || baseCurrency, baseCurrency, trip.customExchangeRates);
                     acc[cat] = (acc[cat] || 0) + converted;
                     return acc;
                   }, {} as Record<string, number>)
                 ).map(([catKey, sum]) => {
                   const catInfo = CATEGORY_NAMES[catKey];
-                  const label =
-                    trip.customCategoryLabels?.[catKey] ||
-                    (catInfo ? catInfo[lang] || catInfo.en : catKey);
+                  const label = trip.customCategoryLabels?.[catKey] || (catInfo ? catInfo[lang] || catInfo.en : catKey);
                   return (
                     <div key={catKey} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200">
                       <span className="text-[10px] text-slate-500 block uppercase font-medium">{label}</span>
@@ -643,12 +571,12 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
             </div>
           )}
 
-          {/* Trip Notes & Booking Memo Appendix */}
+          {/* Trip Notes Appendix */}
           {includeNotes && trip.notes && (
-            <div className="space-y-3 break-inside-avoid border-t-2 border-slate-200 pt-5">
+            <div data-pdf-block="true" className="space-y-3 border-t-2 border-slate-200 pt-5 bg-white">
               <h2 className="text-base font-black text-slate-950 uppercase tracking-wider flex items-center gap-2">
                 <FileText className="w-4 h-4 text-teal-700" />
-                <span>附錄：隨行備忘筆記與票券指引 (Trip Notes & Booking Guidelines)</span>
+                <span>附錄：隨行備忘筆記 (Trip Notes)</span>
               </h2>
               <div className="p-4 bg-slate-50/90 rounded-xl border border-slate-200 text-xs leading-relaxed text-slate-800 whitespace-pre-line font-mono">
                 {trip.notes}
@@ -656,9 +584,9 @@ export const PDFExportModal: React.FC<PDFExportModalProps> = ({ trip, lang, onCl
             </div>
           )}
 
-          {/* Document Footer */}
-          <div className="border-t border-slate-200 pt-4 flex items-center justify-between text-[10px] text-slate-400 font-mono">
-            <span>日和手帳 Hiyori · 隨行手帖 · Offline Printable Guidebook</span>
+          {/* Footer */}
+          <div data-pdf-block="true" className="border-t border-slate-200 pt-4 flex items-center justify-between text-[10px] text-slate-400 font-mono bg-white">
+            <span>日和手帳 Hiyori · Offline Printable Guidebook</span>
             <span>Generated on {new Date().toLocaleDateString()}</span>
           </div>
         </div>

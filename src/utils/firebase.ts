@@ -36,15 +36,19 @@ import {
   MediaRecord,
   idbGetMedia,
   idbGetMeta,
+  idbGetSyncQueue,
   idbSetMeta,
 } from './indexedDb';
 import {
+  MEDIA_PREFIX,
   extractInlineImagesToMediaRefs,
   extractMediaId,
   isMediaRef,
   registerCloudMediaResolver,
+  resolveMediaSrc,
 } from './image';
 import { clearAccountTripsOnLogout } from './storage';
+import { clearDriveClientCaches } from './googleDrive';
 
 export function sanitizeForFirestore<T>(data: T): T {
   return JSON.parse(JSON.stringify(data));
@@ -132,20 +136,9 @@ export function clearDriveAccessToken(): void {
 onAuthStateChanged(auth, (user) => {
   if (!user) {
     clearDriveAccessToken();
+    clearDriveClientCaches();
   }
 });
-
-// 2. Validate Connection to Firestore (Skill Mandatory Requirement)
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firebase client is offline, using offline cache.');
-    }
-  }
-}
-testConnection();
 
 // 3. Error Handling conforming to FirestoreErrorInfo
 export enum OperationType {
@@ -325,11 +318,8 @@ export function resolveAuthRedirect(): Promise<{ user: User | null; errorMessage
     try {
       const result = await getRedirectResult(auth, browserPopupRedirectResolver);
       if (result?.user) {
-        const credential = GoogleAuthProvider.credentialFromResult(result);
-        if (credential?.accessToken) {
-          cachedDriveAccessToken = credential.accessToken;
-          notifyDriveAuthChanged();
-        }
+        // NOTE: Do NOT assign standard sign-in token to cachedDriveAccessToken because googleProvider
+        // does not request drive.file scope; doing so would cause permanent HTTP 403 Drive failures.
         return { user: result.user };
       }
       if (hadPendingRedirect && !auth.currentUser) {
@@ -438,11 +428,29 @@ export async function connectGoogleDrive(): Promise<string | null> {
       prompt: 'consent',
     });
 
-    const result = auth.currentUser
-      ? await reauthenticateWithPopup(auth.currentUser, driveProvider, browserPopupRedirectResolver).catch(async () => {
-          return await signInWithPopup(auth, driveProvider, browserPopupRedirectResolver);
-        })
-      : await signInWithPopup(auth, driveProvider, browserPopupRedirectResolver);
+    let result;
+    if (auth.currentUser) {
+      try {
+        result = await reauthenticateWithPopup(
+          auth.currentUser,
+          driveProvider,
+          browserPopupRedirectResolver
+        );
+      } catch (reauthErr: any) {
+        const code = reauthErr?.code || '';
+        // Never double-open a popup after user cancel, and never silently switch active Firebase accounts on user-mismatch
+        if (
+          code === 'auth/popup-closed-by-user' ||
+          code === 'auth/cancelled-popup-request' ||
+          code === 'auth/user-mismatch'
+        ) {
+          return null;
+        }
+        result = await signInWithPopup(auth, driveProvider, browserPopupRedirectResolver);
+      }
+    } else {
+      result = await signInWithPopup(auth, driveProvider, browserPopupRedirectResolver);
+    }
 
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (credential?.accessToken) {
@@ -459,29 +467,42 @@ export async function connectGoogleDrive(): Promise<string | null> {
 
 export async function logoutFirebase(): Promise<void> {
   const signedOutUid = auth.currentUser?.uid;
-  let pendingTripIds: string[] = [];
-  if (signedOutUid && typeof localStorage !== 'undefined') {
+  const pendingTripIdSet = new Set<string>();
+  if (signedOutUid) {
     try {
-      const rawQueue = localStorage.getItem('hiyori_offline_sync_queue_v1');
-      if (rawQueue) {
-        const parsed = JSON.parse(rawQueue);
-        if (Array.isArray(parsed)) {
-          pendingTripIds = parsed
-            .filter((item) => item?.type === 'save_trip' && item?.userId === signedOutUid && item?.trip?.id)
-            .map((item) => item.trip.id as string);
-        }
+      const idbQueue = await idbGetSyncQueue<any>();
+      if (Array.isArray(idbQueue)) {
+        idbQueue.forEach((item) => {
+          if (item?.type === 'save_trip' && item?.userId === signedOutUid && item?.trip?.id) {
+            pendingTripIdSet.add(item.trip.id);
+          }
+        });
       }
-    } catch {
-      // Ignore queue inspection error
+    } catch {}
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const rawQueue = localStorage.getItem('hiyori_offline_sync_queue_v1');
+        if (rawQueue) {
+          const parsed = JSON.parse(rawQueue);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((item) => {
+              if (item?.type === 'save_trip' && item?.userId === signedOutUid && item?.trip?.id) {
+                pendingTripIdSet.add(item.trip.id);
+              }
+            });
+          }
+        }
+      } catch {}
     }
   }
   try {
     clearDriveAccessToken();
+    clearDriveClientCaches();
     await signOut(auth);
   } catch (error) {
     console.error('Firebase Sign-out Error:', error);
   } finally {
-    clearAccountTripsOnLogout(signedOutUid, pendingTripIds);
+    clearAccountTripsOnLogout(signedOutUid, Array.from(pendingTripIdSet));
   }
 }
 
@@ -506,6 +527,11 @@ function collectMediaIdsFromTrip(trip: Trip): string[] {
   (trip.expenses || []).forEach((e) => {
     maybeAdd(e.receiptImage);
     (e.receiptImages || []).forEach(maybeAdd);
+  });
+  (trip.bookings || []).forEach((b: any) => {
+    if (Array.isArray(b?.voucherImages)) {
+      b.voucherImages.forEach(maybeAdd);
+    }
   });
 
   return Array.from(ids);
@@ -546,11 +572,31 @@ async function uploadMediaCollectionBatch(
     const targetKey = `${targetNamespace}:${mediaId}`;
     if (syncedMap[targetKey]) continue;
 
-    const record = extraById.get(mediaId) || (await idbGetMedia(mediaId));
+    let record = extraById.get(mediaId) || (await idbGetMedia(mediaId));
+    // Cross-device fix: if Device B enables Share/Collab before opening Device A's photos locally,
+    // pull the missing photo from the user's cloud media subcollection before copying it over!
+    if (!record || !record.dataUrl) {
+      const fetchedDataUrl = await resolveMediaSrc(`${MEDIA_PREFIX}${mediaId}`, {
+        tripId: trip.id,
+        ownerId: trip.ownerId || ownerIdForDoc,
+        collabId: trip.collabId,
+      });
+      if (fetchedDataUrl) {
+        const mimeMatch = fetchedDataUrl.match(/^data:([^;]+);/);
+        record = {
+          id: mediaId,
+          tripId: trip.id,
+          dataUrl: fetchedDataUrl,
+          mimeType: mimeMatch ? mimeMatch[1] : 'image/jpeg',
+          byteSize: fetchedDataUrl.length,
+          createdAt: Date.now(),
+        };
+      }
+    }
     if (!record || !record.dataUrl) continue;
 
-    // Guard single media document size (< 900KB)
-    if (record.dataUrl.length >= 900000) {
+    // Guard single media document size (< 880KB)
+    if (record.dataUrl.length >= 880000) {
       console.warn(`[Firestore] Skipping oversized media asset ${mediaId} (${record.dataUrl.length} chars)`);
       continue;
     }
@@ -637,7 +683,13 @@ function computeViewerEmails(trip: Trip): string[] {
   return Array.from(emails).slice(0, 30);
 }
 
-function normalizeTripData(id: string, data: Record<string, any>, fallbackOwnerId?: string): Trip {
+function normalizeTripData(
+  id: string,
+  data: Record<string, any>,
+  fallbackOwnerId?: string,
+  options?: { preserveLastSyncedAt?: boolean }
+): Trip {
+  const shouldStampSyncedAt = options?.preserveLastSyncedAt !== false;
   return {
     id,
     ownerId: data.ownerId || fallbackOwnerId,
@@ -680,34 +732,30 @@ function normalizeTripData(id: string, data: Record<string, any>, fallbackOwnerI
     viewerEmails: data.viewerEmails || undefined,
     generalAccess: data.generalAccess || undefined,
     lastUpdatedBy: data.lastUpdatedBy || undefined,
-    lastSyncedAt: data.lastSyncedAt || Date.now(),
+    lastSyncedAt: shouldStampSyncedAt ? data.lastSyncedAt || Date.now() : data.lastSyncedAt || undefined,
     createdAt: data.createdAt || Date.now(),
     updatedAt: data.updatedAt || Date.now(),
   };
 }
 
 // 6. User Tombstones Helpers
-export async function fetchUserTombstones(userId: string): Promise<Record<string, number>> {
+export async function fetchUserTombstones(userId: string): Promise<Record<string, number> | null> {
   const path = `users/${userId}/meta/tombstones`;
   const docRef = doc(db, path);
   try {
     if (typeof navigator === 'undefined' || navigator.onLine !== false) {
-      try {
-        const serverSnap = await getDocFromServer(docRef);
-        if (!serverSnap.exists()) return {};
-        const data = serverSnap.data();
-        return (data?.deletedTrips as Record<string, number>) || {};
-      } catch {
-        // Fallback to cached snapshot if server unreachable or offline
-      }
+      const serverSnap = await getDocFromServer(docRef);
+      if (!serverSnap.exists()) return {};
+      const data = serverSnap.data();
+      return (data?.deletedTrips as Record<string, number>) || {};
     }
     const snap = await getDoc(docRef);
-    if (!snap.exists()) return {};
+    if (!snap.exists()) return null;
     const data = snap.data();
     return (data?.deletedTrips as Record<string, number>) || {};
   } catch (err) {
     console.warn('[Firestore] fetchUserTombstones warning:', err);
-    return {};
+    return null;
   }
 }
 
@@ -744,7 +792,7 @@ export function subscribeUserTombstones(
 export async function recordCloudTripTombstone(userId: string, tripId: string): Promise<void> {
   const path = `users/${userId}/meta/tombstones`;
   try {
-    const existing = await fetchUserTombstones(userId);
+    const existing = (await fetchUserTombstones(userId)) || {};
     const now = Date.now();
     const nextTimestamp = Math.max(now, existing[tripId] || 0);
     const nextMap: Record<string, number> = {
@@ -891,9 +939,9 @@ export async function saveTripToCloud(userId: string, trip: Trip): Promise<Trip>
     const sizeBytes = new Blob([jsonStr]).size;
     const sizeKb = Math.round(sizeBytes / 1024);
 
-    if (sizeBytes >= 980000) {
+    if (sizeBytes >= 820000) {
       const limitErr = new Error(
-        `行程文字資料量 (${sizeKb} KB) 已超過單筆雲端上限 1MB，請精簡重複文字備註後再試。`
+        `行程文字資料量 (${sizeKb} KB) 已接近或超過單筆雲端上限 1MB（含 Firestore 內部編碼開銷），請精簡文字備註後再試。`
       );
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
@@ -974,6 +1022,52 @@ export async function publishSharedTrip(trip: Trip, ownerUid?: string): Promise<
 
   try {
     const { trip: lightweightTrip, extractedRecords } = await extractInlineImagesToMediaRefs(trip);
+
+    // IMPORTANT: Create parent shared_trips/{shareId} doc FIRST so Firestore rules get() on parent doc passes for media writes
+    const docRef = doc(db, 'shared_trips', shareId);
+    const sharedPayload = sanitizeForFirestore({
+      id: shareId,
+      originalTripId: lightweightTrip.id,
+      ownerId: effectiveUid,
+      title: lightweightTrip.title,
+      destination: lightweightTrip.destination,
+      startDate: lightweightTrip.startDate,
+      endDate: lightweightTrip.endDate,
+      currency: lightweightTrip.currency,
+      budgetTotal: lightweightTrip.budgetTotal || 0,
+      coverGradient: lightweightTrip.coverGradient || 'from-emerald-600 via-teal-600 to-cyan-700',
+      notes: lightweightTrip.notes || '',
+      days: lightweightTrip.days || [],
+      packingList: lightweightTrip.packingList || [],
+      todos: lightweightTrip.todos || [],
+      expenses: lightweightTrip.expenses || [],
+      bookings: lightweightTrip.bookings || [],
+      customExpenseCategories: lightweightTrip.customExpenseCategories || [],
+      customCategoryLabels: lightweightTrip.customCategoryLabels || {},
+      customExpenseTags: lightweightTrip.customExpenseTags || [],
+      customExchangeRates: lightweightTrip.customExchangeRates || {},
+      emergencyContacts: lightweightTrip.emergencyContacts || [],
+      memories: lightweightTrip.memories || [],
+      stickyNotes: lightweightTrip.stickyNotes || [],
+      isSplitEnabled: lightweightTrip.isSplitEnabled ?? false,
+      splitMembers: lightweightTrip.splitMembers || [],
+      isSoloTrip: lightweightTrip.isSoloTrip ?? false,
+      tripMode: lightweightTrip.tripMode || 'planner',
+      destinationLat: typeof lightweightTrip.destinationLat === 'number' ? lightweightTrip.destinationLat : null,
+      destinationLng: typeof lightweightTrip.destinationLng === 'number' ? lightweightTrip.destinationLng : null,
+      googlePhotosAlbumUrl: lightweightTrip.googlePhotosAlbumUrl || null,
+      driveFolderId: lightweightTrip.driveFolderId || null,
+      publishedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    const sizeBytes = new Blob([JSON.stringify(sharedPayload)]).size;
+    if (sizeBytes >= 820000) {
+      throw new Error(`分享資料量 (${Math.round(sizeBytes / 1024)} KB) 已接近單筆雲端上限 1MB，請先精簡內容。`);
+    }
+
+    await setDoc(docRef, sharedPayload);
+
     await uploadMediaCollectionBatch(
       `shared_trips/${shareId}/media`,
       `share:${shareId}`,
@@ -982,45 +1076,6 @@ export async function publishSharedTrip(trip: Trip, ownerUid?: string): Promise<
       effectiveUid
     );
 
-    const docRef = doc(db, 'shared_trips', shareId);
-    await setDoc(
-      docRef,
-      sanitizeForFirestore({
-        id: shareId,
-        originalTripId: lightweightTrip.id,
-        ownerId: effectiveUid,
-        title: lightweightTrip.title,
-        destination: lightweightTrip.destination,
-        startDate: lightweightTrip.startDate,
-        endDate: lightweightTrip.endDate,
-        currency: lightweightTrip.currency,
-        budgetTotal: lightweightTrip.budgetTotal || 0,
-        coverGradient: lightweightTrip.coverGradient || 'from-emerald-600 via-teal-600 to-cyan-700',
-        notes: lightweightTrip.notes || '',
-        days: lightweightTrip.days || [],
-        packingList: lightweightTrip.packingList || [],
-        todos: lightweightTrip.todos || [],
-        expenses: lightweightTrip.expenses || [],
-        bookings: lightweightTrip.bookings || [],
-        customExpenseCategories: lightweightTrip.customExpenseCategories || [],
-        customCategoryLabels: lightweightTrip.customCategoryLabels || {},
-        customExpenseTags: lightweightTrip.customExpenseTags || [],
-        customExchangeRates: lightweightTrip.customExchangeRates || {},
-        emergencyContacts: lightweightTrip.emergencyContacts || [],
-        memories: lightweightTrip.memories || [],
-        stickyNotes: lightweightTrip.stickyNotes || [],
-        isSplitEnabled: lightweightTrip.isSplitEnabled ?? false,
-        splitMembers: lightweightTrip.splitMembers || [],
-        isSoloTrip: lightweightTrip.isSoloTrip ?? false,
-        tripMode: lightweightTrip.tripMode || 'planner',
-        destinationLat: typeof lightweightTrip.destinationLat === 'number' ? lightweightTrip.destinationLat : null,
-        destinationLng: typeof lightweightTrip.destinationLng === 'number' ? lightweightTrip.destinationLng : null,
-        googlePhotosAlbumUrl: lightweightTrip.googlePhotosAlbumUrl || null,
-        driveFolderId: lightweightTrip.driveFolderId || null,
-        publishedAt: Date.now(),
-        updatedAt: Date.now(),
-      })
-    );
     return shareId;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -1036,7 +1091,7 @@ export async function fetchSharedTrip(shareId: string): Promise<Trip | null> {
     }
     const data = snap.data();
     return {
-      ...normalizeTripData(`imported-${data.id}`, data),
+      ...normalizeTripData(`imported-${data.id}`, data, undefined, { preserveLastSyncedAt: false }),
       isCollaborative: false,
       collabId: undefined,
       generalAccess: 'link_viewer',
@@ -1145,6 +1200,64 @@ export async function enableTripCollaboration(trip: Trip, currentUser?: User | n
 
   try {
     const { trip: lightweightTrip, extractedRecords } = await extractInlineImagesToMediaRefs(enrichedTrip);
+
+    // IMPORTANT: Create parent collab_trips/{collabId} doc FIRST so Firestore rules get() succeeds on media uploads
+    const docRef = doc(db, 'collab_trips', collabId);
+    const collabPayload = sanitizeForFirestore({
+      id: collabId,
+      collabId,
+      isCollaborative: true,
+      originalTripId: lightweightTrip.id,
+      ownerId: effectiveUser.uid,
+      ownerEmail,
+      ownerName,
+      generalAccess: defaultAccess,
+      collaborators: initialCollaborators,
+      editorEmails: computeEditorEmails(enrichedTrip, ownerEmail),
+      viewerEmails: computeViewerEmails(enrichedTrip),
+      title: lightweightTrip.title,
+      destination: lightweightTrip.destination,
+      startDate: lightweightTrip.startDate,
+      endDate: lightweightTrip.endDate,
+      currency: lightweightTrip.currency,
+      budgetTotal: lightweightTrip.budgetTotal || 0,
+      coverGradient: lightweightTrip.coverGradient || 'from-emerald-600 via-teal-600 to-cyan-700',
+      notes: lightweightTrip.notes || '',
+      days: lightweightTrip.days || [],
+      packingList: lightweightTrip.packingList || [],
+      todos: lightweightTrip.todos || [],
+      expenses: lightweightTrip.expenses || [],
+      bookings: lightweightTrip.bookings || [],
+      customExpenseCategories: lightweightTrip.customExpenseCategories || [],
+      customCategoryLabels: lightweightTrip.customCategoryLabels || {},
+      customExpenseTags: lightweightTrip.customExpenseTags || [],
+      customExchangeRates: lightweightTrip.customExchangeRates || {},
+      emergencyContacts: lightweightTrip.emergencyContacts || [],
+      memories: lightweightTrip.memories || [],
+      stickyNotes: lightweightTrip.stickyNotes || [],
+      deletedItemIds: lightweightTrip.deletedItemIds || {},
+      isSplitEnabled: lightweightTrip.isSplitEnabled ?? false,
+      splitMembers: lightweightTrip.splitMembers || [],
+      initialCashAmount: lightweightTrip.initialCashAmount ?? null,
+      initialCashCurrency: lightweightTrip.initialCashCurrency || null,
+      isSoloTrip: lightweightTrip.isSoloTrip ?? false,
+      tripMode: lightweightTrip.tripMode || 'planner',
+      destinationLat: typeof lightweightTrip.destinationLat === 'number' ? lightweightTrip.destinationLat : null,
+      destinationLng: typeof lightweightTrip.destinationLng === 'number' ? lightweightTrip.destinationLng : null,
+      googlePhotosAlbumUrl: lightweightTrip.googlePhotosAlbumUrl || null,
+      driveFolderId: lightweightTrip.driveFolderId || null,
+      createdAt: lightweightTrip.createdAt || Date.now(),
+      updatedAt: Date.now(),
+      lastUpdatedBy: ownerName,
+    });
+
+    const sizeBytes = new Blob([JSON.stringify(collabPayload)]).size;
+    if (sizeBytes >= 820000) {
+      throw new Error(`共編資料量 (${Math.round(sizeBytes / 1024)} KB) 已接近單筆雲端上限 1MB，請先精簡內容。`);
+    }
+
+    await setDoc(docRef, collabPayload, { merge: true });
+
     await uploadMediaCollectionBatch(
       `collab_trips/${collabId}/media`,
       `collab:${collabId}`,
@@ -1153,58 +1266,6 @@ export async function enableTripCollaboration(trip: Trip, currentUser?: User | n
       effectiveUser.uid
     );
 
-    const docRef = doc(db, 'collab_trips', collabId);
-    await setDoc(
-      docRef,
-      sanitizeForFirestore({
-        id: collabId,
-        collabId,
-        isCollaborative: true,
-        originalTripId: lightweightTrip.id,
-        ownerId: effectiveUser.uid,
-        ownerEmail,
-        ownerName,
-        generalAccess: defaultAccess,
-        collaborators: initialCollaborators,
-        editorEmails: computeEditorEmails(enrichedTrip, ownerEmail),
-        viewerEmails: computeViewerEmails(enrichedTrip),
-        title: lightweightTrip.title,
-        destination: lightweightTrip.destination,
-        startDate: lightweightTrip.startDate,
-        endDate: lightweightTrip.endDate,
-        currency: lightweightTrip.currency,
-        budgetTotal: lightweightTrip.budgetTotal || 0,
-        coverGradient: lightweightTrip.coverGradient || 'from-emerald-600 via-teal-600 to-cyan-700',
-        notes: lightweightTrip.notes || '',
-        days: lightweightTrip.days || [],
-        packingList: lightweightTrip.packingList || [],
-        todos: lightweightTrip.todos || [],
-        expenses: lightweightTrip.expenses || [],
-        bookings: lightweightTrip.bookings || [],
-        customExpenseCategories: lightweightTrip.customExpenseCategories || [],
-        customCategoryLabels: lightweightTrip.customCategoryLabels || {},
-        customExpenseTags: lightweightTrip.customExpenseTags || [],
-        customExchangeRates: lightweightTrip.customExchangeRates || {},
-        emergencyContacts: lightweightTrip.emergencyContacts || [],
-        memories: lightweightTrip.memories || [],
-        stickyNotes: lightweightTrip.stickyNotes || [],
-        deletedItemIds: lightweightTrip.deletedItemIds || {},
-        isSplitEnabled: lightweightTrip.isSplitEnabled ?? false,
-        splitMembers: lightweightTrip.splitMembers || [],
-        initialCashAmount: lightweightTrip.initialCashAmount ?? null,
-        initialCashCurrency: lightweightTrip.initialCashCurrency || null,
-        isSoloTrip: lightweightTrip.isSoloTrip ?? false,
-        tripMode: lightweightTrip.tripMode || 'planner',
-        destinationLat: typeof lightweightTrip.destinationLat === 'number' ? lightweightTrip.destinationLat : null,
-        destinationLng: typeof lightweightTrip.destinationLng === 'number' ? lightweightTrip.destinationLng : null,
-        googlePhotosAlbumUrl: lightweightTrip.googlePhotosAlbumUrl || null,
-        driveFolderId: lightweightTrip.driveFolderId || null,
-        createdAt: lightweightTrip.createdAt || Date.now(),
-        updatedAt: Date.now(),
-        lastUpdatedBy: ownerName,
-      }),
-      { merge: true }
-    );
     return collabId;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
@@ -1224,7 +1285,9 @@ export function subscribeCollaborativeTrip(
       if (snap.exists()) {
         const data = snap.data();
         const liveTrip: Trip = {
-          ...normalizeTripData(data.originalTripId || data.id, data),
+          ...normalizeTripData(data.originalTripId || data.id, data, undefined, {
+            preserveLastSyncedAt: false,
+          }),
           collabId: data.collabId || collabId,
           isCollaborative: true,
           generalAccess: data.generalAccess || 'link_viewer',
@@ -1265,11 +1328,9 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
   const deletedMap = Object.fromEntries(boundedDeletedEntries);
   const isDeleted = (id: string) => Boolean(deletedMap[id]);
 
-  // Merge days & day items by ID, honoring tombstones
+  // Merge days & day items by ID, honoring tombstones without resurrecting deleted days or deleted photos
   const mergedDays = (newer.days || []).map((newerDay) => {
-    const olderDay = (older.days || []).find(
-      (d) => d.dayNumber === newerDay.dayNumber || d.date === newerDay.date
-    );
+    const olderDay = (older.days || []).find((d) => d.dayNumber === newerDay.dayNumber);
     if (!olderDay) {
       return {
         ...newerDay,
@@ -1285,19 +1346,12 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
       const idx = mergedItems.findIndex((it) => it.id === id);
       if (idx >= 0) {
         const newerItem = mergedItems[idx];
-        const mergedPhotos = Array.from(
-          new Set([
-            ...(newerItem.memoryPhotos || []),
-            ...(olderItem.memoryPhotos || []),
-          ])
-        );
+        // Respect newerItem.memoryPhotos directly so explicitly removed spot photos do not resurrect
         mergedItems[idx] = {
           ...olderItem,
           ...newerItem,
-          memoryPhotos: mergedPhotos,
         };
       } else {
-        // Item exists in older but not newer and has NO deletion tombstone -> preserve concurrently added item
         mergedItems.push(olderItem);
       }
     }
@@ -1307,16 +1361,6 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
       ...newerDay,
       items: mergedItems,
     };
-  });
-
-  const newerDayNums = new Set((newer.days || []).map((d) => d.dayNumber));
-  (older.days || []).forEach((od) => {
-    if (!newerDayNums.has(od.dayNumber)) {
-      mergedDays.push({
-        ...od,
-        items: (od.items || []).filter((it) => !isDeleted(it.id)),
-      });
-    }
   });
   mergedDays.sort((a, b) => a.dayNumber - b.dayNumber);
 
@@ -1356,10 +1400,9 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
   });
   const mergedContacts = Array.from(contactMap.values());
 
-  // Merge splitMembers
-  const mergedSplitMembers = Array.from(
-    new Set([...(older.splitMembers || []), ...(newer.splitMembers || [])])
-  );
+  // Respect newer.splitMembers / customExpenseTags so removed companions/tags do not resurrect
+  const mergedSplitMembers =
+    newer.splitMembers !== undefined ? newer.splitMembers : older.splitMembers || [];
 
   // Merge memories by ID honoring tombstones
   const memoryMap = new Map(
@@ -1391,9 +1434,8 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
     mergedStickyNotes = Array.from(stickyMap.values());
   }
 
-  const mergedCustomTags = Array.from(
-    new Set([...(older.customExpenseTags || []), ...(newer.customExpenseTags || [])])
-  );
+  const mergedCustomTags =
+    newer.customExpenseTags !== undefined ? newer.customExpenseTags : older.customExpenseTags || [];
 
   return {
     ...older,
@@ -1500,9 +1542,12 @@ export async function syncCollaborativeTrip(
     };
 
     if (isOwnerEditor) {
-      basePayload.ownerEmail = tripToSave.ownerEmail || '';
+      basePayload.ownerEmail = tripToSave.ownerEmail || auth.currentUser?.email || '';
       basePayload.collaborators = tripToSave.collaborators || [];
-      basePayload.editorEmails = computeEditorEmails(tripToSave);
+      basePayload.editorEmails = computeEditorEmails(
+        tripToSave,
+        auth.currentUser?.email || undefined
+      );
       basePayload.viewerEmails = computeViewerEmails(tripToSave);
       basePayload.generalAccess = tripToSave.generalAccess || 'link_viewer';
     }
@@ -1513,8 +1558,8 @@ export async function syncCollaborativeTrip(
     const sizeBytes = new Blob([jsonStr]).size;
     const sizeKb = Math.round(sizeBytes / 1024);
 
-    if (sizeBytes >= 980000) {
-      const limitErr = new Error(`共編資料量 (${sizeKb} KB) 已超過單筆雲端上限 1MB。`);
+    if (sizeBytes >= 820000) {
+      const limitErr = new Error(`共編資料量 (${sizeKb} KB) 已接近單筆雲端上限 1MB。`);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
           new CustomEvent('cloud_sync_status', {
@@ -1560,7 +1605,9 @@ export async function fetchCollaborativeTrip(collabId: string): Promise<Trip | n
     if (!snap.exists()) return null;
     const data = snap.data();
     return {
-      ...normalizeTripData(data.originalTripId || data.id, data),
+      ...normalizeTripData(data.originalTripId || data.id, data, undefined, {
+        preserveLastSyncedAt: false,
+      }),
       collabId: data.collabId || collabId,
       isCollaborative: true,
       generalAccess: data.generalAccess || 'link_viewer',

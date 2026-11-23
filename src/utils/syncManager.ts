@@ -23,56 +23,75 @@ export interface QueuedSyncItem {
   timestamp: number;
 }
 
-/**
- * Retrieve current pending sync queue (IndexedDB primary, localStorage fallback)
- */
-export async function getPendingQueueAsync(): Promise<QueuedSyncItem[]> {
-  try {
-    const idbQueue = await idbGetSyncQueue<QueuedSyncItem>();
-    if (idbQueue && idbQueue.length > 0) {
-      return idbQueue;
-    }
-  } catch {
-    // Fallback to localStorage
-  }
-  return getPendingQueue();
-}
+// Authoritative in-memory queue (prevents 5MB localStorage quota overflow from wiping IndexedDB queue)
+let memoryQueue: QueuedSyncItem[] | null = null;
+let queueHydratedFromIdb = false;
+let flushInFlightPromise: Promise<{ successCount: number; failedCount: number }> | null = null;
 
-export function getPendingQueue(): QueuedSyncItem[] {
+function readLocalStorageQueue(): QueuedSyncItem[] {
   try {
     const raw = localStorage.getItem(QUEUE_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
-  } catch (e) {
-    console.error('Error reading offline sync queue:', e);
+  } catch {
     return [];
   }
 }
 
-/**
- * Save pending sync queue to both IndexedDB and localStorage fallback
- */
+export async function getPendingQueueAsync(): Promise<QueuedSyncItem[]> {
+  if (memoryQueue !== null && queueHydratedFromIdb) {
+    return [...memoryQueue];
+  }
+  try {
+    const idbQueue = await idbGetSyncQueue<QueuedSyncItem>();
+    if (idbQueue !== null) {
+      queueHydratedFromIdb = true;
+      // Merge any items enqueued synchronously before IDB finished hydrating
+      if (memoryQueue !== null && memoryQueue.length > 0) {
+        const mergedMap = new Map<string, QueuedSyncItem>();
+        idbQueue.forEach((it) => mergedMap.set(it.id, it));
+        memoryQueue.forEach((it) => mergedMap.set(it.id, it));
+        memoryQueue = Array.from(mergedMap.values()).slice(-30);
+      } else {
+        memoryQueue = idbQueue;
+      }
+      return [...memoryQueue];
+    }
+  } catch {}
+  if (memoryQueue === null) {
+    memoryQueue = readLocalStorageQueue();
+  }
+  return [...memoryQueue];
+}
+
+export function getPendingQueue(): QueuedSyncItem[] {
+  if (memoryQueue !== null) {
+    return [...memoryQueue];
+  }
+  memoryQueue = readLocalStorageQueue();
+  return [...memoryQueue];
+}
+
 function setPendingQueue(queue: QueuedSyncItem[]): void {
   const capped = queue.slice(-30);
+  memoryQueue = capped;
+  queueHydratedFromIdb = true;
   idbSaveSyncQueue(capped).catch(() => {});
   try {
     localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(capped));
-  } catch (e) {
-    console.warn('localStorage queue mirror skipped:', e);
+  } catch {
+    // IndexedDB + memoryQueue remain authoritative if localStorage quota is full
   }
 }
 
-/**
- * Enqueue or update a pending trip save operation (scoped to userId)
- */
 export function enqueueTripSave(userId: string, trip: Trip): void {
   const queue = getPendingQueue();
   const filtered = queue.filter(
     (item) => !(item.type === 'save_trip' && item.userId === userId && item.trip?.id === trip.id)
   );
   filtered.push({
-    id: `save-${userId}-${trip.id}-${Date.now()}`,
+    id: `save-${userId}-${trip.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     type: 'save_trip',
     userId,
     trip,
@@ -81,16 +100,13 @@ export function enqueueTripSave(userId: string, trip: Trip): void {
   setPendingQueue(filtered);
 }
 
-/**
- * Enqueue a pending trip delete operation (scoped to userId)
- */
 export function enqueueTripDelete(userId: string, tripId: string): void {
   const queue = getPendingQueue();
   const filtered = queue.filter(
     (item) => !(item.type === 'save_trip' && item.userId === userId && item.trip?.id === tripId)
   );
   filtered.push({
-    id: `delete-${userId}-${tripId}-${Date.now()}`,
+    id: `delete-${userId}-${tripId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     type: 'delete_trip',
     userId,
     tripId,
@@ -99,9 +115,6 @@ export function enqueueTripDelete(userId: string, tripId: string): void {
   setPendingQueue(filtered);
 }
 
-/**
- * Remove any pending trip save tasks (used when deleting a trip online so stale retries cannot resurrect it)
- */
 export async function removePendingTripSave(userId: string, tripId: string): Promise<void> {
   const queue = await getPendingQueueAsync();
   const filtered = queue.filter(
@@ -112,16 +125,13 @@ export async function removePendingTripSave(userId: string, tripId: string): Pro
   }
 }
 
-/**
- * Enqueue a collaborative trip sync
- */
 export function enqueueCollabSync(collabId: string, trip: Trip, editorName?: string): void {
   const queue = getPendingQueue();
   const filtered = queue.filter(
     (item) => !(item.type === 'sync_collab' && item.collabId === collabId)
   );
   filtered.push({
-    id: `collab-${collabId}-${Date.now()}`,
+    id: `collab-${collabId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     type: 'sync_collab',
     collabId,
     trip,
@@ -132,7 +142,8 @@ export function enqueueCollabSync(collabId: string, trip: Trip, editorName?: str
 }
 
 /**
- * Flush pending offline sync tasks scoped to activeUserId when online
+ * Mutex-protected offline queue flusher.
+ * Never drops tasks enqueued concurrently during async network I/O.
  */
 export async function flushPendingSyncQueue(
   activeUserId?: string | null,
@@ -141,101 +152,124 @@ export async function flushPendingSyncQueue(
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     return { successCount: 0, failedCount: 0 };
   }
-
-  const queue = await getPendingQueueAsync();
-  if (queue.length === 0) return { successCount: 0, failedCount: 0 };
-
-  let effectiveTombstones = cloudTombstones;
-  if (activeUserId && effectiveTombstones === undefined) {
-    try {
-      effectiveTombstones = await fetchUserTombstones(activeUserId);
-    } catch {
-      effectiveTombstones = {};
-    }
+  if (!activeUserId) {
+    return { successCount: 0, failedCount: 0 };
   }
-  const TOMBSTONE_CLOCK_SKEW_MS = 15 * 60 * 1000;
-  const isCloudTombstoned = (tripId: string, updatedAt = 0) => {
-    const deletedAt = effectiveTombstones?.[tripId];
-    return typeof deletedAt === 'number' && deletedAt + TOMBSTONE_CLOCK_SKEW_MS >= updatedAt;
-  };
 
-  const remaining: QueuedSyncItem[] = [];
-  let successCount = 0;
-  let failedCount = 0;
-  const syncedTimestamps: Record<string, number> = {};
+  if (flushInFlightPromise) {
+    return flushInFlightPromise;
+  }
 
-  const deletedIds = new Set(getDeletedTripIds());
-  const queuedDeleteIds = new Set(
-    queue
-      .filter((q) => q.type === 'delete_trip' && q.userId === activeUserId && q.tripId)
-      .map((q) => q.tripId as string)
-  );
-
-  for (const item of queue) {
-    // Keep another user's queued operations untouched until that account signs in
-    if ((item.type === 'save_trip' || item.type === 'delete_trip') && item.userId !== activeUserId) {
-      remaining.push(item);
-      continue;
-    }
-
-    if (item.type === 'sync_collab' && !activeUserId) {
-      remaining.push(item);
-      continue;
-    }
-
+  flushInFlightPromise = (async () => {
     try {
-      if (item.type === 'save_trip' && item.userId && item.trip) {
-        if (
-          deletedIds.has(item.trip.id) ||
-          queuedDeleteIds.has(item.trip.id) ||
-          isCloudTombstoned(item.trip.id, item.trip.updatedAt || 0)
-        ) {
-          // Drop stale save tasks for trips that were deleted locally or on another device
+      const snapshotQueue = await getPendingQueueAsync();
+      if (snapshotQueue.length === 0) return { successCount: 0, failedCount: 0 };
+
+      let effectiveTombstones: Record<string, number> = cloudTombstones || {};
+      if (cloudTombstones === undefined) {
+        try {
+          const fetched = await fetchUserTombstones(activeUserId);
+          if (fetched !== null) {
+            effectiveTombstones = fetched;
+          }
+        } catch {
+          effectiveTombstones = {};
+        }
+      }
+
+      const TOMBSTONE_CLOCK_SKEW_MS = 15 * 60 * 1000;
+      const isCloudTombstoned = (tripId: string, updatedAt = 0) => {
+        const deletedAt = effectiveTombstones?.[tripId];
+        return typeof deletedAt === 'number' && deletedAt + TOMBSTONE_CLOCK_SKEW_MS >= updatedAt;
+      };
+
+      const completedOrDroppedIds = new Set<string>();
+      let successCount = 0;
+      let failedCount = 0;
+      const syncedTimestamps: Record<string, number> = {};
+
+      const deletedIds = new Set(getDeletedTripIds());
+      const queuedDeleteIds = new Set(
+        snapshotQueue
+          .filter((q) => q.type === 'delete_trip' && q.userId === activeUserId && q.tripId)
+          .map((q) => q.tripId as string)
+      );
+
+      for (const item of snapshotQueue) {
+        if ((item.type === 'save_trip' || item.type === 'delete_trip') && item.userId !== activeUserId) {
           continue;
         }
-        const saved = await saveTripToCloud(item.userId, item.trip);
-        syncedTimestamps[item.trip.id] = Math.max(Date.now(), saved.lastSyncedAt || item.trip.updatedAt || 0);
-        successCount++;
-      } else if (item.type === 'delete_trip' && item.userId && item.tripId) {
-        await deleteTripFromCloud(item.userId, item.tripId);
-        successCount++;
-      } else if (item.type === 'sync_collab' && item.collabId && item.trip) {
-        if (
-          deletedIds.has(item.trip.id) ||
-          queuedDeleteIds.has(item.trip.id) ||
-          isCloudTombstoned(item.trip.id, item.trip.updatedAt || 0)
-        ) {
-          continue;
+
+        try {
+          if (item.type === 'save_trip' && item.userId && item.trip) {
+            if (
+              deletedIds.has(item.trip.id) ||
+              queuedDeleteIds.has(item.trip.id) ||
+              isCloudTombstoned(item.trip.id, item.trip.updatedAt || 0)
+            ) {
+              completedOrDroppedIds.add(item.id);
+              continue;
+            }
+            const saved = await saveTripToCloud(item.userId, item.trip);
+            syncedTimestamps[item.trip.id] = Math.max(
+              Date.now(),
+              saved.lastSyncedAt || item.trip.updatedAt || 0
+            );
+            completedOrDroppedIds.add(item.id);
+            successCount++;
+          } else if (item.type === 'delete_trip' && item.userId && item.tripId) {
+            await deleteTripFromCloud(item.userId, item.tripId);
+            completedOrDroppedIds.add(item.id);
+            successCount++;
+          } else if (item.type === 'sync_collab' && item.collabId && item.trip) {
+            if (
+              deletedIds.has(item.trip.id) ||
+              queuedDeleteIds.has(item.trip.id) ||
+              isCloudTombstoned(item.trip.id, item.trip.updatedAt || 0)
+            ) {
+              completedOrDroppedIds.add(item.id);
+              continue;
+            }
+            await syncCollaborativeTrip(item.collabId, item.trip, item.editorName);
+            completedOrDroppedIds.add(item.id);
+            successCount++;
+          }
+        } catch (err) {
+          console.warn('Failed to process offline sync item, keeping in queue:', item.id, err);
+          failedCount++;
         }
-        await syncCollaborativeTrip(item.collabId, item.trip, item.editorName);
-        successCount++;
       }
-    } catch (err) {
-      console.warn('Failed to process offline sync item, keeping in queue:', item, err);
-      remaining.push(item);
-      failedCount++;
-    }
-  }
 
-  setPendingQueue(remaining);
-
-  if (Object.keys(syncedTimestamps).length > 0) {
-    const stored = getStoredTrips();
-    let changed = false;
-    const updated = stored.map((tr) => {
-      const ts = syncedTimestamps[tr.id];
-      if (ts && (tr.lastSyncedAt || 0) < ts) {
-        changed = true;
-        return { ...tr, lastSyncedAt: ts };
+      // Preserve any new items enqueued mid-flush; only remove exact IDs completed or dropped above
+      if (completedOrDroppedIds.size > 0) {
+        const latestQueue = getPendingQueue();
+        const nextQueue = latestQueue.filter((it) => !completedOrDroppedIds.has(it.id));
+        setPendingQueue(nextQueue);
       }
-      return tr;
-    });
-    if (changed) {
-      saveTrips(updated);
-    }
-  }
 
-  return { successCount, failedCount };
+      if (Object.keys(syncedTimestamps).length > 0) {
+        const stored = getStoredTrips();
+        let changed = false;
+        const updated = stored.map((tr) => {
+          const ts = syncedTimestamps[tr.id];
+          if (ts && (tr.lastSyncedAt || 0) < ts) {
+            changed = true;
+            return { ...tr, lastSyncedAt: ts };
+          }
+          return tr;
+        });
+        if (changed) {
+          saveTrips(updated);
+        }
+      }
+
+      return { successCount, failedCount };
+    } finally {
+      flushInFlightPromise = null;
+    }
+  })();
+
+  return flushInFlightPromise;
 }
 
 export interface TripConflictSummary {
@@ -266,13 +300,9 @@ export function formatConflictTimestamp(ts?: number): string {
   const d = new Date(ts);
   if (isNaN(d.getTime())) return '未知時間';
   const pad = (n: number) => n.toString().padStart(2, '0');
-  const year = d.getFullYear();
-  const month = pad(d.getMonth() + 1);
-  const day = pad(d.getDate());
-  const hours = pad(d.getHours());
-  const mins = pad(d.getMinutes());
-  const secs = pad(d.getSeconds());
-  return `${year}/${month}/${day} ${hours}:${mins}:${secs}`;
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 export function summarizeTripForConflict(trip: Trip): TripConflictSummary {
@@ -303,178 +333,50 @@ export function summarizeTripForConflict(trip: Trip): TripConflictSummary {
   };
 }
 
-/**
- * Deeply compares two trips for substantive differences across schedule, checklists, expenses, permissions & photos.
- */
-export function hasTripContentDifference(a: Trip, b: Trip): boolean {
-  if ((a.updatedAt || 0) !== (b.updatedAt || 0)) {
-    return true;
-  }
-
-  const aSummary = summarizeTripForConflict(a);
-  const bSummary = summarizeTripForConflict(b);
-
-  if (
-    aSummary.spotCount !== bSummary.spotCount ||
-    aSummary.todoCount !== bSummary.todoCount ||
-    aSummary.packingCount !== bSummary.packingCount ||
-    aSummary.expenseCount !== bSummary.expenseCount ||
-    Math.round(aSummary.expenseTotal) !== Math.round(bSummary.expenseTotal) ||
-    a.title !== b.title ||
-    a.destination !== b.destination ||
-    a.startDate !== b.startDate ||
-    a.endDate !== b.endDate ||
-    (a.notes || '') !== (b.notes || '') ||
-    a.googlePhotosAlbumUrl !== b.googlePhotosAlbumUrl ||
-    a.driveFolderId !== b.driveFolderId ||
-    a.isSoloTrip !== b.isSoloTrip ||
-    a.tripMode !== b.tripMode ||
-    a.destinationLat !== b.destinationLat ||
-    a.destinationLng !== b.destinationLng ||
-    a.isSplitEnabled !== b.isSplitEnabled ||
-    a.coverGradient !== b.coverGradient ||
-    a.generalAccess !== b.generalAccess ||
-    (a.collaborators || []).length !== (b.collaborators || []).length ||
-    (a.memories || []).length !== (b.memories || []).length ||
-    (a.bookings || []).length !== (b.bookings || []).length ||
-    (a.stickyNotes || []).length !== (b.stickyNotes || []).length ||
-    Object.keys(a.deletedItemIds || {}).length !== Object.keys(b.deletedItemIds || {}).length
-  ) {
-    return true;
-  }
-
-  const aStickies = a.stickyNotes || [];
-  const bStickies = b.stickyNotes || [];
-  for (let s = 0; s < aStickies.length; s++) {
-    const sa = aStickies[s];
-    const sb = bStickies[s];
-    if (
-      !sb ||
-      sa.id !== sb.id ||
-      sa.label !== sb.label ||
-      sa.content !== sb.content ||
-      sa.category !== sb.category ||
-      Boolean(sa.completed) !== Boolean(sb.completed)
-    ) {
-      return true;
-    }
-  }
-
-  const aMems = a.memories || [];
-  const bMems = b.memories || [];
-  for (let m = 0; m < aMems.length; m++) {
-    const ma = aMems[m];
-    const mb = bMems[m];
-    if (
-      !mb ||
-      ma.id !== mb.id ||
-      ma.imageUrl !== mb.imageUrl ||
-      ma.googlePhotosUrl !== mb.googlePhotosUrl ||
-      ma.driveFileId !== mb.driveFileId ||
-      ma.caption !== mb.caption ||
-      ma.spotId !== mb.spotId ||
-      ma.mood !== mb.mood ||
-      ma.date !== mb.date ||
-      ma.lat !== mb.lat ||
-      ma.lng !== mb.lng
-    ) {
-      return true;
-    }
-  }
-
-  const daysA = a.days || [];
-  const daysB = b.days || [];
-  if (daysA.length !== daysB.length) return true;
-
-  for (let i = 0; i < daysA.length; i++) {
-    const dayA = daysA[i];
-    const dayB = daysB[i];
-    if (!dayB) return true;
-    const itemsA = dayA.items || [];
-    const itemsB = dayB.items || [];
-    if (itemsA.length !== itemsB.length) return true;
-
-    for (let j = 0; j < itemsA.length; j++) {
-      const itA = itemsA[j];
-      const itB = itemsB[j];
-      if (
-        itA.id !== itB.id ||
-        itA.title !== itB.title ||
-        itA.startTime !== itB.startTime ||
-        itA.endTime !== itB.endTime ||
-        itA.notes !== itB.notes ||
-        itA.completed !== itB.completed ||
-        itA.googlePhotosUrl !== itB.googlePhotosUrl ||
-        itA.memoryNotes !== itB.memoryNotes
-      ) {
-        return true;
-      }
-
-      const photosA = itA.memoryPhotos || [];
-      const photosB = itB.memoryPhotos || [];
-      if (photosA.length !== photosB.length) return true;
-      for (let p = 0; p < photosA.length; p++) {
-        if (photosA[p] !== photosB[p]) return true;
-      }
-    }
-  }
-
-  const expA = a.expenses || [];
-  const expB = b.expenses || [];
-  for (let i = 0; i < expA.length; i++) {
-    const ea = expA[i];
-    const eb = expB[i];
-    if (
-      !eb ||
-      ea.id !== eb.id ||
-      ea.amount !== eb.amount ||
-      ea.title !== eb.title ||
-      (ea.receiptImages || []).length !== (eb.receiptImages || []).length
-    ) {
-      return true;
-    }
-  }
-
-  return false;
+function stableContentSignature(trip: Trip): string {
+  const normalized = {
+    title: trip.title || '',
+    destination: trip.destination || '',
+    startDate: trip.startDate || '',
+    endDate: trip.endDate || '',
+    currency: trip.currency || '',
+    budgetTotal: trip.budgetTotal || 0,
+    notes: trip.notes || '',
+    coverGradient: trip.coverGradient || '',
+    tripMode: trip.tripMode || 'planner',
+    destinationLat: trip.destinationLat ?? null,
+    destinationLng: trip.destinationLng ?? null,
+    isSoloTrip: Boolean(trip.isSoloTrip),
+    isSplitEnabled: Boolean(trip.isSplitEnabled),
+    splitMembers: trip.splitMembers || [],
+    initialCashAmount: trip.initialCashAmount ?? null,
+    initialCashCurrency: trip.initialCashCurrency ?? null,
+    customExchangeRates: trip.customExchangeRates || {},
+    customExpenseCategories: trip.customExpenseCategories || [],
+    customCategoryLabels: trip.customCategoryLabels || {},
+    customExpenseTags: trip.customExpenseTags || [],
+    googlePhotosAlbumUrl: trip.googlePhotosAlbumUrl || '',
+    driveFolderId: trip.driveFolderId || '',
+    generalAccess: trip.generalAccess || 'restricted',
+    collaborators: trip.collaborators || [],
+    days: trip.days || [],
+    todos: trip.todos || [],
+    packingList: trip.packingList || [],
+    expenses: trip.expenses || [],
+    bookings: trip.bookings || [],
+    memories: trip.memories || [],
+    stickyNotes: trip.stickyNotes || [],
+    emergencyContacts: trip.emergencyContacts || [],
+    deletedItemIds: trip.deletedItemIds || {},
+  };
+  return JSON.stringify(normalized);
 }
 
-export function detectTripConflicts(
-  localTrips: Trip[],
-  cloudTrips: Trip[]
-): TripConflict[] {
-  const conflicts: TripConflict[] = [];
-
-  for (const lTrip of localTrips) {
-    const cTrip = cloudTrips.find((c) => c.id === lTrip.id);
-    if (!cTrip) continue;
-
-    const localUpdated = lTrip.updatedAt || 0;
-    const cloudUpdated = cTrip.updatedAt || 0;
-    const timeDiffMs = Math.abs(localUpdated - cloudUpdated);
-
-    if (timeDiffMs > 2000 && hasTripContentDifference(lTrip, cTrip)) {
-      const localSummary = summarizeTripForConflict(lTrip);
-      const cloudSummary = summarizeTripForConflict(cTrip);
-      const newerVersion =
-        localUpdated > cloudUpdated ? 'local' : cloudUpdated > localUpdated ? 'cloud' : 'equal';
-      const timeDiffMinutes = Math.max(1, Math.round(timeDiffMs / (1000 * 60)));
-
-      conflicts.push({
-        tripId: lTrip.id,
-        tripTitle: lTrip.title,
-        destination: lTrip.destination,
-        localTrip: lTrip,
-        cloudTrip: cTrip,
-        localSummary,
-        cloudSummary,
-        detectedAt: Date.now(),
-        newerVersion,
-        timeDiffMinutes,
-      });
-    }
-  }
-
-  return conflicts;
+/**
+ * Deep substantive comparison ignoring volatile metadata (`updatedAt`, `lastSyncedAt`).
+ */
+export function hasTripContentDifference(a: Trip, b: Trip): boolean {
+  return stableContentSignature(a) !== stableContentSignature(b);
 }
 
 export async function resolveTripConflict(
@@ -506,38 +408,19 @@ export async function resolveTripConflict(
   saveTrips(updatedTrips);
 
   if (strategy !== 'keep_cloud') {
-    const runBackgroundSync = async () => {
-      if (userId) {
-        try {
-          const timeout = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Cloud save timeout')), 4000)
-          );
-          await Promise.race([saveTripToCloud(userId, resolvedTrip), timeout]);
-        } catch (err) {
-          console.warn('Background cloud save delayed, enqueued in offline queue:', err);
-          enqueueTripSave(userId, resolvedTrip);
-        }
-      }
+    if (userId && !(resolvedTrip.isCollaborative && resolvedTrip.ownerId && resolvedTrip.ownerId !== userId)) {
+      saveTripToCloud(userId, resolvedTrip).catch((err) => {
+        console.warn('Conflict resolution cloud save failed, enqueued:', err);
+        enqueueTripSave(userId, resolvedTrip);
+      });
+    }
 
-      if (resolvedTrip.collabId && resolvedTrip.isCollaborative) {
-        try {
-          const timeout = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Collab sync timeout')), 4000)
-          );
-          await Promise.race([
-            syncCollaborativeTrip(resolvedTrip.collabId, resolvedTrip),
-            timeout,
-          ]);
-        } catch (err) {
-          console.warn('Background collab sync delayed, enqueued in offline queue:', err);
-          enqueueCollabSync(resolvedTrip.collabId, resolvedTrip);
-        }
-      }
-    };
-
-    runBackgroundSync().catch((err) => {
-      console.warn('Trip conflict background sync encountered error:', err);
-    });
+    if (resolvedTrip.collabId && resolvedTrip.isCollaborative) {
+      syncCollaborativeTrip(resolvedTrip.collabId, resolvedTrip).catch((err) => {
+        console.warn('Conflict resolution collab sync failed, enqueued:', err);
+        enqueueCollabSync(resolvedTrip.collabId!, resolvedTrip);
+      });
+    }
   }
 
   return resolvedTrip;
@@ -545,7 +428,7 @@ export async function resolveTripConflict(
 
 /**
  * Tombstone-aware bi-directional merge between local trips and cloud trips.
- * Prevents deleted trips from resurrecting when another device deletes them.
+ * Protects collaborative/shared trips from false auto-deletion and merges concurrent edits safely.
  */
 export function mergeTrips(
   localTrips: Trip[],
@@ -554,7 +437,12 @@ export function mergeTrips(
   isServerAuthoritative = true,
   activeUserId?: string,
   pendingSaveIds?: Set<string>
-): { merged: Trip[]; tripsToUpload: Trip[]; deletedLocalTripIds: string[]; conflicts: TripConflict[] } {
+): {
+  merged: Trip[];
+  tripsToUpload: Trip[];
+  deletedLocalTripIds: string[];
+  conflicts: TripConflict[];
+} {
   const tripsToUpload: Trip[] = [];
   const deletedLocalTripIds: string[] = [];
   const conflicts: TripConflict[] = [];
@@ -585,14 +473,21 @@ export function mergeTrips(
   for (const lTrip of validLocalTrips) {
     const existing = mergedMap.get(lTrip.id);
     if (!existing) {
-      // 1. If trip was previously synced to cloud and is now missing from authoritative server list,
-      // it was deleted on another device — purge stale cache instead of resurrecting!
+      // Never auto-delete read-only imported share trips or another owner's collaborative trip
+      // just because they are not stored inside users/{activeUserId}/trips!
+      const isExternalShareOrCollab =
+        lTrip.id.startsWith('imported-share_') ||
+        Boolean(lTrip.isCollaborative && lTrip.ownerId && activeUserId && lTrip.ownerId !== activeUserId);
+      if (isExternalShareOrCollab) {
+        mergedMap.set(lTrip.id, lTrip);
+        continue;
+      }
+
       if (isServerAuthoritative && lTrip.lastSyncedAt) {
         deletedLocalTripIds.push(lTrip.id);
         continue;
       }
-      // 2. If user already has cloud history and local holds only an untouched default template preset,
-      // do not resurrect it back into the cloud account.
+
       if (
         isServerAuthoritative &&
         hasCloudHistory &&
@@ -602,8 +497,7 @@ export function mergeTrips(
         deletedLocalTripIds.push(lTrip.id);
         continue;
       }
-      // 3. If trip explicitly belongs to this signed-in account and is not awaiting offline/in-flight upload,
-      // treat absence from authoritative cloud snapshot as deleted on another device.
+
       if (
         isServerAuthoritative &&
         hasCloudHistory &&
@@ -614,7 +508,7 @@ export function mergeTrips(
         deletedLocalTripIds.push(lTrip.id);
         continue;
       }
-      // Newly created local/offline trip never synced yet -> keep & upload
+
       mergedMap.set(lTrip.id, lTrip);
       tripsToUpload.push(lTrip);
     } else {
@@ -622,21 +516,25 @@ export function mergeTrips(
       const cloudUpdated = existing.updatedAt || 0;
       const lastSynced = lTrip.lastSyncedAt || 0;
       const timeDiffMs = Math.abs(localUpdated - cloudUpdated);
+      const hasDiff = hasTripContentDifference(lTrip, existing);
+
+      if (!hasDiff) {
+        mergedMap.set(lTrip.id, existing);
+        continue;
+      }
 
       const bothDivergedSinceSync =
         lastSynced > 0 &&
         localUpdated > lastSynced + 2000 &&
         cloudUpdated > lastSynced + 2000 &&
-        timeDiffMs > 2000 &&
-        hasTripContentDifference(lTrip, existing);
+        timeDiffMs > 2000;
 
       const divergedWithoutBaseline =
         !lTrip.id.startsWith('preset-') &&
         lastSynced === 0 &&
         localUpdated > 0 &&
         cloudUpdated > 0 &&
-        timeDiffMs > 2000 &&
-        hasTripContentDifference(lTrip, existing);
+        timeDiffMs > 2000;
 
       if (bothDivergedSinceSync || divergedWithoutBaseline) {
         const localSummary = summarizeTripForConflict(lTrip);
@@ -657,63 +555,25 @@ export function mergeTrips(
           newerVersion,
           timeDiffMinutes,
         });
-        // Preserve local draft temporarily until user resolves via ConflictResolutionModal
         mergedMap.set(lTrip.id, lTrip);
+      } else if (lastSynced > 0 && localUpdated > lastSynced && cloudUpdated > lastSynced) {
+        // Both modified within the short 2s window: smart-merge instead of silently dropping local edits!
+        const mergedTrip =
+          localUpdated >= cloudUpdated
+            ? mergeSingleTrip(lTrip, existing)
+            : mergeSingleTrip(existing, lTrip);
+        mergedMap.set(lTrip.id, mergedTrip);
+        tripsToUpload.push(mergedTrip);
       } else if (cloudUpdated > localUpdated) {
         mergedMap.set(lTrip.id, existing);
-      } else if (localUpdated > cloudUpdated) {
-        const mergedTrip = mergeSingleTrip(lTrip, existing);
-        mergedMap.set(lTrip.id, mergedTrip);
-        tripsToUpload.push(mergedTrip);
-      } else if (hasTripContentDifference(lTrip, existing)) {
-        const mergedTrip = mergeSingleTrip(lTrip, existing);
-        mergedMap.set(lTrip.id, mergedTrip);
-        tripsToUpload.push(mergedTrip);
       } else {
-        mergedMap.set(lTrip.id, existing);
+        const mergedTrip = mergeSingleTrip(lTrip, existing);
+        mergedMap.set(lTrip.id, mergedTrip);
+        tripsToUpload.push(mergedTrip);
       }
     }
   }
 
   const merged = Array.from(mergedMap.values());
   return { merged, tripsToUpload, deletedLocalTripIds, conflicts };
-}
-
-export async function executeSafeTripUpdate(
-  updatedTrip: Trip,
-  userId?: string | null,
-  userName?: string
-): Promise<void> {
-  const current = getStoredTrips();
-  const idx = current.findIndex((t) => t.id === updatedTrip.id);
-  const nextTrips = idx >= 0
-    ? current.map((t) => (t.id === updatedTrip.id ? updatedTrip : t))
-    : [updatedTrip, ...current];
-  saveTrips(nextTrips);
-
-  if (updatedTrip.collabId && updatedTrip.isCollaborative) {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      enqueueCollabSync(updatedTrip.collabId, updatedTrip, userName);
-    } else {
-      try {
-        await syncCollaborativeTrip(updatedTrip.collabId, updatedTrip, userName);
-      } catch (err) {
-        console.warn('Collab sync failed, enqueuing for offline sync:', err);
-        enqueueCollabSync(updatedTrip.collabId, updatedTrip, userName);
-      }
-    }
-  }
-
-  if (userId) {
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      enqueueTripSave(userId, updatedTrip);
-    } else {
-      try {
-        await saveTripToCloud(userId, updatedTrip);
-      } catch (err) {
-        console.warn('Cloud save failed, enqueuing for offline sync:', err);
-        enqueueTripSave(userId, updatedTrip);
-      }
-    }
-  }
 }

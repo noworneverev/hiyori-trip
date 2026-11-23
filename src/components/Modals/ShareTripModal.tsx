@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Trip } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
 import { formatDateSlash } from '../../utils/date';
 import { enableTripCollaboration } from '../../utils/firebase';
 import { getPublicShareBaseUrl } from '../../utils/url';
 import { copyTextToClipboard } from '../../utils/clipboard';
+import { generateQrSvgPath } from '../../utils/qrCode';
 import { User } from 'firebase/auth';
 import {
   IosModalSheet,
@@ -46,22 +47,32 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
 }) => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
-  const [shareUrl, setShareUrl] = useState<string | null>(() => {
-    if (trip.collabId && trip.isCollaborative) {
-      const base = getPublicShareBaseUrl();
-      return `${base}?collab=${trip.collabId}`;
-    }
-    return null;
-  });
+  const derivedShareUrl =
+    trip.collabId && trip.isCollaborative
+      ? `${getPublicShareBaseUrl()}?collab=${trip.collabId}`
+      : null;
+  const [shareUrl, setShareUrl] = useState<string | null>(derivedShareUrl);
   const [copied, setCopied] = useState(false);
   const [copiedText, setCopiedText] = useState(false);
   const [showQrCode, setShowQrCode] = useState(false);
+
+  useEffect(() => {
+    setShareUrl(derivedShareUrl);
+  }, [derivedShareUrl]);
+
+  const qrSvg = useMemo(() => (shareUrl ? generateQrSvgPath(shareUrl) : null), [shareUrl]);
+  const isOwner = !trip.ownerId || Boolean(currentUser && currentUser.uid === trip.ownerId);
+  const isOnline = typeof navigator === 'undefined' || navigator.onLine !== false;
 
   const handleGenerateLiveShare = async () => {
     setShareError(null);
     if (!currentUser) {
       setShareError('請先登入 Google 帳號，才能建立即時雲端分享連結');
       onRequireAuth?.();
+      return;
+    }
+    if (!isOwner) {
+      setShareError('僅行程建立者可開啟或重新產生雲端分享連結');
       return;
     }
 
@@ -174,7 +185,7 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
             </h4>
             <p className="text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
               {trip.days.length} 天日程 · {totalSpots} 個景點 · 預算約 {trip.currency}{' '}
-              {trip.budgetTotal.toLocaleString()}
+              {Number(trip.budgetTotal || 0).toLocaleString()}
             </p>
           </div>
         </IosInsetGroup>
@@ -188,7 +199,11 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
         {!shareUrl ? (
           <IosInsetGroup
             header="即時雲端連結"
-            footer="建立後，親友取得連結即可即時瀏覽最新日程，無需登入帳號。"
+            footer={
+              trip.generalAccess === 'restricted'
+                ? '目前設為「僅限受邀成員」，親友須使用受邀 Google 帳號登入才可瀏覽。'
+                : '建立後，親友取得連結即可即時瀏覽最新日程，無需登入帳號。'
+            }
           >
             <IosRow
               icon={
@@ -219,7 +234,7 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
               headerRight={
                 <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-1">
                   <Radio className="w-3 h-3" />
-                  <span>同步中</span>
+                  <span>{isOnline ? '雲端同步中' : '離線快取'}</span>
                 </span>
               }
             >
@@ -233,7 +248,7 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
                 <button
                   type="button"
                   onClick={handleCopyLink}
-                  className="min-h-[36px] px-3 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 text-white text-xs font-bold flex items-center gap-1 shrink-0 transition active:scale-95 cursor-pointer"
+                  className="min-h-[44px] sm:min-h-[36px] px-3.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 text-white text-xs font-bold flex items-center gap-1 shrink-0 transition active:scale-95 cursor-pointer"
                 >
                   {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                   <span>{copied ? '已複製' : '複製'}</span>
@@ -268,16 +283,23 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
                 onToggle={() => setShowQrCode((v) => !v)}
               >
                 <div className="py-5 px-4 text-center space-y-2">
-                  <div className="inline-block p-2.5 rounded-2xl bg-white shadow-xs border border-[#E5E2DC]">
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(shareUrl)}`}
-                      alt="Trip Share QR Code"
-                      className="w-36 h-36 mx-auto"
-                      loading="lazy"
-                    />
+                  <div className="inline-block p-3 rounded-2xl bg-white shadow-xs border border-[#E5E2DC]">
+                    {qrSvg ? (
+                      <svg
+                        viewBox={`0 0 ${qrSvg.size} ${qrSvg.size}`}
+                        className="w-36 h-36 mx-auto"
+                        role="img"
+                        aria-label="Trip Share QR Code"
+                      >
+                        <rect width={qrSvg.size} height={qrSvg.size} fill="#ffffff" />
+                        <path d={qrSvg.path} fill="#0f172a" />
+                      </svg>
+                    ) : (
+                      <p className="text-xs text-slate-500 py-8 px-4">連結過長，請改用複製連結分享</p>
+                    )}
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    請旅伴使用相機掃描立即開啟行程
+                    本機安全生成 · 請旅伴使用相機掃描立即開啟行程
                   </p>
                 </div>
               </IosDisclosureRow>

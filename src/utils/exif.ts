@@ -1,7 +1,7 @@
-import { compressImageFile, getImageDimensions, storeImageAsMediaRef } from './image';
+import { compressImageFileWithMeta, storeImageAsMediaRef } from './image';
 
 export interface PhotoExifMetadata {
-  takenDate: string; // YYYY-MM-DD (EXIF DateTimeOriginal/CreateDate or fallback file.lastModified)
+  takenDate: string; // YYYY-MM-DD in photo's captured calendar day
   hasExifDate: boolean;
   lat?: number;
   lng?: number;
@@ -31,34 +31,38 @@ function toLocalYyyyMmDd(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-function parseExifDateCandidate(val: unknown): Date | null {
+/**
+ * Extracts YYYY-MM-DD directly from EXIF/ISO strings before Date conversion so photos captured
+ * in Japan (UTC+9) don't shift calendar days when uploaded in another timezone (e.g. UTC-5 / UTC+8).
+ */
+function parseExifDateToYyyyMmDd(val: unknown): string | null {
   if (!val) return null;
-  if (val instanceof Date && !isNaN(val.getTime())) {
-    return val;
-  }
   if (typeof val === 'string') {
-    // Handle standard EXIF format "YYYY:MM:DD HH:MM:SS"
-    const exifMatch = val.trim().match(/^(\d{4}):(\d{2}):(\d{2})(?:\s+(\d{2}):(\d{2}):(\d{2}))?/);
-    if (exifMatch) {
-      const d = new Date(
-        Number(exifMatch[1]),
-        Number(exifMatch[2]) - 1,
-        Number(exifMatch[3]),
-        Number(exifMatch[4] || 12),
-        Number(exifMatch[5] || 0),
-        Number(exifMatch[6] || 0)
-      );
-      if (!isNaN(d.getTime())) return d;
+    const directMatch = val.trim().match(/^(\d{4})[-:/](\d{1,2})[-:/](\d{1,2})/);
+    if (directMatch) {
+      const y = Number(directMatch[1]);
+      const m = Number(directMatch[2]);
+      const d = Number(directMatch[3]);
+      if (y >= 1990 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+        return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      }
     }
-    const isoParsed = new Date(val);
-    if (!isNaN(isoParsed.getTime())) return isoParsed;
+    const parsed = new Date(val);
+    if (!isNaN(parsed.getTime()) && parsed.getFullYear() >= 1990 && parsed.getFullYear() <= 2100) {
+      return toLocalYyyyMmDd(parsed);
+    }
+    return null;
+  }
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    if (val.getFullYear() >= 1990 && val.getFullYear() <= 2100) {
+      return toLocalYyyyMmDd(val);
+    }
   }
   return null;
 }
 
 /**
- * Extract capture date and GPS coordinates purely client-side using exifr.
- * Never throws on EXIF-stripped or unsupported files; gracefully falls back to file.lastModified.
+ * Extract capture date and GPS coordinates in a single exifr file pass.
  */
 export async function extractPhotoExifMetadata(file: File): Promise<PhotoExifMetadata> {
   const fallbackDate = file.lastModified
@@ -74,36 +78,37 @@ export async function extractPhotoExifMetadata(file: File): Promise<PhotoExifMet
   try {
     const exifrModule = await import('exifr');
     const exifr = exifrModule.default || exifrModule;
-    const [tags, gps] = await Promise.all([
-      exifr.parse(file, ['DateTimeOriginal', 'CreateDate', 'ModifyDate']).catch(() => null),
-      exifr.gps(file).catch(() => null),
-    ]);
+    const parsed = await exifr
+      .parse(file, {
+        pick: ['DateTimeOriginal', 'CreateDate', 'ModifyDate', 'GPSLatitude', 'GPSLongitude', 'GPSLatitudeRef', 'GPSLongitudeRef'],
+        gps: true,
+      })
+      .catch(() => null);
 
-    if (tags) {
+    if (parsed) {
       const candidate =
-        parseExifDateCandidate(tags.DateTimeOriginal) ||
-        parseExifDateCandidate(tags.CreateDate) ||
-        parseExifDateCandidate(tags.ModifyDate);
+        parseExifDateToYyyyMmDd(parsed.DateTimeOriginal) ||
+        parseExifDateToYyyyMmDd(parsed.CreateDate) ||
+        parseExifDateToYyyyMmDd(parsed.ModifyDate);
 
-      if (candidate && candidate.getFullYear() >= 1990 && candidate.getFullYear() <= 2100) {
-        takenDate = toLocalYyyyMmDd(candidate);
+      if (candidate) {
+        takenDate = candidate;
         hasExifDate = true;
       }
-    }
 
-    if (
-      gps &&
-      typeof gps.latitude === 'number' &&
-      typeof gps.longitude === 'number' &&
-      Number.isFinite(gps.latitude) &&
-      Number.isFinite(gps.longitude) &&
-      Math.abs(gps.latitude) <= 90 &&
-      Math.abs(gps.longitude) <= 180 &&
-      !(gps.latitude === 0 && gps.longitude === 0)
-    ) {
-      lat = Math.round(gps.latitude * 1000000) / 1000000;
-      lng = Math.round(gps.longitude * 1000000) / 1000000;
-      hasGps = true;
+      if (
+        typeof parsed.latitude === 'number' &&
+        typeof parsed.longitude === 'number' &&
+        Number.isFinite(parsed.latitude) &&
+        Number.isFinite(parsed.longitude) &&
+        Math.abs(parsed.latitude) <= 90 &&
+        Math.abs(parsed.longitude) <= 180 &&
+        !(parsed.latitude === 0 && parsed.longitude === 0)
+      ) {
+        lat = Math.round(parsed.latitude * 1000000) / 1000000;
+        lng = Math.round(parsed.longitude * 1000000) / 1000000;
+        hasGps = true;
+      }
     }
   } catch {
     // Graceful fallback without failing photo upload
@@ -119,18 +124,17 @@ export async function extractPhotoExifMetadata(file: File): Promise<PhotoExifMet
 }
 
 /**
- * Extract EXIF metadata, compress image for cloud/IndexedDB efficiency, and offload to media:// reference.
+ * Extract EXIF metadata and compress image with a SINGLE bitmap decode (cuts iOS RAM spike in half).
  */
 export async function processPhotoWithExif(
   file: File,
   tripId: string
 ): Promise<ProcessedBatchPhoto> {
-  const [exif, compressed, dims] = await Promise.all([
+  const [exif, compressed] = await Promise.all([
     extractPhotoExifMetadata(file),
-    compressImageFile(file),
-    getImageDimensions(file),
+    compressImageFileWithMeta(file),
   ]);
-  const mediaRef = await storeImageAsMediaRef(tripId, compressed);
+  const mediaRef = await storeImageAsMediaRef(tripId, compressed.dataUrl);
 
   return {
     id: `photo-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -143,8 +147,8 @@ export async function processPhotoWithExif(
     hasGps: exif.hasGps,
     rawFile: file,
     originalBytes: file.size || undefined,
-    originalWidth: dims?.width,
-    originalHeight: dims?.height,
+    originalWidth: compressed.originalWidth || undefined,
+    originalHeight: compressed.originalHeight || undefined,
     originalMimeType: file.type || undefined,
   };
 }

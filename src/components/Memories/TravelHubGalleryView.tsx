@@ -30,7 +30,7 @@ export const TravelHubGalleryView: React.FC<TravelHubGalleryViewProps> = ({
 
   const visiblePhotos = useMemo(() => {
     if (!featuredOnly) return photos;
-    return photos.filter((p) => p.isFeaturedSpot || Boolean(p.caption));
+    return photos.filter((p) => Boolean(p.caption && p.caption.trim()));
   }, [photos, featuredOnly]);
 
   const distinctTripsCount = useMemo(() => {
@@ -129,6 +129,7 @@ export const TravelHubGalleryView: React.FC<TravelHubGalleryViewProps> = ({
                 ownerId={photo.ownerId}
                 collabId={photo.collabId}
                 alt={photo.spotTitle}
+                loading="lazy"
                 className="w-full h-auto object-cover group-hover:scale-[1.03] transition-transform duration-300"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col justify-end p-3">

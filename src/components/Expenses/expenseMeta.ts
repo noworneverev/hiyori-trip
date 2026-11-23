@@ -66,6 +66,28 @@ export const DEFAULT_EXPENSE_TAGS: string[] = [
   '代買',
 ];
 
+const CUSTOM_CATEGORY_PALETTE: Array<{ color: string; bg: string }> = [
+  { color: '#0D9488', bg: 'bg-teal-500/10 text-teal-700 dark:text-teal-300' },
+  { color: '#E11D48', bg: 'bg-rose-500/10 text-rose-700 dark:text-rose-300' },
+  { color: '#EA580C', bg: 'bg-orange-500/10 text-orange-700 dark:text-orange-300' },
+  { color: '#0284C7', bg: 'bg-sky-500/10 text-sky-700 dark:text-sky-300' },
+  { color: '#65A30D', bg: 'bg-lime-500/10 text-lime-700 dark:text-lime-300' },
+  { color: '#9333EA', bg: 'bg-purple-500/10 text-purple-700 dark:text-purple-300' },
+  { color: '#CA8A04', bg: 'bg-yellow-500/10 text-yellow-700 dark:text-yellow-300' },
+  { color: '#0891B2', bg: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300' },
+  { color: '#C026D3', bg: 'bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300' },
+  { color: '#4F46E5', bg: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300' },
+];
+
+function getDeterministicCustomColor(key: string): { color: string; bg: string } {
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+  }
+  const index = Math.abs(hash) % CUSTOM_CATEGORY_PALETTE.length;
+  return CUSTOM_CATEGORY_PALETTE[index];
+}
+
 export function resolveExpenseCategoryMeta(catKey: string, trip?: Trip): CategoryMeta {
   const customLabel = trip?.customCategoryLabels?.[catKey];
   if (DEFAULT_EXPENSE_CATEGORIES[catKey]) {
@@ -74,11 +96,12 @@ export function resolveExpenseCategoryMeta(catKey: string, trip?: Trip): Categor
       label: customLabel || DEFAULT_EXPENSE_CATEGORIES[catKey].label,
     };
   }
+  const customStyle = getDeterministicCustomColor(catKey || 'custom');
   return {
     label: customLabel || catKey,
     Icon: Tag,
-    color: '#0d9488',
-    bg: 'bg-teal-500/10 text-teal-700 dark:text-teal-300',
+    color: customStyle.color,
+    bg: customStyle.bg,
   };
 }
 

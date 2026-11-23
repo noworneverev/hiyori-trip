@@ -1,26 +1,28 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 interface UseScrollDirectionOptions {
-  thresholdDown?: number; // Scroll distance in px before hiding (default: 10)
-  thresholdUp?: number;   // Scroll distance in px before revealing (default: 6)
-  topOffset?: number;     // Scroll offset from page top where nav is always visible (default: 32)
-  paused?: boolean;       // Pause hiding while top-bar menus/modals are open
+  thresholdDown?: number;
+  thresholdUp?: number;
+  topOffset?: number;
+  paused?: boolean;
 }
 
 /**
- * Custom hook to detect scroll direction on mobile viewports (< 640px)
- * for native-like Scroll-to-Hide dynamic chrome behavior.
+ * Native-like Scroll-to-Hide dynamic chrome hook for mobile viewports (< 640px).
+ * Guards against top AND bottom iOS elastic rubber-band bounce and ignores height-only
+ * Safari URL-bar resize jitter.
  */
 export function useScrollDirection({
-  thresholdDown = 10,
-  thresholdUp = 6,
-  topOffset = 32,
+  thresholdDown = 14,
+  thresholdUp = 8,
+  topOffset = 40,
   paused = false,
 }: UseScrollDirectionOptions = {}) {
   const [isNavHidden, setIsNavHidden] = useState(false);
   const lastScrollY = useRef(0);
+  const lastInnerWidth = useRef(typeof window !== 'undefined' ? window.innerWidth : 1024);
   const accumulatedDelta = useRef(0);
-  const ticking = useRef(false);
+  const rafId = useRef<number | null>(null);
   const pausedRef = useRef(paused);
 
   useEffect(() => {
@@ -46,37 +48,51 @@ export function useScrollDirection({
     const isMobile = () => typeof window !== 'undefined' && window.innerWidth < 640;
 
     const handleScroll = () => {
-      if (pausedRef.current || (typeof document !== 'undefined' && document.body.hasAttribute('data-scroll-locked'))) {
+      if (
+        pausedRef.current ||
+        (typeof document !== 'undefined' && document.body.hasAttribute('data-scroll-locked'))
+      ) {
         return;
       }
 
-      if (!ticking.current) {
-        window.requestAnimationFrame(() => {
-          if (pausedRef.current || (typeof document !== 'undefined' && document.body.hasAttribute('data-scroll-locked'))) {
-            ticking.current = false;
+      if (rafId.current === null) {
+        rafId.current = window.requestAnimationFrame(() => {
+          rafId.current = null;
+
+          if (
+            pausedRef.current ||
+            (typeof document !== 'undefined' && document.body.hasAttribute('data-scroll-locked'))
+          ) {
             return;
           }
 
-          // If desktop or tablet, never hide nav
           if (!isMobile()) {
             setIsNavHidden(false);
-            ticking.current = false;
             return;
           }
 
           const currentScrollY = Math.max(0, window.scrollY);
+          const maxScrollY = Math.max(
+            0,
+            document.documentElement.scrollHeight - window.innerHeight
+          );
+
+          // Ignore iOS bottom elastic rubber-band rebound
+          if (maxScrollY > 40 && currentScrollY >= maxScrollY - 24) {
+            lastScrollY.current = currentScrollY;
+            accumulatedDelta.current = 0;
+            return;
+          }
+
           const delta = currentScrollY - lastScrollY.current;
 
-          // Always reveal nav bars when near the top of the page
           if (currentScrollY <= topOffset) {
             setIsNavHidden(false);
             accumulatedDelta.current = 0;
             lastScrollY.current = currentScrollY;
-            ticking.current = false;
             return;
           }
 
-          // Reset accumulated delta if direction reverses
           if (
             (delta > 0 && accumulatedDelta.current < 0) ||
             (delta < 0 && accumulatedDelta.current > 0)
@@ -86,29 +102,38 @@ export function useScrollDirection({
 
           accumulatedDelta.current += delta;
 
-          // Scrolling down past threshold -> hide chrome
           if (accumulatedDelta.current > thresholdDown) {
             setIsNavHidden(true);
-          }
-          // Scrolling up past threshold -> reveal chrome
-          else if (accumulatedDelta.current < -thresholdUp) {
+          } else if (accumulatedDelta.current < -thresholdUp) {
             setIsNavHidden(false);
           }
 
           lastScrollY.current = currentScrollY;
-          ticking.current = false;
         });
+      }
+    };
 
-        ticking.current = true;
+    const handleResize = () => {
+      // Only respond when viewport width crosses mobile/desktop threshold (ignore iOS address-bar height resize)
+      const currentWidth = window.innerWidth;
+      if (currentWidth !== lastInnerWidth.current) {
+        lastInnerWidth.current = currentWidth;
+        if (currentWidth >= 640) {
+          setIsNavHidden(false);
+        }
       }
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
-    window.addEventListener('resize', handleScroll, { passive: true });
+    window.addEventListener('resize', handleResize, { passive: true });
 
     return () => {
       window.removeEventListener('scroll', handleScroll);
-      window.removeEventListener('resize', handleScroll);
+      window.removeEventListener('resize', handleResize);
+      if (rafId.current !== null) {
+        window.cancelAnimationFrame(rafId.current);
+        rafId.current = null;
+      }
     };
   }, [thresholdDown, thresholdUp, topOffset]);
 

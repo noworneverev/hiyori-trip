@@ -5,7 +5,9 @@ import { useEffect } from 'react';
  *
  * Handles iOS Safari / WebKit rubber-band scrolling and Android touch scroll leakage
  * by pinning document.body with `position: fixed` and matching `top: -${scrollY}px`.
- * Supports nested modals seamlessly via global reference counting.
+ * Restores scroll position BEFORE clearing `data-scroll-locked` so scroll-hide navbars
+ * never react to synthetic unlock scroll jumps, and avoids double scrollbar compensation
+ * when `html { scrollbar-gutter: stable }` is active.
  */
 let lockCount = 0;
 let originalPosition = '';
@@ -25,11 +27,9 @@ let savedScrollY = 0;
 export function useBodyScrollLock(isLocked: boolean = true) {
   useEffect(() => {
     if (!isLocked) return;
-
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
     if (lockCount === 0) {
-      // 1. Record current scroll offset before freezing
       savedScrollY =
         window.scrollY ||
         window.pageYOffset ||
@@ -37,7 +37,6 @@ export function useBodyScrollLock(isLocked: boolean = true) {
         document.body.scrollTop ||
         0;
 
-      // 2. Backup existing inline styles
       originalPosition = document.body.style.position;
       originalTop = document.body.style.top;
       originalLeft = document.body.style.left;
@@ -52,13 +51,17 @@ export function useBodyScrollLock(isLocked: boolean = true) {
       originalHtmlOverscrollBehavior = document.documentElement.style.overscrollBehavior;
       originalHtmlTouchAction = document.documentElement.style.touchAction;
 
-      // 3. Compensate for desktop scrollbar jump
+      // Only add paddingRight if the browser does NOT already reserve scrollbar-gutter: stable
+      const htmlStyle = window.getComputedStyle(document.documentElement);
+      const hasStableGutter =
+        typeof (htmlStyle as any).scrollbarGutter === 'string' &&
+        (htmlStyle as any).scrollbarGutter.includes('stable');
       const scrollBarWidth = window.innerWidth - document.documentElement.clientWidth;
-      if (scrollBarWidth > 0) {
+      if (scrollBarWidth > 0 && !hasStableGutter) {
         document.body.style.paddingRight = `${scrollBarWidth}px`;
       }
 
-      // 4. Pin body in place - this stops iOS Safari rubber-band background scrolling
+      document.body.setAttribute('data-scroll-locked', 'true');
       document.body.style.position = 'fixed';
       document.body.style.top = `-${savedScrollY}px`;
       document.body.style.left = '0';
@@ -69,8 +72,6 @@ export function useBodyScrollLock(isLocked: boolean = true) {
 
       document.documentElement.style.overflow = 'hidden';
       document.documentElement.style.overscrollBehavior = 'none';
-
-      document.body.setAttribute('data-scroll-locked', 'true');
     }
 
     lockCount++;
@@ -79,7 +80,6 @@ export function useBodyScrollLock(isLocked: boolean = true) {
       lockCount = Math.max(0, lockCount - 1);
 
       if (lockCount === 0) {
-        // Restore all body styles cleanly
         document.body.style.position = originalPosition || '';
         document.body.style.top = originalTop || '';
         document.body.style.left = originalLeft || '';
@@ -94,25 +94,22 @@ export function useBodyScrollLock(isLocked: boolean = true) {
         document.documentElement.style.overscrollBehavior = originalHtmlOverscrollBehavior || '';
         document.documentElement.style.touchAction = originalHtmlTouchAction || '';
 
-        // Extra safety resets to ensure no stale locks trap user scrolling
-        if (document.body.style.overflow === 'hidden') {
-          document.body.style.overflow = '';
-        }
-        if (document.documentElement.style.overflow === 'hidden') {
-          document.documentElement.style.overflow = '';
-        }
-        if (document.body.style.touchAction === 'none') {
-          document.body.style.touchAction = '';
-        }
+        if (document.body.style.overflow === 'hidden') document.body.style.overflow = '';
+        if (document.documentElement.style.overflow === 'hidden') document.documentElement.style.overflow = '';
+        if (document.body.style.touchAction === 'none') document.body.style.touchAction = '';
 
-        document.body.removeAttribute('data-scroll-locked');
-
-        // Restore user scroll position immediately
+        // Restore scroll position WHILE data-scroll-locked is still present so scroll listeners ignore the jump
         try {
           window.scrollTo({ top: savedScrollY, left: 0, behavior: 'instant' as ScrollBehavior });
         } catch {
           window.scrollTo(0, savedScrollY);
         }
+
+        window.requestAnimationFrame(() => {
+          if (lockCount === 0) {
+            document.body.removeAttribute('data-scroll-locked');
+          }
+        });
       }
     };
   }, [isLocked]);

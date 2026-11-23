@@ -12,6 +12,7 @@ interface ExpenseCalendarBarProps {
   todayStr: string;
   lang: Language;
   hasPreTripExpenses: boolean;
+  ratesVersion?: number;
 }
 
 const WEEKDAY_HEADERS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -49,6 +50,7 @@ export const ExpenseCalendarBar: React.FC<ExpenseCalendarBarProps> = ({
   todayStr,
   lang,
   hasPreTripExpenses,
+  ratesVersion,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -68,6 +70,11 @@ export const ExpenseCalendarBar: React.FC<ExpenseCalendarBarProps> = ({
   const [viewMonth, setViewMonth] = useState<{ year: number; month: number }>(() =>
     parseYearMonth(initialAnchorDate)
   );
+
+  // Reset displayed month whenever switching trips
+  useEffect(() => {
+    setViewMonth(parseYearMonth(initialAnchorDate));
+  }, [trip.id, initialAnchorDate]);
 
   // Sync viewed calendar month if user jumps to a specific date externally (e.g. from chart or filter drawer)
   useEffect(() => {
@@ -92,7 +99,7 @@ export const ExpenseCalendarBar: React.FC<ExpenseCalendarBarProps> = ({
       map[d].count += 1;
     });
     return map;
-  }, [trip.expenses, baseCurrency, trip.customExchangeRates]);
+  }, [trip.expenses, baseCurrency, trip.customExchangeRates, ratesVersion]);
 
   // Map trip days by date for quick Day N badge lookup
   const tripDayByDate = useMemo(() => {
@@ -152,8 +159,22 @@ export const ExpenseCalendarBar: React.FC<ExpenseCalendarBarProps> = ({
   };
 
   const handleStepDay = (delta: number) => {
-    const base = activeExactDate || (trip.startDate ? trip.startDate.slice(0, 10) : todayStr);
-    const parsed = new Date(`${base}T00:00:00`);
+    if (!activeExactDate) {
+      // Stepping from "All Dates": jump cleanly to Trip Day 1 (or last day when stepping backward)
+      const firstTripDate = (trip.startDate || '').slice(0, 10);
+      const lastTripDate = (trip.endDate || '').slice(0, 10);
+      const datedExpenses = (trip.expenses || [])
+        .map((e) => (e.date || '').slice(0, 10).replace(/\//g, '-'))
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+        .sort();
+      const target =
+        delta > 0
+          ? firstTripDate || datedExpenses[0] || todayStr
+          : lastTripDate || datedExpenses[datedExpenses.length - 1] || todayStr;
+      onSelectDateFilter(target);
+      return;
+    }
+    const parsed = new Date(`${activeExactDate}T00:00:00`);
     if (isNaN(parsed.getTime())) return;
     parsed.setDate(parsed.getDate() + delta);
     const nextStr = `${parsed.getFullYear()}-${pad2(parsed.getMonth() + 1)}-${pad2(parsed.getDate())}`;
