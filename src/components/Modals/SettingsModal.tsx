@@ -362,11 +362,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           />
 
           {showConfirmReset ? (
-            <div className="px-4 py-3 bg-rose-50/70 dark:bg-rose-950/30 flex items-center justify-between gap-2">
+            <div className="px-4 py-3 bg-rose-50/70 dark:bg-rose-950/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <span className="text-xs font-bold text-rose-700 dark:text-rose-300">
-                確定清除本機所有快取資料？
+                警告：將永久清除本機所有未同步的旅程、記帳與照片，確定繼續？
               </span>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
                 <button
                   type="button"
                   onClick={() => setShowConfirmReset(false)}
@@ -379,14 +379,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   onClick={handlePerformReset}
                   className="min-h-[38px] px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold cursor-pointer"
                 >
-                  確定清除
+                  永久清除
                 </button>
               </div>
             </div>
           ) : (
             <IosRow
               icon={<Trash2 className="w-4 h-4 text-rose-600 dark:text-rose-400" />}
-              label={lang === 'zh' ? '重設本機快取資料' : 'Reset Local Cache'}
+              label={lang === 'zh' ? '清除本機所有資料（含未同步旅程）' : 'Erase All Local Data'}
               destructive
               onClick={() => setShowConfirmReset(true)}
             />

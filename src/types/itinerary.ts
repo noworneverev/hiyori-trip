@@ -159,6 +159,16 @@ export interface StickyNoteItem {
   completed?: boolean;
 }
 
+export interface SettlementRecord {
+  id: string;
+  from: string;
+  to: string;
+  amount: number;
+  currency: string;
+  settledAt: number;
+  note?: string;
+}
+
 export interface Trip {
   id: string;
   title: string;
@@ -194,6 +204,7 @@ export interface Trip {
   isSoloTrip?: boolean;
   isSplitEnabled?: boolean;
   splitMembers?: string[];
+  settlements?: SettlementRecord[];
   settledTransfers?: Record<string, { settled: boolean; settledAt?: number }>;
   initialCashAmount?: number;
   initialCashCurrency?: string;

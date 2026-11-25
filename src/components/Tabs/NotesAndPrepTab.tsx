@@ -5,6 +5,7 @@ import { Language } from '../../utils/i18n';
 import { PackingTab } from './PackingTab';
 import { BookingVaultView } from '../Vault/BookingVaultView';
 import { triggerHaptic } from '../../utils/pwaUpdater';
+import { useHasActiveModalLayer } from '../../hooks/useModalHistory';
 import { CheckSquare, Ticket, Plus } from 'lucide-react';
 
 interface NotesAndPrepTabProps {
@@ -27,6 +28,7 @@ export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
   const [subTab, setSubTab] = useState<'checklist' | 'bookings'>('checklist');
   const [addTodoTrigger, setAddTodoTrigger] = useState(0);
   const [addBookingTrigger, setAddBookingTrigger] = useState(0);
+  const hasActiveModal = useHasActiveModalLayer();
   const isZh = lang === 'zh' || lang === 'zh-CN';
 
   const pendingTodosCount = useMemo(
@@ -35,12 +37,22 @@ export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
   );
 
   const totalBookingCount = useMemo(() => {
+    const voucherCodes = new Set<string>();
     const standalone = (trip.bookings || []).length;
-    const inDays = (trip.days || []).reduce(
-      (sum, d) =>
-        sum + (d.items || []).filter((it) => Boolean(it.bookingCode && it.bookingCode.trim())).length,
-      0
-    );
+    (trip.bookings || []).forEach((b) => {
+      const code = (b.bookingCode || '').trim().toUpperCase();
+      if (code) voucherCodes.add(code);
+    });
+    const seenItinCodes = new Set<string>();
+    let inDays = 0;
+    (trip.days || []).forEach((d) => {
+      (d.items || []).forEach((it) => {
+        const code = (it.bookingCode || '').trim().toUpperCase();
+        if (!code || voucherCodes.has(code) || seenItinCodes.has(code)) return;
+        seenItinCodes.add(code);
+        inDays += 1;
+      });
+    });
     return standalone + inDays;
   }, [trip.bookings, trip.days]);
 
@@ -115,6 +127,7 @@ export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
 
       {/* Bottom-Right Floating Action Button (+) for Adding Todo / Booking Voucher */}
       {canEdit &&
+        !hasActiveModal &&
         typeof document !== 'undefined' &&
         createPortal(
           <button

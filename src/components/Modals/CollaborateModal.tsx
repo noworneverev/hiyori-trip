@@ -162,8 +162,9 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
       setMemberError('僅行程建立者可調整成員角色');
       return;
     }
+    const targetEmail = memberEmail.trim().toLowerCase();
     const updatedMembers = currentMembers.map((m) =>
-      m.email === memberEmail ? { ...m, role: newRole } : m
+      m.email.trim().toLowerCase() === targetEmail ? { ...m, role: newRole } : m
     );
     onUpdateTrip({
       ...trip,
@@ -178,7 +179,8 @@ export const CollaborateModal: React.FC<CollaborateModalProps> = ({
       setMemberError('僅行程建立者可移除成員');
       return;
     }
-    const updatedMembers = currentMembers.filter((m) => m.email !== memberEmail);
+    const targetEmail = memberEmail.trim().toLowerCase();
+    const updatedMembers = currentMembers.filter((m) => m.email.trim().toLowerCase() !== targetEmail);
     onUpdateTrip({
       ...trip,
       collaborators: updatedMembers,

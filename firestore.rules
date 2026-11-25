@@ -40,6 +40,10 @@ service cloud.firestore {
       return !(field in data) || (data[field] is list && data[field].size() <= maxLen);
     }
 
+    function isValidOptionalMap(data, field) {
+      return !(field in data) || data[field] == null || data[field] is map;
+    }
+
     function isValidTripPayload(data) {
       return data.keys().hasAll(['id', 'ownerId', 'title', 'destination', 'startDate', 'endDate', 'currency', 'days']) &&
              data.id is string && data.id.size() > 0 && data.id.size() <= 128 &&
@@ -72,6 +76,8 @@ service cloud.firestore {
              isValidOptionalList(data, 'customExpenseCategories', 50) &&
              isValidOptionalList(data, 'customExpenseTags', 100) &&
              isValidOptionalList(data, 'splitMembers', 30) &&
+             isValidOptionalList(data, 'settlements', 300) &&
+             isValidOptionalMap(data, 'settledTransfers') &&
              isValidOptionalList(data, 'collaborators', 30) &&
              isValidOptionalList(data, 'editorEmails', 30) &&
              isValidOptionalList(data, 'viewerEmails', 30);
@@ -85,7 +91,7 @@ service cloud.firestore {
                'currency', 'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
                'todos', 'expenses', 'bookings', 'customExpenseCategories', 'customCategoryLabels',
                'customExpenseTags', 'customExchangeRates', 'emergencyContacts', 'memories',
-               'stickyNotes', 'deletedItemIds', 'isSplitEnabled', 'splitMembers',
+               'stickyNotes', 'deletedItemIds', 'isSplitEnabled', 'splitMembers', 'settlements', 'settledTransfers',
                'initialCashAmount', 'initialCashCurrency', 'isSoloTrip', 'tripMode',
                'destinationLat', 'destinationLng', 'googlePhotosAlbumUrl', 'driveFolderId',
                'isCollaborative', 'collabId', 'collaborators', 'editorEmails', 'viewerEmails',
@@ -120,7 +126,7 @@ service cloud.firestore {
                'currency', 'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
                'todos', 'expenses', 'bookings', 'customExpenseCategories', 'customCategoryLabels',
                'customExpenseTags', 'customExchangeRates', 'emergencyContacts', 'memories',
-               'stickyNotes', 'isSplitEnabled', 'splitMembers', 'isSoloTrip', 'tripMode',
+               'stickyNotes', 'isSplitEnabled', 'splitMembers', 'settlements', 'settledTransfers', 'isSoloTrip', 'tripMode',
                'destinationLat', 'destinationLng', 'googlePhotosAlbumUrl', 'driveFolderId',
                'publishedAt', 'updatedAt'
              ]);
@@ -135,7 +141,7 @@ service cloud.firestore {
                'coverGradient', 'notes', 'days', 'packingList', 'todos', 'expenses', 'bookings',
                'customExpenseCategories', 'customCategoryLabels', 'customExpenseTags', 'customExchangeRates',
                'emergencyContacts', 'memories', 'stickyNotes', 'deletedItemIds', 'isSplitEnabled',
-               'splitMembers', 'initialCashAmount', 'initialCashCurrency', 'isSoloTrip',
+               'splitMembers', 'settlements', 'settledTransfers', 'initialCashAmount', 'initialCashCurrency', 'isSoloTrip',
                'tripMode', 'destinationLat', 'destinationLng',
                'googlePhotosAlbumUrl', 'driveFolderId', 'createdAt', 'updatedAt', 'lastUpdatedBy'
              ]);
@@ -250,7 +256,7 @@ service cloud.firestore {
                              'budgetTotal', 'coverGradient', 'notes', 'days', 'packingList',
                              'todos', 'expenses', 'bookings', 'customExpenseCategories', 'customCategoryLabels',
                              'customExpenseTags', 'customExchangeRates', 'emergencyContacts', 'memories',
-                             'stickyNotes', 'deletedItemIds', 'isSplitEnabled', 'splitMembers', 'initialCashAmount',
+                             'stickyNotes', 'deletedItemIds', 'isSplitEnabled', 'splitMembers', 'settlements', 'settledTransfers', 'initialCashAmount',
                              'initialCashCurrency', 'isSoloTrip', 'tripMode', 'destinationLat',
                              'destinationLng', 'googlePhotosAlbumUrl', 'driveFolderId',
                              'updatedAt', 'lastUpdatedBy'

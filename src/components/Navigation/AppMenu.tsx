@@ -395,7 +395,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           <div className="p-3.5 space-y-3 text-xs">
             <div className="flex items-center justify-between gap-2">
               <span className="text-slate-500 dark:text-slate-400">
-                {isZh ? '清除本機快取資料' : 'Reset Local Cache'}
+                {isZh ? '清除本機所有資料（含未同步旅程）' : 'Erase All Local Data'}
               </span>
               {showConfirmReset ? (
                 <div className="flex items-center gap-1.5">
@@ -411,7 +411,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
                     }}
                     className="min-h-[40px] px-3 rounded-xl bg-rose-600 text-white font-bold text-xs cursor-pointer"
                   >
-                    {isZh ? '確認重設' : 'Confirm'}
+                    {isZh ? '確認永久清除' : 'Confirm Erase'}
                   </button>
                   <button
                     type="button"
@@ -427,14 +427,14 @@ export const AppMenu: React.FC<AppMenuProps> = ({
                   onClick={() => setShowConfirmReset(true)}
                   className="min-h-[40px] px-3 rounded-xl text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 font-bold text-xs cursor-pointer"
                 >
-                  {isZh ? '重設快取' : 'Reset'}
+                  {isZh ? '清除資料' : 'Erase'}
                 </button>
               )}
             </div>
             <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed pt-2 border-t border-[#E5E2DC]/70 dark:border-slate-800">
               {isZh
-                ? '行程與記帳資料優先保存在本機 IndexedDB，無網路時仍可完整使用。'
-                : 'Trips & expenses are stored locally in IndexedDB for full offline reliability.'}
+                ? '警告：清除將永久刪除本機所有未同步的行程、記帳與照片；建議操作前先匯出 JSON 完整備份。'
+                : 'Warning: Erasing permanently deletes all unsynced local trips, expenses, and photos.'}
             </p>
           </div>
         </IosDisclosureRow>

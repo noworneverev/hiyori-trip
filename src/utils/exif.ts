@@ -76,7 +76,7 @@ export async function extractPhotoExifMetadata(file: File): Promise<PhotoExifMet
   let hasGps = false;
 
   try {
-    const exifrModule = await import('exifr');
+    const exifrModule = await import('exifr/dist/lite.esm.js');
     const exifr = exifrModule.default || exifrModule;
     const parsed = await exifr
       .parse(file, {

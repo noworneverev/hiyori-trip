@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { Language } from '../../utils/i18n';
 import { formatDateSlash } from '../../utils/date';
 import { getGoogleMapsNavigationUrl } from '../../utils/geo';
@@ -64,6 +65,7 @@ export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
   const hotspotLayerRef = useRef<L.LayerGroup | null>(null);
   const markerByKeyRef = useRef<Map<string, { marker: L.Marker; spot: FlattenedSpotMemory }>>(new Map());
   const prevActiveKeyRef = useRef<string | null>(null);
+  const prevMappedSigRef = useRef<string>('');
 
   const [colorBy, setColorBy] = useState<'trip' | 'category'>('trip');
   const [showHotspots, setShowHotspots] = useState(true);
@@ -313,7 +315,16 @@ export const TravelHubMapView: React.FC<TravelHubMapViewProps> = ({
 
     prevActiveKeyRef.current = selectedSpot ? `${selectedSpot.tripId}::${selectedSpot.spotId}` : null;
 
-    if (latLngs.length > 0 && !selectedCity) {
+    const nextMappedSig = mappedSpots
+      .map((s) => `${s.tripId}:${s.spotId}:${s.lat?.toFixed(4)},${s.lng?.toFixed(4)}`)
+      .join('|');
+    const filterSetChanged = prevMappedSigRef.current !== nextMappedSig;
+    prevMappedSigRef.current = nextMappedSig;
+
+    if (latLngs.length > 0 && (filterSetChanged || !selectedCity)) {
+      if (filterSetChanged && selectedCity && !cityHotspots.some((hs) => hs.city === selectedCity)) {
+        setSelectedCity(null);
+      }
       const bounds = L.latLngBounds(latLngs);
       map.fitBounds(bounds.pad(0.18), { maxZoom: 13 });
     }

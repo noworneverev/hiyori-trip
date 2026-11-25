@@ -261,7 +261,7 @@ export function generateQrSvgPath(text: string): { size: number; path: string } 
   const matrix = generateQrMatrix(text);
   if (!matrix) return null;
   const n = matrix.length;
-  const quiet = 2;
+  const quiet = 4; // ISO/IEC 18004 §6.3.3 standard 4-module quiet zone for optical scanners
   const parts: string[] = [];
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {

@@ -1,9 +1,30 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { motion } from 'framer-motion';
+import React, { useState, useMemo, useEffect, useRef, Suspense, lazy } from 'react';
 import { Trip, DayPlan, ItineraryItem } from '../../types/itinerary';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { useModalLayer } from '../../hooks/useModalHistory';
-import { LeafletMap, CATEGORY_COLORS } from '../Map/LeafletMap';
+
+// Heavy map / overview chunks are loaded on demand so Leaflet never blocks first paint.
+const LeafletMap = lazy(() => import('../Map/LeafletMap').then((m) => ({ default: m.LeafletMap })));
+const ItineraryOverviewTable = lazy(() =>
+  import('../Itinerary/ItineraryOverviewTable').then((m) => ({ default: m.ItineraryOverviewTable }))
+);
+
+const CATEGORY_COLORS: Record<string, string> = {
+  spot: '#0d9488',
+  food: '#ea580c',
+  transport: '#0284c7',
+  hotel: '#7c3aed',
+  shopping: '#db2777',
+  activity: '#e11d48',
+  other: '#475569',
+};
+
+const LazyPanelFallback: React.FC<{ height?: number }> = ({ height = 220 }) => (
+  <div
+    style={{ height }}
+    className="w-full rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC] dark:border-slate-800 animate-pulse"
+  />
+);
 import {
   calculateDistanceKm,
   formatDistance,
@@ -39,7 +60,6 @@ import { sanitizeExternalUrl } from '../../utils/url';
 import { garbageCollectOrphanedMedia } from '../../utils/image';
 import { getStoredTrips } from '../../utils/storage';
 import { triggerHaptic } from '../../utils/pwaUpdater';
-import { ItineraryOverviewTable } from '../Itinerary/ItineraryOverviewTable';
 import { IosActionSheet } from '../UI/IosPrimitives';
 import {
   Calendar,
@@ -47,8 +67,6 @@ import {
   MapPin,
   Navigation,
   Plus,
-  ArrowUp,
-  ArrowDown,
   Trash2,
   Edit2,
   CheckCircle2,
@@ -94,6 +112,7 @@ interface TimelineTabProps {
   onOpenEditItem: (item: ItineraryItem, dayNumber: number) => void;
   isPickMode: boolean;
   onStartMapPick: () => void;
+  onCancelMapPick?: () => void;
   pickedCoords: { lat: number; lng: number } | null;
   onPickLocation: (lat: number, lng: number) => void;
   onOpenMemories?: (spotId?: string) => void;
@@ -159,6 +178,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   onOpenAddItem,
   onOpenEditItem,
   isPickMode,
+  onCancelMapPick,
   pickedCoords,
   onPickLocation,
   onOpenMemories,
@@ -196,11 +216,24 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   const [dragState, setDragState] = useState<{ fromIndex: number; overIndex: number } | null>(null);
   const dragStateRef = useRef<{ fromIndex: number; overIndex: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
+  const longPressOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const suppressClickRef = useRef(false);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const handleReorderRef = useRef<(from: number, to: number) => void>(() => {});
 
   useEffect(() => {
     dragStateRef.current = dragState;
   }, [dragState]);
+
+  // Always release global pointer listeners & timers on unmount
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+      if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
+    };
+  }, []);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [expandedNoteIds, setExpandedNoteIds] = useState<Record<string, boolean>>({});
   const [isMapExpanded, setIsMapExpanded] = useState(false);
   const [spotSearchQuery, setSpotSearchQuery] = useState('');
   const [dayWeatherMap, setDayWeatherMap] = useState<Record<number, DayWeatherStatus>>({});
@@ -364,6 +397,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     }, 60);
 
     const handleWindowScroll = () => {
+      // Body scroll-lock (open sheet) rewrites window scroll position — never treat that as user scroll.
+      if (document.body.hasAttribute('data-scroll-locked') || document.body.style.position === 'fixed') return;
       if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
       rafIdRef.current = window.requestAnimationFrame(() => {
         const currentScrollY = window.scrollY || document.documentElement.scrollTop || 0;
@@ -693,12 +728,12 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
       cur.startTime = formatMinutesToHHMM(targetStart);
       if (curDur !== null) {
-        cur.endTime = formatMinutesToHHMM(Math.min(23 * 60 + 59, targetStart + curDur));
+        cur.endTime = formatMinutesToHHMM((targetStart + curDur) % (24 * 60));
       }
 
       target.startTime = formatMinutesToHHMM(curStart);
       if (targetDur !== null) {
-        target.endTime = formatMinutesToHHMM(Math.min(23 * 60 + 59, curStart + targetDur));
+        target.endTime = formatMinutesToHHMM((curStart + targetDur) % (24 * 60));
       }
     }
 
@@ -749,7 +784,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
         items[i] = {
           ...items[i],
           startTime: formatMinutesToHHMM(slotStart),
-          endTime: dur !== null ? formatMinutesToHHMM(Math.min(23 * 60 + 59, slotStart + dur)) : items[i].endTime,
+          endTime: dur !== null ? formatMinutesToHHMM((slotStart + dur) % (24 * 60)) : items[i].endTime,
         };
       }
     }
@@ -761,27 +796,52 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     onUpdateTrip({ ...trip, days: updatedDays, updatedAt: Date.now() });
   };
 
+  // Keep a ref to the latest reorder handler so pointer listeners never act on a stale `trip` closure
+  handleReorderRef.current = handleReorderItem;
+
   // Pointer drag-to-reorder listener lifecycle (works seamlessly on Desktop mouse + iOS Safari touch)
   const beginDragReorder = (fromIndex: number) => {
     if (!canEdit || activeDay.items.length < 2) return;
+    dragCleanupRef.current?.();
     triggerHaptic(14);
     const initial = { fromIndex, overIndex: fromIndex };
     dragStateRef.current = initial;
     setDragState(initial);
+    suppressClickRef.current = true;
+
+    let autoScrollRaf: number | null = null;
+    let lastPointerY = -1;
+
+    const runAutoScroll = () => {
+      autoScrollRaf = null;
+      if (!dragStateRef.current || lastPointerY < 0) return;
+      const edge = 88;
+      let delta = 0;
+      if (lastPointerY < edge) delta = -Math.ceil((edge - lastPointerY) / 8) - 2;
+      else if (lastPointerY > window.innerHeight - edge) delta = Math.ceil((lastPointerY - (window.innerHeight - edge)) / 8) + 2;
+      if (delta !== 0) {
+        window.scrollBy(0, delta);
+        autoScrollRaf = window.requestAnimationFrame(runAutoScroll);
+      }
+    };
 
     const onPointerMove = (ev: PointerEvent) => {
       const current = dragStateRef.current;
       if (!current) return;
-      // Locate which spot card the pointer Y currently sits over
+      lastPointerY = ev.clientY;
+      if (autoScrollRaf === null) autoScrollRaf = window.requestAnimationFrame(runAutoScroll);
+
+      // Directional hit-testing: crossing ~35% into a neighbour card swaps position (Reminders-style)
       const cards = document.querySelectorAll<HTMLElement>('[data-timeline-spot-index]');
-      let nextOver = current.overIndex;
+      let nextOver = current.fromIndex;
       cards.forEach((el) => {
         const idx = Number(el.dataset.timelineSpotIndex);
-        if (!Number.isFinite(idx)) return;
+        if (!Number.isFinite(idx) || idx === current.fromIndex) return;
         const rect = el.getBoundingClientRect();
-        const midY = rect.top + rect.height / 2;
-        if (ev.clientY >= rect.top - 16 && ev.clientY <= rect.bottom + 16) {
-          nextOver = ev.clientY < midY ? idx : Math.min(cards.length - 1, idx);
+        if (idx > current.fromIndex && ev.clientY > rect.top + rect.height * 0.35) {
+          nextOver = Math.max(nextOver, idx);
+        } else if (idx < current.fromIndex && ev.clientY < rect.bottom - rect.height * 0.35) {
+          nextOver = nextOver === current.fromIndex ? idx : Math.min(nextOver, idx);
         }
       });
       if (nextOver !== current.overIndex) {
@@ -792,24 +852,40 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       }
     };
 
-    const onPointerEnd = () => {
+    const cleanup = () => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerEnd);
-      window.removeEventListener('pointercancel', onPointerEnd);
+      window.removeEventListener('pointercancel', onPointerCancel);
+      if (autoScrollRaf !== null) window.cancelAnimationFrame(autoScrollRaf);
+      autoScrollRaf = null;
+      dragCleanupRef.current = null;
+    };
+
+    const finish = (commit: boolean) => {
+      cleanup();
       const finalState = dragStateRef.current;
       dragStateRef.current = null;
       setDragState(null);
-      if (finalState && finalState.fromIndex !== finalState.overIndex) {
-        handleReorderItem(finalState.fromIndex, finalState.overIndex);
+      // Swallow the synthetic click fired right after pointerup so dropping never opens the map
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 80);
+      if (commit && finalState && finalState.fromIndex !== finalState.overIndex) {
+        handleReorderRef.current(finalState.fromIndex, finalState.overIndex);
       }
     };
 
+    const onPointerEnd = () => finish(true);
+    const onPointerCancel = () => finish(false);
+
+    dragCleanupRef.current = cleanup;
     window.addEventListener('pointermove', onPointerMove, { passive: true });
     window.addEventListener('pointerup', onPointerEnd);
-    window.addEventListener('pointercancel', onPointerEnd);
+    window.addEventListener('pointercancel', onPointerCancel);
   };
 
   const clearLongPress = () => {
+    longPressOriginRef.current = null;
     if (longPressTimerRef.current !== null) {
       window.clearTimeout(longPressTimerRef.current);
       longPressTimerRef.current = null;
@@ -821,11 +897,15 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
     if (!canEdit) return;
     const sM = parseTimeToMinutes(source.startTime);
     const eM = parseTimeToMinutes(source.endTime);
-    const newStartTime = sM !== 99999 ? formatMinutesToHHMM(Math.min(23 * 60 + 45, sM + 30)) : source.startTime;
-    const dur = sM !== 99999 && eM !== 99999 && eM >= sM ? eM - sM : null;
+    const shiftedStart = sM !== 99999 ? Math.min(23 * 60 + 45, sM + 30) : 99999;
+    const newStartTime = shiftedStart !== 99999 ? formatMinutesToHHMM(shiftedStart) : source.startTime;
+    let dur: number | null = null;
+    if (sM !== 99999 && eM !== 99999) {
+      dur = isOvernightTimeRange(sM, eM) ? 24 * 60 - sM + eM : eM >= sM ? eM - sM : null;
+    }
     const newEndTime =
-      dur !== null && sM !== 99999
-        ? formatMinutesToHHMM(Math.min(23 * 60 + 59, Math.min(23 * 60 + 45, sM + 30) + dur))
+      dur !== null && shiftedStart !== 99999
+        ? formatMinutesToHHMM((shiftedStart + dur) % (24 * 60))
         : source.endTime;
 
     const copyItem: ItineraryItem = {
@@ -944,10 +1024,60 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       });
 
     const newEndDate = remainingDays[remainingDays.length - 1]?.date || trip.endDate;
+
+    // Keep expenses / bookings / memories attached to the same physical day after renumbering
+    const dateRemap = new Map<string, string>();
+    const dayNumRemap = new Map<number, number>();
+    trip.days
+      .filter((d) => d.id !== dayToDelete.id)
+      .forEach((d, idx) => {
+        const oldKey = normalizeDateKey(d.date);
+        const newKey = normalizeDateKey(remainingDays[idx].date);
+        if (oldKey && newKey && oldKey !== newKey) dateRemap.set(oldKey, newKey);
+        dayNumRemap.set(d.dayNumber, idx + 1);
+      });
+    const deletedDateKey = normalizeDateKey(dayToDelete.date);
+    const remapDate = (value?: string) => {
+      if (!value) return value;
+      const key = normalizeDateKey(value);
+      if (key && key === deletedDateKey) return value;
+      return (key && dateRemap.get(key)) || value;
+    };
+    const remapDayNum = (n?: number) => {
+      if (!n) return n;
+      if (n === deletedDayNum) return undefined;
+      return dayNumRemap.get(n) ?? n;
+    };
+
+    const updatedExpenses = (trip.expenses || []).map((e) => {
+      const nextDate = remapDate(e.date) || e.date;
+      const nextDayNum = remapDayNum(e.dayNumber);
+      if (nextDate === e.date && nextDayNum === e.dayNumber) return e;
+      const copy = { ...e, date: nextDate };
+      if (nextDayNum === undefined) delete copy.dayNumber;
+      else copy.dayNumber = nextDayNum;
+      return copy;
+    });
+
+    const updatedBookings = (trip.bookings || []).map((b) => {
+      const nextStart = remapDate(b.startDate);
+      const nextEnd = remapDate(b.endDate);
+      const nextDayNum = remapDayNum(b.dayNumber);
+      if (nextStart === b.startDate && nextEnd === b.endDate && nextDayNum === b.dayNumber) return b;
+      const copy = { ...b };
+      if (nextStart !== undefined) copy.startDate = nextStart;
+      if (nextEnd !== undefined) copy.endDate = nextEnd;
+      if (nextDayNum === undefined) delete copy.dayNumber;
+      else copy.dayNumber = nextDayNum;
+      return copy;
+    });
+
     const updatedTrip: Trip = {
       ...trip,
       days: remainingDays,
       memories: updatedMemories,
+      expenses: trip.expenses ? updatedExpenses : trip.expenses,
+      bookings: trip.bookings ? updatedBookings : trip.bookings,
       endDate: newEndDate,
       deletedItemIds,
       updatedAt: now,
@@ -1248,6 +1378,17 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             type="text"
             value={spotSearchQuery}
             onChange={(e) => setSpotSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.stopPropagation();
+                setSpotSearchQuery('');
+                (e.target as HTMLInputElement).blur();
+              } else if (e.key === 'Enter' && matchingSpots.length > 0) {
+                handleJumpToSpot(matchingSpots[0].dayNumber, matchingSpots[0].item.id);
+                (e.target as HTMLInputElement).blur();
+              }
+            }}
+            enterKeyHint="search"
             placeholder={isZh ? '搜尋全程景點或備註...' : 'Search spots or notes...'}
             className="w-full bg-transparent text-[15px] sm:text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden"
           />
@@ -1373,29 +1514,34 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           )}
         </div>
       ) : timelineViewMode === 'overview' ? (
-        <ItineraryOverviewTable
-          trip={trip}
-          selectedDayNumber={selectedDayNumber}
-          onSelectDay={(dayNum) => {
-            handleSelectDay(dayNum);
-            setTimelineViewMode('daily');
-          }}
-          lang={lang}
-          defaultExpanded={true}
-        />
+        <Suspense fallback={<LazyPanelFallback height={320} />}>
+          <ItineraryOverviewTable
+            trip={trip}
+            selectedDayNumber={selectedDayNumber}
+            onSelectDay={(dayNum) => {
+              handleSelectDay(dayNum);
+              setTimelineViewMode('daily');
+            }}
+            lang={lang}
+            defaultExpanded={true}
+          />
+        </Suspense>
       ) : (
         <>
           {/* Interactive Map (Auto-expanded on Pick Mode or Locate click) */}
           {isMapExpanded && (
             <div id="timeline-day-map" className="scroll-mt-24">
-              <LeafletMap
-                items={activeDay.items}
-                selectedItemId={selectedItemId}
-                onSelectItem={(it) => setSelectedItemId(it.id)}
-                isPickMode={isPickMode}
-                onPickLocation={onPickLocation}
-                pickedLocation={pickedCoords}
-              />
+              <Suspense fallback={<LazyPanelFallback height={300} />}>
+                <LeafletMap
+                  items={activeDay.items}
+                  selectedItemId={selectedItemId}
+                  onSelectItem={(it) => setSelectedItemId(it.id)}
+                  isPickMode={isPickMode}
+                  onPickLocation={onPickLocation}
+                  onCancelPickMode={onCancelMapPick}
+                  pickedLocation={pickedCoords}
+                />
+              </Suspense>
             </div>
           )}
 
@@ -1405,15 +1551,15 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >
-            <motion.div
+            <div
               key={activeDay.dayNumber}
-              initial={{
-                opacity: 0.9,
-                x: slideDirection === 'left' ? 20 : slideDirection === 'right' ? -20 : 0,
-              }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.18, ease: 'easeOut' }}
-              className="space-y-3"
+              className={`space-y-3 animate-in fade-in duration-150 ${
+                slideDirection === 'left'
+                  ? 'slide-in-from-right-4'
+                  : slideDirection === 'right'
+                    ? 'slide-in-from-left-4'
+                    : ''
+              }`}
             >
               {/* Streamlined Day Header Card with Integrated Weather + Inline Day Edit/Delete */}
               <div
@@ -1690,7 +1836,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                         <div
                           id={`spot-card-${item.id}`}
                           onClick={() => {
-                            if (!dragState) setSelectedItemId(item.id);
+                            if (!dragState && !suppressClickRef.current) setSelectedItemId(item.id);
                           }}
                           className={`rounded-2xl p-3.5 sm:p-4 transition shadow-2xs border cursor-pointer ${
                             isDraggingThis
@@ -1724,22 +1870,36 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                               )}
                               <button
                                 type="button"
+                                data-no-day-swipe="true"
                                 onPointerDown={(e) => {
                                   if (!canEdit || activeDay.items.length < 2) return;
                                   clearLongPress();
                                   const targetEl = e.currentTarget;
+                                  longPressOriginRef.current = { x: e.clientX, y: e.clientY };
                                   longPressTimerRef.current = window.setTimeout(() => {
                                     longPressTimerRef.current = null;
+                                    longPressOriginRef.current = null;
                                     targetEl.blur();
                                     beginDragReorder(index);
                                   }, 380);
                                 }}
+                                onPointerMove={(e) => {
+                                  const origin = longPressOriginRef.current;
+                                  if (!origin || longPressTimerRef.current === null) return;
+                                  // User is scrolling, not long-pressing — cancel the pending drag
+                                  if (Math.abs(e.clientX - origin.x) > 8 || Math.abs(e.clientY - origin.y) > 8) {
+                                    clearLongPress();
+                                  }
+                                }}
                                 onPointerUp={clearLongPress}
                                 onPointerLeave={clearLongPress}
                                 onPointerCancel={clearLongPress}
+                                onContextMenu={(e) => {
+                                  if (canEdit) e.preventDefault();
+                                }}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (dragState) return;
+                                  if (dragState || suppressClickRef.current) return;
                                   setSelectedItemId(item.id);
                                   setIsMapExpanded(true);
                                   setTimeout(() => {
@@ -1834,11 +1994,33 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                         <span>{item.transportNote}</span>
                                       </p>
                                     )}
-                                    {item.notes && (
-                                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap">
-                                        {item.notes}
-                                      </p>
-                                    )}
+                                    {item.notes && (() => {
+                                      const isLong = item.notes.length > 120 || item.notes.split('\n').length > 4;
+                                      const isNotesOpen = Boolean(expandedNoteIds[item.id]);
+                                      return (
+                                        <div>
+                                          <p
+                                            className={`text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap break-words ${
+                                              isLong && !isNotesOpen ? 'line-clamp-3' : ''
+                                            }`}
+                                          >
+                                            {item.notes}
+                                          </p>
+                                          {isLong && (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setExpandedNoteIds((prev) => ({ ...prev, [item.id]: !prev[item.id] }));
+                                              }}
+                                              className="mt-0.5 min-h-[28px] text-[11px] font-bold text-teal-700 dark:text-teal-400 cursor-pointer"
+                                            >
+                                              {isNotesOpen ? (isZh ? '收合' : 'Show less') : (isZh ? '展開全文' : 'Show more')}
+                                            </button>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 )}
 
@@ -1921,26 +2103,8 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                   )}
                                 </button>
 
-                                {/* Desktop Quick Reorder & Edit */}
+                                {/* Desktop Quick Edit (reorder via drag handle or ⋯ menu) */}
                                 <div className="hidden sm:flex items-center gap-0.5">
-                                  <button
-                                    type="button"
-                                    disabled={index === 0}
-                                    onClick={() => handleMoveItem(index, 'up')}
-                                    className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-25 transition cursor-pointer"
-                                    title="上移"
-                                  >
-                                    <ArrowUp className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={index === activeDay.items.length - 1}
-                                    onClick={() => handleMoveItem(index, 'down')}
-                                    className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-25 transition cursor-pointer"
-                                    title="下移"
-                                  >
-                                    <ArrowDown className="w-3.5 h-3.5" />
-                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => onOpenEditItem(item, activeDay.dayNumber)}
@@ -2086,7 +2250,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   )}
                 </div>
               )}
-            </motion.div>
+            </div>
           </div>
         </>
       )}

@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import html2canvas from 'html2canvas';
 import { Trip } from '../../types/itinerary';
 import { copyTextToClipboard } from '../../utils/clipboard';
 import { convertAmount, formatCurrencyAmount } from '../../utils/currency';
@@ -85,6 +84,7 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
   const [selectedYear, setSelectedYear] = useState<string>(initialYear || 'all');
   const [motto, setMotto] = useState('把世界走成自己的故事');
   const [resolvedPhotoUrls, setResolvedPhotoUrls] = useState<string[]>([]);
+  const [isResolvingPhotos, setIsResolvingPhotos] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedText, setCopiedText] = useState(false);
   const [exportStatus, setExportStatus] = useState<string | null>(null);
@@ -188,6 +188,7 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
+    setIsResolvingPhotos(summary.highlightPhotos.length > 0);
     (async () => {
       const urls: string[] = [];
       for (const p of summary.highlightPhotos) {
@@ -202,7 +203,10 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
           // Skip broken asset cleanly
         }
       }
-      if (!cancelled) setResolvedPhotoUrls(urls);
+      if (!cancelled) {
+        setResolvedPhotoUrls(urls);
+        setIsResolvingPhotos(false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -245,6 +249,7 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
     document.body.appendChild(host);
 
     try {
+      const { default: html2canvas } = await import('html2canvas');
       const canvas = await html2canvas(clone, {
         scale: 2.5,
         useCORS: true,
@@ -352,15 +357,17 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
         subtitle="2.5x 高解析 PNG"
         leftLabel="關閉"
         onLeftClick={onClose}
-        rightLabel="下載 PNG"
+        rightLabel={isResolvingPhotos ? '載入相片...' : '下載 PNG'}
         onRightClick={handleDownloadPng}
+        rightDisabled={isResolvingPhotos}
         rightLoading={isGenerating}
       />
 
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 sm:p-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-start">
-          {/* Left: Dark-Mode-Isolated Magazine Poster Canvas */}
-          <div className="md:col-span-7 flex items-center justify-center bg-[#EFECE5] dark:bg-slate-950/70 rounded-2xl p-4 sm:p-6 overflow-x-auto border border-[#E5E2DC] dark:border-slate-800">
+          {/* Left: Dark-Mode-Isolated Magazine Poster Canvas (mx-auto prevents <420px flexbox left-clipping!) */}
+          <div className="md:col-span-7 bg-[#EFECE5] dark:bg-slate-950/70 rounded-2xl p-3 sm:p-6 overflow-x-auto border border-[#E5E2DC] dark:border-slate-800">
+            <div className="mx-auto w-fit">
             <div
               ref={posterRef}
               style={{
@@ -547,6 +554,7 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
                 </div>
               </div>
             </div>
+            </div>
           </div>
 
           {/* Right: iOS Inset Grouped Controls */}
@@ -648,13 +656,13 @@ export const ShareCardStudioModal: React.FC<ShareCardStudioModalProps> = ({
             <IosInsetGroup header="輸出與分享">
               <IosRow
                 onClick={handleDownloadPng}
-                disabled={isGenerating}
+                disabled={isGenerating || isResolvingPhotos}
                 icon={<Download className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-                label="下載高解析 PNG 圖卡"
+                label={isResolvingPhotos ? '相片素材載入中...' : '下載高解析 PNG 圖卡'}
               />
               <IosRow
                 onClick={handleNativeShare}
-                disabled={isGenerating}
+                disabled={isGenerating || isResolvingPhotos}
                 icon={<Share2 className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
                 label="使用系統分享圖卡"
               />

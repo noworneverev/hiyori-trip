@@ -140,17 +140,46 @@ export async function getStoredTripsAsync(): Promise<Trip[]> {
   return getStoredTrips();
 }
 
+let isHydratingIdb = false;
+let localStorageMirrorTimer: number | null = null;
+let pendingLocalStorageMirror: Trip[] | null = null;
+
+function flushLocalStorageMirror(): void {
+  if (localStorageMirrorTimer !== null && typeof window !== 'undefined') {
+    window.clearTimeout(localStorageMirrorTimer);
+    localStorageMirrorTimer = null;
+  }
+  if (!pendingLocalStorageMirror) return;
+  const toWrite = pendingLocalStorageMirror;
+  pendingLocalStorageMirror = null;
+  try {
+    localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(toWrite));
+  } catch (err: any) {
+    if (err?.name === 'QuotaExceededError' || err?.code === 22 || err?.code === 1014) {
+      console.warn('LocalStorage quota exceeded; full data safely preserved in IndexedDB.');
+    } else {
+      console.error('Error saving trips to local storage:', err);
+    }
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushLocalStorageMirror);
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushLocalStorageMirror();
+  });
+}
+
 /**
  * Hydrate trips and bounded media cache from IndexedDB on startup, migrating legacy localStorage inline photos.
+ * Safely merges any early mutations that occurred during hydration instead of discarding IDB-only trips!
  */
 export async function hydrateStorageFromIndexedDB(): Promise<Trip[]> {
   const startRevision = localTripsRevision;
+  isHydratingIdb = true;
   try {
     await idbWarmMediaCache();
     const idbTrips = await idbGetAllTrips();
-    if (localTripsRevision !== startRevision) {
-      return getStoredTrips();
-    }
     if (idbTrips && idbTrips.length > 0) {
       const cleaned = normalizeAndCleanTrips(idbTrips);
       const migrated: Trip[] = [];
@@ -158,16 +187,29 @@ export async function hydrateStorageFromIndexedDB(): Promise<Trip[]> {
         const { trip: lightweight } = await extractInlineImagesToMediaRefs(t);
         migrated.push(lightweight);
       }
-      if (localTripsRevision !== startRevision) {
-        return getStoredTrips();
-      }
+
       const deletedSet = new Set(getDeletedTripIds());
-      const finalMigrated = migrated.filter((t) => !deletedSet.has(t.id));
+      const mergedMap = new Map<string, Trip>();
+      migrated.forEach((t) => {
+        if (!deletedSet.has(t.id)) mergedMap.set(t.id, t);
+      });
+
+      // If any mutation occurred while awaiting IDB, overlay the newer in-memory mutations on top of IDB trips!
+      if (localTripsRevision !== startRevision && authoritativeTripsCache) {
+        authoritativeTripsCache.forEach((memTrip) => {
+          if (deletedSet.has(memTrip.id)) return;
+          const existing = mergedMap.get(memTrip.id);
+          if (!existing || (memTrip.updatedAt || 0) >= (existing.updatedAt || 0)) {
+            mergedMap.set(memTrip.id, memTrip);
+          }
+        });
+      }
+
+      const finalMigrated = Array.from(mergedMap.values());
       authoritativeTripsCache = finalMigrated;
       await idbSaveAllTrips(finalMigrated);
-      try {
-        localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(finalMigrated));
-      } catch {}
+      pendingLocalStorageMirror = finalMigrated;
+      flushLocalStorageMirror();
       return finalMigrated;
     }
 
@@ -177,20 +219,31 @@ export async function hydrateStorageFromIndexedDB(): Promise<Trip[]> {
       const { trip: lightweight } = await extractInlineImagesToMediaRefs(t);
       migrated.push(lightweight);
     }
-    if (localTripsRevision !== startRevision) {
-      return getStoredTrips();
-    }
     const deletedSet = new Set(getDeletedTripIds());
-    const finalMigrated = migrated.filter((t) => !deletedSet.has(t.id));
+    const mergedMap = new Map<string, Trip>();
+    migrated.forEach((t) => {
+      if (!deletedSet.has(t.id)) mergedMap.set(t.id, t);
+    });
+    if (localTripsRevision !== startRevision && authoritativeTripsCache) {
+      authoritativeTripsCache.forEach((memTrip) => {
+        if (deletedSet.has(memTrip.id)) return;
+        const existing = mergedMap.get(memTrip.id);
+        if (!existing || (memTrip.updatedAt || 0) >= (existing.updatedAt || 0)) {
+          mergedMap.set(memTrip.id, memTrip);
+        }
+      });
+    }
+    const finalMigrated = Array.from(mergedMap.values());
     authoritativeTripsCache = finalMigrated;
     await idbSaveAllTrips(finalMigrated);
-    try {
-      localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(finalMigrated));
-    } catch {}
+    pendingLocalStorageMirror = finalMigrated;
+    flushLocalStorageMirror();
     return finalMigrated;
   } catch (err) {
     console.warn('[Storage] IndexedDB hydration fallback:', err);
     return getStoredTrips();
+  } finally {
+    isHydratingIdb = false;
   }
 }
 
@@ -208,20 +261,22 @@ export function saveTrips(trips: Trip[]): void {
   const deduped = Array.from(uniqueMap.values());
   authoritativeTripsCache = deduped;
 
-  // 1. Primary durable persistence in IndexedDB (serialized queue, 100MB+ capacity)
-  idbSaveAllTrips(deduped).catch((err) => {
-    console.warn('[Storage] IndexedDB save warning:', err);
-  });
+  // 1. Primary durable persistence in IndexedDB: skip destructive store.clear() while initial hydration is in flight
+  if (!isHydratingIdb) {
+    idbSaveAllTrips(deduped).catch((err) => {
+      console.warn('[Storage] IndexedDB save warning:', err);
+    });
+  }
 
-  // 2. Fast-boot mirror in localStorage
-  try {
-    localStorage.setItem(STORAGE_KEY_TRIPS, JSON.stringify(deduped));
-  } catch (err: any) {
-    if (err?.name === 'QuotaExceededError' || err?.code === 22 || err?.code === 1014) {
-      console.warn('LocalStorage quota exceeded; full data safely preserved in IndexedDB.');
-    } else {
-      console.error('Error saving trips to local storage:', err);
+  // 2. Debounced fast-boot mirror in localStorage (avoids synchronous main-thread JSON.stringify jank on rapid taps)
+  pendingLocalStorageMirror = deduped;
+  if (typeof window !== 'undefined') {
+    if (localStorageMirrorTimer !== null) {
+      window.clearTimeout(localStorageMirrorTimer);
     }
+    localStorageMirrorTimer = window.setTimeout(flushLocalStorageMirror, 320);
+  } else {
+    flushLocalStorageMirror();
   }
 }
 

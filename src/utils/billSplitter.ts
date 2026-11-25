@@ -1,4 +1,4 @@
-import { Trip } from '../types/itinerary';
+import { Trip, SettlementRecord } from '../types/itinerary';
 import { formatCurrencyAmount, convertAmount, CURRENCY_MAP } from './currency';
 
 export interface SplitMemberSummary {
@@ -7,13 +7,19 @@ export interface SplitMemberSummary {
   groupPaid: number;       // 公費代墊金額 (Paid out of pocket for shared items)
   totalShare: number;      // 應分攤公費 (Consumed shared amount)
   personalExpense: number; // 個人自費金額 (Private self-spent)
-  netBalance: number;      // 分帳結餘 (net: groupPaid - totalShare; positive = should receive, negative = should pay)
+  settledOut: number;      // 已還款轉出金額 (Converted to targetCurrency)
+  settledIn: number;       // 已收款轉入金額 (Converted to targetCurrency)
+  netBalance: number;      // 剩餘未結清淨額 (groupPaid - totalShare + settledOut - settledIn; 0 = 已結清)
 }
 
 export interface DebtTransfer {
   from: string;  // 應付款人
   to: string;    // 應收款人
   amount: number;
+}
+
+export interface NormalizedSettlementItem extends SettlementRecord {
+  convertedAmount: number;
 }
 
 export interface SplitCalculationResult {
@@ -23,13 +29,14 @@ export interface SplitCalculationResult {
   totalPersonalExpense: number;
   summaries: Record<string, SplitMemberSummary>;
   transfers: DebtTransfer[];
+  settledRecords: NormalizedSettlementItem[];
 }
 
 /**
- * Calculates group splitting balances and minimal debt transfers.
+ * Calculates group splitting balances, factoring in real SettlementRecord repayments!
  * Uses integer-unit largest-remainder allocation per expense so sum(netBalance) === 0 strictly,
- * deduplicates splitWith participants, and preserves historical/removed members so nobody's payments
- * are silently reassigned to someone else.
+ * deduplicates splitWith participants, preserves historical/removed members, and dynamically
+ * reduces remaining transfers & member net balances as settlements are recorded.
  */
 export const calculateTripSplits = (
   trip: Trip,
@@ -49,12 +56,11 @@ export const calculateTripSplits = (
   const activeMembers = Array.from(new Set(rawActiveMembers.map((m) => m.trim()).filter(Boolean)));
   if (activeMembers.length === 0) activeMembers.push('我');
 
-  // Start with active members, then preserve any historical members referenced in expenses
   const members: string[] = [...activeMembers];
   const memberSet = new Set<string>(members);
 
   const ensureMember = (name: string) => {
-    const trimmed = name.trim();
+    const trimmed = (name || '').trim();
     if (!trimmed) return;
     if (!memberSet.has(trimmed)) {
       memberSet.add(trimmed);
@@ -63,9 +69,7 @@ export const calculateTripSplits = (
   };
 
   (trip.expenses || []).forEach((exp) => {
-    if (exp.paidBy && exp.paidBy.trim()) {
-      ensureMember(exp.paidBy);
-    }
+    if (exp.paidBy && exp.paidBy.trim()) ensureMember(exp.paidBy);
     if (Array.isArray(exp.splitWith)) {
       exp.splitWith.forEach((m) => {
         if (m && m.trim()) ensureMember(m);
@@ -73,13 +77,28 @@ export const calculateTripSplits = (
     }
   });
 
+  const deletedMap = trip.deletedItemIds || {};
+  const activeSettlements = (trip.settlements || []).filter(
+    (s) => s && s.id && !deletedMap[s.id] && s.amount > 0 && s.from && s.to && s.from.trim() !== s.to.trim()
+  );
+
+  activeSettlements.forEach((s) => {
+    ensureMember(s.from);
+    ensureMember(s.to);
+  });
+
   // Track everything in integer minor currency units to guarantee zero floating-point drift
-  const unitSummaries: Record<string, {
-    totalPaid: number;
-    groupPaid: number;
-    totalShare: number;
-    personalExpense: number;
-  }> = {};
+  const unitSummaries: Record<
+    string,
+    {
+      totalPaid: number;
+      groupPaid: number;
+      totalShare: number;
+      personalExpense: number;
+      settledOut: number;
+      settledIn: number;
+    }
+  > = {};
 
   members.forEach((m) => {
     unitSummaries[m] = {
@@ -87,6 +106,8 @@ export const calculateTripSplits = (
       groupPaid: 0,
       totalShare: 0,
       personalExpense: 0,
+      settledOut: 0,
+      settledIn: 0,
     };
   });
 
@@ -116,19 +137,16 @@ export const calculateTripSplits = (
       unitSummaries[payer].groupPaid += costUnits;
     }
 
-    // Deduplicate participants cleanly; if omitted, split among activeMembers
-    const rawParticipants = Array.isArray(exp.splitWith) && exp.splitWith.length > 0
-      ? Array.from(new Set(exp.splitWith.map((m) => m.trim()).filter((m) => Boolean(m && unitSummaries[m]))))
-      : activeMembers;
+    const rawParticipants =
+      Array.isArray(exp.splitWith) && exp.splitWith.length > 0
+        ? Array.from(new Set(exp.splitWith.map((m) => m.trim()).filter((m) => Boolean(m && unitSummaries[m]))))
+        : activeMembers;
 
     const participants = rawParticipants.length > 0 ? rawParticipants : activeMembers;
-
-    // Largest-remainder exact integer distribution (guarantees sum(shares) === costUnits)
     const count = participants.length;
     const baseShare = Math.floor(costUnits / count);
     const remainder = costUnits - baseShare * count;
 
-    // Rotate remainder distribution deterministically by expense id hash so one person doesn't absorb every extra ¥1
     let seed = 0;
     for (let i = 0; i < (exp.id || '').length; i++) {
       seed = (seed * 31 + exp.id.charCodeAt(i)) % count;
@@ -141,19 +159,42 @@ export const calculateTripSplits = (
     });
   });
 
+  // Apply recorded settlements: when `from` pays `to`, `from`'s debt decreases (+settledOut) and `to`'s credit decreases (+settledIn)
+  const settledRecords: NormalizedSettlementItem[] = activeSettlements
+    .slice()
+    .sort((a, b) => (b.settledAt || 0) - (a.settledAt || 0))
+    .map((s) => {
+      const fromName = s.from.trim();
+      const toName = s.to.trim();
+      const conv = convertAmount(s.amount, s.currency || baseCur, baseCur, rates);
+      const sUnits = toUnits(conv);
+      if (sUnits > 0 && unitSummaries[fromName] && unitSummaries[toName]) {
+        unitSummaries[fromName].settledOut += sUnits;
+        unitSummaries[toName].settledIn += sUnits;
+      }
+      return {
+        ...s,
+        from: fromName,
+        to: toName,
+        convertedAmount: fromUnits(Math.max(0, sUnits)),
+      };
+    });
+
   const summaries: Record<string, SplitMemberSummary> = {};
   const debtors: { name: string; units: number }[] = [];
   const creditors: { name: string; units: number }[] = [];
 
   members.forEach((m) => {
     const u = unitSummaries[m];
-    const netUnits = u.groupPaid - u.totalShare;
+    const netUnits = u.groupPaid - u.totalShare + u.settledOut - u.settledIn;
     summaries[m] = {
       name: m,
       totalPaid: fromUnits(u.totalPaid),
       groupPaid: fromUnits(u.groupPaid),
       totalShare: fromUnits(u.totalShare),
       personalExpense: fromUnits(u.personalExpense),
+      settledOut: fromUnits(u.settledOut),
+      settledIn: fromUnits(u.settledIn),
       netBalance: fromUnits(netUnits),
     };
 
@@ -198,11 +239,13 @@ export const calculateTripSplits = (
     totalPersonalExpense: fromUnits(totalPersonalUnits),
     summaries,
     transfers,
+    settledRecords,
   };
 };
 
 /**
- * Formats a clean, polite summary ready to copy & paste into LINE / WeChat / WhatsApp
+ * Formats a clean, polite summary ready to copy & paste into LINE / WeChat / WhatsApp,
+ * accurately reflecting both remaining transfers and already-completed settlements!
  */
 export const formatSplitsForSharing = (
   trip: Trip,
@@ -228,11 +271,12 @@ export const formatSplitsForSharing = (
   result.members.forEach((m) => {
     const s = result.summaries[m];
     const diff = roundCur(s.netBalance);
-    const diffText = diff >= minStep
-      ? `應收回 ${formatCurrencyAmount(diff, cur)}`
-      : diff <= -minStep
-      ? `應補付 ${formatCurrencyAmount(roundCur(-diff), cur)}`
-      : `已平衡`;
+    const diffText =
+      diff >= minStep
+        ? `待收回 ${formatCurrencyAmount(diff, cur)}`
+        : diff <= -minStep
+        ? `待補付 ${formatCurrencyAmount(roundCur(-diff), cur)}`
+        : `已結清`;
     let line = `・${m}：公費代墊 ${formatCurrencyAmount(roundCur(s.groupPaid), cur)} / 應攤 ${formatCurrencyAmount(roundCur(s.totalShare), cur)}`;
     if (s.personalExpense > 0) {
       line += ` (個人自費 ${formatCurrencyAmount(roundCur(s.personalExpense), cur)})`;
@@ -241,9 +285,19 @@ export const formatSplitsForSharing = (
     text += line;
   });
 
-  text += `\n【最簡還款建議】\n`;
+  if (result.settledRecords.length > 0) {
+    text += `\n【已完成還款 ✅】\n`;
+    result.settledRecords.forEach((rec) => {
+      text += `・✓ ${rec.from} 已還給 ${rec.to}：${formatCurrencyAmount(rec.amount, rec.currency)}\n`;
+    });
+  }
+
+  text += `\n【待轉帳結算建議】\n`;
   if (result.transfers.length === 0) {
-    text += `✨ 太棒了！大家的代墊與消費完全打平，無須轉帳！\n`;
+    text +=
+      result.settledRecords.length > 0
+        ? `✨ 所有分帳款項皆已全數還清結案！\n`
+        : `✨ 太棒了！大家的代墊與消費完全打平，無須轉帳！\n`;
   } else {
     result.transfers.forEach((t, idx) => {
       text += `${idx + 1}. 👉 由【${t.from}】支付給【${t.to}】：${formatCurrencyAmount(t.amount, cur)}\n`;

@@ -4,7 +4,7 @@ import { PRESET_TRIPS } from '../../data/presetTrips';
 import { generateAiTrip, universalParseItinerary, checkAiAvailability, AiBackendMode } from '../../utils/aiClient';
 import { MediaImage } from '../UI/MediaImage';
 import { resolveDestinationTimezone } from '../../utils/timezone';
-import { getTodayLocal, addDaysLocal, formatMonthDaySlash } from '../../utils/date';
+import { getTodayLocal, addDaysLocal, formatMonthDaySlash, normalizeDateKey, sortItineraryItemsByTime } from '../../utils/date';
 import { processPhotoWithExif, ProcessedBatchPhoto } from '../../utils/exif';
 import { searchLocationOSM } from '../../utils/geo';
 import { connectGoogleDrive, getDriveAccessToken, hasDriveAccessToken } from '../../utils/firebase';
@@ -37,6 +37,7 @@ import {
   Navigation,
   HardDrive,
   Coins,
+  Wallet,
   Palette,
   ChevronRight,
 } from 'lucide-react';
@@ -98,6 +99,11 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
   const [isPhotoMemoryOnly, setIsPhotoMemoryOnly] = useState(trip?.tripMode === 'memory');
   const [isSoloTrip, setIsSoloTrip] = useState<boolean>(trip?.isSoloTrip ?? false);
   const [currency, setCurrency] = useState(trip?.currency || 'JPY');
+  const [budgetTotalInput, setBudgetTotalInput] = useState<string>(
+    typeof trip?.budgetTotal === 'number' && Number.isFinite(trip.budgetTotal) && trip.budgetTotal > 0
+      ? String(trip.budgetTotal)
+      : ''
+  );
   const [coverGradient, setCoverGradient] = useState(trip?.coverGradient || GRADIENTS[0].class);
   const [googlePhotosAlbumUrl, setGooglePhotosAlbumUrl] = useState(trip?.googlePhotosAlbumUrl || '');
   const [notes, setNotes] = useState(trip?.notes || '');
@@ -326,13 +332,37 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
     const safeStart = startDate || today;
     const safeEnd = !endDate || endDate < safeStart ? safeStart : endDate;
 
+    const parsedBudgetRaw = budgetTotalInput.trim() !== '' ? Number(budgetTotalInput.replace(/,/g, '')) : undefined;
+    const resolvedBudget =
+      typeof parsedBudgetRaw === 'number' && Number.isFinite(parsedBudgetRaw) && parsedBudgetRaw >= 0
+        ? Math.round(parsedBudgetRaw)
+        : undefined;
+
     if (isEditing && trip) {
       const safeAlbumUrl = sanitizeExternalUrl(googlePhotosAlbumUrl) || undefined;
       const effectiveMode: 'planner' | 'memory' = isMemoryMode || isPhotoMemoryOnly ? 'memory' : 'planner';
       const targetDaysCount = effectiveMode === 'memory' ? Math.max(1, (trip.days || []).length) : calculateDays(safeStart, safeEnd);
 
+      // Compute calendar day shift when startDate changes so expenses, bookings & memories move cleanly
+      const oldStartKey = normalizeDateKey(trip.startDate);
+      const newStartKey = normalizeDateKey(safeStart);
+      let startDayDelta = 0;
+      if (oldStartKey && newStartKey && oldStartKey !== newStartKey) {
+        const dOld = new Date(`${oldStartKey}T00:00:00Z`).getTime();
+        const dNew = new Date(`${newStartKey}T00:00:00Z`).getTime();
+        if (Number.isFinite(dOld) && Number.isFinite(dNew)) {
+          startDayDelta = Math.round((dNew - dOld) / 86400000);
+        }
+      }
+      const shiftDateIfChanged = (dateVal?: string): string | undefined => {
+        if (!dateVal || startDayDelta === 0) return dateVal;
+        const key = normalizeDateKey(dateVal);
+        return key ? addDaysLocal(key, startDayDelta) : dateVal;
+      };
+
       // Keep trip.days synchronized when user updates startDate / endDate on an existing planner trip
       let syncedDays = trip.days || [];
+      let mergedTruncatedDays = false;
       if (effectiveMode === 'planner') {
         const existing = [...syncedDays];
         const nextDays: DayPlan[] = [];
@@ -354,16 +384,16 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
             });
           }
         }
-        // Preserve any extra trailing days that still contain planned spots so edits never silently delete user itineraries
-        if (existing.length > targetDaysCount) {
-          for (let i = targetDaysCount; i < existing.length; i++) {
-            if ((existing[i].items || []).length > 0) {
-              nextDays.push({
-                ...existing[i],
-                dayNumber: nextDays.length + 1,
-                date: addDaysLocal(safeStart, nextDays.length),
-              });
-            }
+        // When user shortens endDate, preserve spots from truncated days by merging them into the final day
+        if (existing.length > targetDaysCount && nextDays.length > 0) {
+          const overflowItems = existing.slice(targetDaysCount).flatMap((d) => d.items || []);
+          if (overflowItems.length > 0) {
+            mergedTruncatedDays = true;
+            const lastIdx = nextDays.length - 1;
+            nextDays[lastIdx] = {
+              ...nextDays[lastIdx],
+              items: sortItineraryItemsByTime([...(nextDays[lastIdx].items || []), ...overflowItems]),
+            };
           }
         }
         syncedDays = nextDays;
@@ -373,6 +403,39 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
         effectiveMode === 'planner' && syncedDays.length > 0
           ? syncedDays[syncedDays.length - 1].date
           : safeEnd;
+
+      const clampDayNum = (n?: number) =>
+        typeof n === 'number' && effectiveMode === 'planner' && syncedDays.length > 0
+          ? Math.min(n, syncedDays.length)
+          : n;
+
+      const updatedExpenses =
+        startDayDelta !== 0 || mergedTruncatedDays
+          ? (trip.expenses || []).map((ex) => ({
+              ...ex,
+              date: shiftDateIfChanged(ex.date) || ex.date,
+              ...(ex.dayNumber !== undefined ? { dayNumber: clampDayNum(ex.dayNumber) } : {}),
+            }))
+          : trip.expenses;
+
+      const updatedBookings =
+        startDayDelta !== 0 || mergedTruncatedDays
+          ? (trip.bookings || []).map((b) => ({
+              ...b,
+              ...(b.startDate ? { startDate: shiftDateIfChanged(b.startDate) } : {}),
+              ...(b.endDate ? { endDate: shiftDateIfChanged(b.endDate) } : {}),
+              ...(b.dayNumber !== undefined ? { dayNumber: clampDayNum(b.dayNumber) } : {}),
+            }))
+          : trip.bookings;
+
+      const updatedMemories =
+        startDayDelta !== 0 || mergedTruncatedDays
+          ? (trip.memories || []).map((m) => ({
+              ...m,
+              ...(m.date ? { date: shiftDateIfChanged(m.date) } : {}),
+              ...(m.dayNumber !== undefined ? { dayNumber: clampDayNum(m.dayNumber) } : {}),
+            }))
+          : trip.memories;
 
       didSaveRef.current = true;
       onSave({
@@ -385,7 +448,11 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
         startDate: safeStart,
         endDate: finalSyncedEnd,
         days: syncedDays,
+        expenses: updatedExpenses,
+        bookings: updatedBookings,
+        memories: updatedMemories,
         currency,
+        budgetTotal: resolvedBudget ?? (budgetTotalInput.trim() === '' ? 0 : trip.budgetTotal),
         coverGradient,
         isSoloTrip,
         isSplitEnabled: isSoloTrip ? false : trip.isSplitEnabled,
@@ -541,7 +608,7 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
       startDate,
       endDate: isPhotoMemoryOnly ? startDate : endDate,
       currency,
-      budgetTotal: 50000,
+      budgetTotal: resolvedBudget ?? 50000,
       coverGradient,
       isSoloTrip,
       isSplitEnabled: !isSoloTrip,
@@ -1110,6 +1177,30 @@ export const TripEditModal: React.FC<TripEditModalProps> = ({
                 ))}
               </div>
             </IosDisclosureRow>
+
+            {/* Total Trip Budget Input */}
+            {tripMode === 'planner' && (
+              <div className="px-4 py-2.5 min-h-[50px] flex items-center justify-between gap-3">
+                <label
+                  htmlFor="trip-budget-input"
+                  className="text-sm sm:text-xs font-semibold text-slate-800 dark:text-slate-200 shrink-0 flex items-center gap-2"
+                >
+                  <Wallet className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                  <span>總預算 ({currency})</span>
+                </label>
+                <input
+                  id="trip-budget-input"
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  step="any"
+                  placeholder="例如：50000（選填）"
+                  value={budgetTotalInput}
+                  onChange={(e) => setBudgetTotalInput(e.target.value)}
+                  className="min-w-0 flex-1 bg-transparent text-right font-mono tabular-nums text-[16px] sm:text-xs font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 outline-none"
+                />
+              </div>
+            )}
 
             {/* Inline Cover Gradient Picker */}
             <IosDisclosureRow

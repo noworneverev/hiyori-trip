@@ -1,5 +1,4 @@
 @import "tailwindcss";
-@import "leaflet/dist/leaflet.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -89,6 +88,14 @@
 
 @utility slide-in-from-top-2 {
   --hiyori-enter-translate-y: -0.5rem;
+}
+
+@utility slide-in-from-right-4 {
+  --hiyori-enter-translate-x: 1rem;
+}
+
+@utility slide-in-from-left-4 {
+  --hiyori-enter-translate-x: -1rem;
 }
 
 @utility ios-chrome {

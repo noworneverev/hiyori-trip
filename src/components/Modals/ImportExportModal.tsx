@@ -10,6 +10,7 @@ import {
 } from '../../utils/storage';
 import { universalParseItinerary, checkAiAvailability, AiBackendMode } from '../../utils/aiClient';
 import { extractInlineImagesToMediaRefs, rebindTripMediaIds } from '../../utils/image';
+import { getTodayLocal } from '../../utils/date';
 import { TRIP_TEMPLATES } from '../../data/presetTrips';
 import {
   IosModalSheet,
@@ -80,7 +81,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   }, []);
 
   const normalizeImportedTrip = (candidate: any, idx = 0): Trip => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getTodayLocal();
     const days = Array.isArray(candidate.days) ? candidate.days.slice(0, 60) : [];
     const safeTitle = String(candidate.title || '匯入旅程').trim().slice(0, 180) || '匯入旅程';
     const safeDestination =
@@ -302,18 +303,43 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
 
   const handleLoadPreset = (preset: Trip) => {
     const cloned: Trip = JSON.parse(JSON.stringify(preset));
-    cloned.id = `preset-copy-${Date.now()}`;
+    const now = Date.now();
+    const uid = `${now}-${Math.random().toString(36).slice(2, 6)}`;
+    const spotIdMap = new Map<string, string>();
+    cloned.id = `preset-copy-${uid}`;
     cloned.title = `${preset.title} (新副本)`;
-    cloned.collabId = undefined;
+    cloned.days = (cloned.days || []).map((d, dIdx) => ({
+      ...d,
+      id: `day-${uid}-${dIdx + 1}`,
+      items: (d.items || []).map((it, iIdx) => {
+        const newSpotId = `item-${uid}-${dIdx + 1}-${iIdx + 1}`;
+        spotIdMap.set(it.id, newSpotId);
+        return { ...it, id: newSpotId };
+      }),
+    }));
+    cloned.todos = (cloned.todos || []).map((td, idx) => ({ ...td, id: `todo-${uid}-${idx}` }));
+    cloned.packingList = (cloned.packingList || []).map((pk, idx) => ({ ...pk, id: `pack-${uid}-${idx}` }));
+    cloned.expenses = (cloned.expenses || []).map((ex, idx) => ({ ...ex, id: `exp-${uid}-${idx}` }));
+    cloned.bookings = (cloned.bookings || []).map((bk, idx) => ({ ...bk, id: `bk-${uid}-${idx}` }));
+    cloned.memories = (cloned.memories || []).map((m, idx) => ({
+      ...m,
+      id: `mem-${uid}-${idx}`,
+      ...(m.spotId && spotIdMap.has(m.spotId) ? { spotId: spotIdMap.get(m.spotId) } : {}),
+    }));
+    cloned.emergencyContacts = (cloned.emergencyContacts || []).map((ec, idx) => ({ ...ec, id: `ec-${uid}-${idx}` }));
+    cloned.settlements = [];
+    cloned.settledTransfers = {};
+    delete cloned.collabId;
     cloned.isCollaborative = false;
-    cloned.collaborators = undefined;
-    cloned.editorEmails = undefined;
-    cloned.viewerEmails = undefined;
-    cloned.generalAccess = undefined;
-    cloned.ownerId = undefined;
-    cloned.ownerEmail = undefined;
-    cloned.createdAt = Date.now();
-    cloned.updatedAt = Date.now();
+    delete cloned.collaborators;
+    delete cloned.editorEmails;
+    delete cloned.viewerEmails;
+    delete cloned.generalAccess;
+    delete cloned.ownerId;
+    delete cloned.ownerEmail;
+    delete cloned.lastSyncedAt;
+    cloned.createdAt = now;
+    cloned.updatedAt = now;
     onImportTrip(cloned);
     onClose();
   };
@@ -655,11 +681,12 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                   </button>
                   <button
                     type="button"
+                    disabled={isConfirmingImport}
                     onClick={handleConfirmImport}
-                    className="min-h-[40px] px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                    className="min-h-[40px] px-4 py-2 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition cursor-pointer disabled:opacity-50"
                   >
-                    <Check className="w-4 h-4" />
-                    <span>立即套用並切換</span>
+                    {isConfirmingImport ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                    <span>{isConfirmingImport ? '匯入中...' : '立即套用並切換'}</span>
                   </button>
                 </div>
               </IosInsetGroup>

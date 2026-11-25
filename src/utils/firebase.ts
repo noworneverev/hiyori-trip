@@ -105,30 +105,39 @@ googleProvider.setCustomParameters({
   prompt: 'select_account',
 });
 
-// Strict in-memory-only Google Drive OAuth access token (never persisted to localStorage/sessionStorage)
+// Strict in-memory-only Google Drive OAuth access token with 55-minute expiry tracking
 let cachedDriveAccessToken: string | null = null;
+let cachedDriveTokenExpiresAt = 0;
+const DRIVE_TOKEN_TTL_MS = 55 * 60 * 1000;
 
 function notifyDriveAuthChanged(): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('hiyori_drive_auth_changed', {
-        detail: { connected: Boolean(cachedDriveAccessToken) },
+        detail: { connected: hasDriveAccessToken() },
       })
     );
   }
 }
 
 export function getDriveAccessToken(): string | null {
+  if (cachedDriveAccessToken && Date.now() >= cachedDriveTokenExpiresAt) {
+    cachedDriveAccessToken = null;
+    cachedDriveTokenExpiresAt = 0;
+    notifyDriveAuthChanged();
+    return null;
+  }
   return cachedDriveAccessToken;
 }
 
 export function hasDriveAccessToken(): boolean {
-  return Boolean(cachedDriveAccessToken);
+  return Boolean(getDriveAccessToken());
 }
 
 export function clearDriveAccessToken(): void {
   if (cachedDriveAccessToken !== null) {
     cachedDriveAccessToken = null;
+    cachedDriveTokenExpiresAt = 0;
     notifyDriveAuthChanged();
   }
 }
@@ -455,6 +464,7 @@ export async function connectGoogleDrive(): Promise<string | null> {
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (credential?.accessToken) {
       cachedDriveAccessToken = credential.accessToken;
+      cachedDriveTokenExpiresAt = Date.now() + DRIVE_TOKEN_TTL_MS;
       notifyDriveAuthChanged();
       return cachedDriveAccessToken;
     }
@@ -601,23 +611,36 @@ async function uploadMediaCollectionBatch(
       continue;
     }
 
-    const docPath = `${collectionPath}/${mediaId}`;
+    const docRef = doc(db, collectionPath, mediaId);
     try {
+      // Prevent co-editor PERMISSION_DENIED brick: if this immutable media asset already exists in the target
+      // subcollection (e.g., uploaded earlier by Collaborator A), mark synced and skip overwriting ownerId!
+      try {
+        const existingSnap = await getDoc(docRef);
+        if (existingSnap.exists()) {
+          await markMediaSynced(targetKey);
+          continue;
+        }
+      } catch {
+        // Proceed to setDoc if offline or read check unavailable
+      }
+
       await setDoc(
-        doc(db, collectionPath, mediaId),
+        docRef,
         sanitizeForFirestore({
           id: mediaId,
           tripId: trip.id,
           ownerId: ownerIdForDoc,
           dataUrl: record.dataUrl,
-          mimeType: record.mimeType || 'image/jpeg',
+          mimeType: record.mimeType || 'image/webp',
           byteSize: record.dataUrl.length,
           createdAt: record.createdAt || Date.now(),
         })
       );
       await markMediaSynced(targetKey);
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, docPath);
+      // Log media write warning without aborting parent trip document sync!
+      console.warn(`[Firestore] Media asset sync skipped (${collectionPath}/${mediaId}):`, error);
     }
   }
 }
@@ -717,6 +740,8 @@ function normalizeTripData(
     deletedItemIds: data.deletedItemIds || undefined,
     isSplitEnabled: data.isSplitEnabled ?? false,
     splitMembers: data.splitMembers || [],
+    settlements: Array.isArray(data.settlements) ? data.settlements : undefined,
+    settledTransfers: data.settledTransfers || undefined,
     initialCashAmount: data.initialCashAmount,
     initialCashCurrency: data.initialCashCurrency,
     isSoloTrip: data.isSoloTrip ?? false,
@@ -915,6 +940,8 @@ export async function saveTripToCloud(userId: string, trip: Trip): Promise<Trip>
       deletedItemIds: lightweightTrip.deletedItemIds || {},
       isSplitEnabled: lightweightTrip.isSplitEnabled ?? false,
       splitMembers: lightweightTrip.splitMembers || [],
+      settlements: lightweightTrip.settlements || [],
+      settledTransfers: lightweightTrip.settledTransfers || {},
       initialCashAmount: lightweightTrip.initialCashAmount ?? null,
       initialCashCurrency: lightweightTrip.initialCashCurrency || null,
       isSoloTrip: lightweightTrip.isSoloTrip ?? false,
@@ -939,6 +966,14 @@ export async function saveTripToCloud(userId: string, trip: Trip): Promise<Trip>
     const sizeBytes = new Blob([jsonStr]).size;
     const sizeKb = Math.round(sizeBytes / 1024);
 
+    if (sizeBytes >= 650000 && sizeBytes < 820000 && typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('cloud_sync_warning', {
+          detail: { tripId: trip.id, sizeKb },
+        })
+      );
+    }
+
     if (sizeBytes >= 820000) {
       const limitErr = new Error(
         `行程文字資料量 (${sizeKb} KB) 已接近或超過單筆雲端上限 1MB（含 Firestore 內部編碼開銷），請精簡文字備註後再試。`
@@ -957,14 +992,6 @@ export async function saveTripToCloud(userId: string, trip: Trip): Promise<Trip>
         );
       }
       throw limitErr;
-    }
-
-    if (sizeBytes > 850000 && typeof window !== 'undefined') {
-      window.dispatchEvent(
-        new CustomEvent('cloud_sync_warning', {
-          detail: { tripId: trip.id, sizeKb },
-        })
-      );
     }
 
     await setDoc(docRef, payload, { merge: true });
@@ -1051,6 +1078,8 @@ export async function publishSharedTrip(trip: Trip, ownerUid?: string): Promise<
       stickyNotes: lightweightTrip.stickyNotes || [],
       isSplitEnabled: lightweightTrip.isSplitEnabled ?? false,
       splitMembers: lightweightTrip.splitMembers || [],
+      settlements: lightweightTrip.settlements || [],
+      settledTransfers: lightweightTrip.settledTransfers || {},
       isSoloTrip: lightweightTrip.isSoloTrip ?? false,
       tripMode: lightweightTrip.tripMode || 'planner',
       destinationLat: typeof lightweightTrip.destinationLat === 'number' ? lightweightTrip.destinationLat : null,
@@ -1238,6 +1267,8 @@ export async function enableTripCollaboration(trip: Trip, currentUser?: User | n
       deletedItemIds: lightweightTrip.deletedItemIds || {},
       isSplitEnabled: lightweightTrip.isSplitEnabled ?? false,
       splitMembers: lightweightTrip.splitMembers || [],
+      settlements: lightweightTrip.settlements || [],
+      settledTransfers: lightweightTrip.settledTransfers || {},
       initialCashAmount: lightweightTrip.initialCashAmount ?? null,
       initialCashCurrency: lightweightTrip.initialCashCurrency || null,
       isSoloTrip: lightweightTrip.isSoloTrip ?? false,
@@ -1328,9 +1359,11 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
   const deletedMap = Object.fromEntries(boundedDeletedEntries);
   const isDeleted = (id: string) => Boolean(deletedMap[id]);
 
-  // Merge days & day items by ID, honoring tombstones without resurrecting deleted days or deleted photos
+  // Merge days & day items by ID first (falling back to dayNumber), honoring tombstones
   const mergedDays = (newer.days || []).map((newerDay) => {
-    const olderDay = (older.days || []).find((d) => d.dayNumber === newerDay.dayNumber);
+    const olderDay =
+      (older.days || []).find((d) => d.id && newerDay.id && d.id === newerDay.id) ||
+      (older.days || []).find((d) => d.dayNumber === newerDay.dayNumber);
     if (!olderDay) {
       return {
         ...newerDay,
@@ -1437,9 +1470,26 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
   const mergedCustomTags =
     newer.customExpenseTags !== undefined ? newer.customExpenseTags : older.customExpenseTags || [];
 
+  // Merge settlements by ID honoring tombstones
+  const settlementMap = new Map(
+    (older.settlements || []).filter((s) => s && s.id && !isDeleted(s.id)).map((s) => [s.id, s])
+  );
+  (newer.settlements || []).forEach((s) => {
+    if (s && s.id && !isDeleted(s.id)) settlementMap.set(s.id, s);
+  });
+  const mergedSettlements = Array.from(settlementMap.values());
+
+  // Strip explicit `undefined` own keys on `newer` so spreading `{ ...older, ...cleanNewer }` never wipes defined cloud metadata (such as generalAccess)!
+  const cleanNewer: Record<string, any> = {};
+  for (const [k, v] of Object.entries(newer)) {
+    if (v !== undefined) {
+      cleanNewer[k] = v;
+    }
+  }
+
   return {
     ...older,
-    ...newer,
+    ...(cleanNewer as Partial<Trip>),
     days: mergedDays,
     todos: mergedTodos,
     packingList: mergedPacking,
@@ -1447,6 +1497,7 @@ export function mergeTrips(local: Trip, remote: Trip): Trip {
     bookings: mergedBookings,
     emergencyContacts: mergedContacts,
     splitMembers: mergedSplitMembers,
+    settlements: mergedSettlements.length > 0 ? mergedSettlements : undefined,
     customExpenseTags: mergedCustomTags,
     memories: mergedMemories,
     ...(mergedStickyNotes !== undefined ? { stickyNotes: mergedStickyNotes } : {}),
@@ -1529,6 +1580,8 @@ export async function syncCollaborativeTrip(
       deletedItemIds: tripToSave.deletedItemIds || {},
       isSplitEnabled: tripToSave.isSplitEnabled ?? false,
       splitMembers: tripToSave.splitMembers || [],
+      settlements: tripToSave.settlements || [],
+      settledTransfers: tripToSave.settledTransfers || {},
       initialCashAmount: tripToSave.initialCashAmount ?? null,
       initialCashCurrency: tripToSave.initialCashCurrency || null,
       isSoloTrip: tripToSave.isSoloTrip ?? false,

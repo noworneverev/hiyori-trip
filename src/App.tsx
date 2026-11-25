@@ -1,4 +1,4 @@
-import React, { Suspense, useState, useEffect, useRef, useCallback } from 'react';
+import React, { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Trip, ItineraryItem } from './types/itinerary';
 import { PRESET_TRIPS } from './data/presetTrips';
@@ -19,6 +19,7 @@ import { Language, TRANSLATIONS, getStoredLanguage, setStoredLanguage } from './
 import { useDarkMode } from './hooks/useDarkMode';
 import { useScrollDirection } from './hooks/useScrollDirection';
 import { useIsMobileViewport } from './hooks/useIsMobileViewport';
+import { resetSavedScrollPosition } from './hooks/useBodyScrollLock';
 import { IosModalSheet, IosNavBar, IosInsetGroup } from './components/UI/IosPrimitives';
 import { TripPhaseBanner } from './components/UI/TripPhaseBanner';
 import { TimelineTab } from './components/Tabs/TimelineTab';
@@ -180,7 +181,14 @@ export default function App() {
     return active || PRESET_TRIPS[0]?.id || '';
   });
   const [activeTab, setActiveTab] = useState<TabType>('timeline');
-  const [dismissedPhaseTripIds, setDismissedPhaseTripIds] = useState<Record<string, boolean>>({});
+  const [dismissedPhaseTripIds, setDismissedPhaseTripIds] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem('hiyori_dismissed_phase_banners_v1');
+      return raw ? JSON.parse(raw) || {} : {};
+    } catch {
+      return {};
+    }
+  });
   const [memoriesSpotId, setMemoriesSpotId] = useState<string | undefined>(undefined);
   const [requestedTimelineDay, setRequestedTimelineDay] = useState<{
     dayNumber: number;
@@ -223,6 +231,7 @@ export default function App() {
   const [showGlobalHubModal, setShowGlobalHubModal] = useState(false);
   const [showQuickActionModal, setShowQuickActionModal] = useState(false);
   const [quickActionTab, setQuickActionTab] = useState<'expense' | 'todos'>('expense');
+  const [quickActionDate, setQuickActionDate] = useState<string | undefined>(undefined);
   const [sharedBannerTrip, setSharedBannerTrip] = useState<Trip | null>(null);
   const [collabBannerTrip, setCollabBannerTrip] = useState<Trip | null>(null);
   const [isHeroExpanded, setIsHeroExpanded] = useState(false);
@@ -1120,6 +1129,10 @@ export default function App() {
 
   const switchTab = useCallback((nextTab: TabType) => {
     setActiveTab(nextTab);
+    if (nextTab !== 'timeline') {
+      setIsPickMode(false);
+    }
+    resetSavedScrollPosition(0);
     if (typeof window !== 'undefined' && window.scrollY > 0) {
       window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
     }
@@ -1131,6 +1144,8 @@ export default function App() {
       setCurrentTripId(id);
       setShowTripSwitcher(false);
       setMemoriesSpotId(undefined);
+      setIsPickMode(false);
+      resetSavedScrollPosition(0);
       const found = tripsRef.current.find((tr) => tr.id === id);
       if (found?.tripMode === 'memory') {
         switchTab('memories');
@@ -1406,12 +1421,24 @@ export default function App() {
     const existingMemories = latestTrip.memories || [];
 
     const photoSet = new Set(sanitizedPhotos);
+    const removedMemories: string[] = [];
     const retainedMemories = existingMemories.filter((m) => {
       if (m.spotId === targetItemId) {
-        return sanitizedPhotos.length > 0 && photoSet.has(m.imageUrl);
+        const keep = sanitizedPhotos.length > 0 && photoSet.has(m.imageUrl);
+        if (!keep && m.id) removedMemories.push(m.id);
+        return keep;
       }
       return true;
     });
+
+    const nowTs = Date.now();
+    const nextDeletedItemIds =
+      removedMemories.length > 0
+        ? {
+            ...(latestTrip.deletedItemIds || {}),
+            ...Object.fromEntries(removedMemories.map((id) => [id, nowTs])),
+          }
+        : latestTrip.deletedItemIds;
 
     const updatedMemories = [...retainedMemories];
     if (sanitizedPhotos.length > 0) {
@@ -1450,12 +1477,19 @@ export default function App() {
       });
     }
 
-    handleUpdateTrip({
+    const updatedTripObj: Trip = {
       ...latestTrip,
       days: updatedDays,
       memories: updatedMemories,
-      updatedAt: Date.now(),
-    });
+      ...(nextDeletedItemIds ? { deletedItemIds: nextDeletedItemIds } : {}),
+      updatedAt: nowTs,
+    };
+    handleUpdateTrip(updatedTripObj);
+    if (removedMemories.length > 0) {
+      garbageCollectOrphanedMedia(
+        tripsRef.current.map((tr) => (tr.id === updatedTripObj.id ? updatedTripObj : tr))
+      ).catch(() => {});
+    }
 
     setShowItemModal(false);
     setEditingItemData(null);
@@ -1489,6 +1523,19 @@ export default function App() {
     setShowItemModal(true);
   };
 
+  const handleCancelMapPick = useCallback(() => {
+    setIsPickMode(false);
+    if (editingItemData) {
+      setShowItemModal(true);
+    }
+  }, [editingItemData]);
+
+  const mergedEditingItem = useMemo<ItineraryItem | undefined>(() => {
+    if (!editingItemData) return undefined;
+    if (!itemDraftBackup) return editingItemData.item;
+    return { ...(editingItemData.item || {}), ...itemDraftBackup } as ItineraryItem;
+  }, [editingItemData, itemDraftBackup]);
+
   const handleImportTrip = async (imported: Trip) => {
     const exists = tripsRef.current.some((tr) => tr.id === imported.id);
     let baseTrip = imported;
@@ -1496,15 +1543,20 @@ export default function App() {
       const newId = `trip-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       baseTrip = await rebindTripMediaIds(imported, newId);
     }
+    const {
+      collabId: _c,
+      collaborators: _col,
+      editorEmails: _ed,
+      viewerEmails: _vw,
+      generalAccess: _ga,
+      ...cleanBase
+    } = baseTrip;
     const sanitized: Trip = {
-      ...baseTrip,
-      collabId: undefined,
+      ...cleanBase,
       isCollaborative: false,
-      collaborators: undefined,
-      editorEmails: undefined,
-      viewerEmails: undefined,
-      generalAccess: undefined,
-      ownerId: currentUserRef.current?.uid || baseTrip.ownerId,
+      ...(currentUserRef.current?.uid || baseTrip.ownerId
+        ? { ownerId: currentUserRef.current?.uid || baseTrip.ownerId }
+        : {}),
       updatedAt: Date.now(),
     };
     applyUpdateTrip(sanitized);
@@ -1549,12 +1601,19 @@ export default function App() {
                 onClick={() => setShowTripSwitcher(!showTripSwitcher)}
                 aria-expanded={showTripSwitcher}
                 aria-haspopup="listbox"
-                className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-1.5 h-11 sm:h-9 px-3 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-100 transition sm:max-w-[260px] lg:max-w-[360px] cursor-pointer active:scale-[0.98]"
+                className="w-full sm:w-auto flex items-center justify-between sm:justify-start gap-1.5 h-11 sm:h-10 px-3 rounded-xl border border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-900 hover:bg-[#F3F1EC] dark:hover:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-100 transition sm:max-w-[280px] lg:max-w-[380px] cursor-pointer active:scale-[0.98]"
                 title={isZh ? '切換旅程' : 'Switch Trip'}
               >
-                <span className="flex items-center gap-1.5 min-w-0">
+                <span className="flex items-center gap-2 min-w-0">
                   <Plane className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
-                  <span className="truncate">{currentTrip.title}</span>
+                  <span className="min-w-0 text-left leading-tight">
+                    <span className="block truncate font-bold text-xs text-slate-900 dark:text-white">
+                      {currentTrip.title}
+                    </span>
+                    <span className="block truncate text-[10px] font-mono tabular-nums font-medium text-slate-500 dark:text-slate-400">
+                      {currentTrip.destination} · {formatDateSlash(currentTrip.startDate).slice(5)}–{formatDateSlash(currentTrip.endDate).slice(5)}
+                    </span>
+                  </span>
                 </span>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               </button>
@@ -1827,17 +1886,22 @@ export default function App() {
                 onClick={async () => {
                   const newId = `trip-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
                   const rebound = await rebindTripMediaIds(sharedBannerTrip, newId);
+                  const {
+                    collabId: _c,
+                    collaborators: _col,
+                    editorEmails: _ed,
+                    viewerEmails: _vw,
+                    generalAccess: _ga,
+                    ...cleanRebound
+                  } = rebound;
                   const copyTrip: Trip = {
-                    ...rebound,
+                    ...cleanRebound,
                     id: newId,
                     title: `${sharedBannerTrip.title} (${isZh ? '副本' : 'Copy'})`,
-                    collabId: undefined,
                     isCollaborative: false,
-                    collaborators: undefined,
-                    editorEmails: undefined,
-                    viewerEmails: undefined,
-                    generalAccess: undefined,
-                    ownerId: currentUserRef.current?.uid || sharedBannerTrip.ownerId,
+                    ...(currentUserRef.current?.uid || sharedBannerTrip.ownerId
+                      ? { ownerId: currentUserRef.current?.uid || sharedBannerTrip.ownerId }
+                      : {}),
                     createdAt: Date.now(),
                     updatedAt: Date.now(),
                   };
@@ -1864,8 +1928,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Slim Editorial Trip Ribbon (Ultra-compact on mobile so Day 1 itinerary appears immediately above the fold!) */}
-        {!isHeroExpanded ? (
+        {/* Slim Editorial Trip Ribbon (Shown ONLY on Timeline tab so Live/Expenses/Todos/Memories start immediately above the fold!) */}
+        {activeTab === 'timeline' && (!isHeroExpanded ? (
           <div className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 px-3 py-2 sm:px-5 sm:py-3 flex items-center justify-between gap-2 animate-in fade-in duration-150">
             <button
               type="button"
@@ -2058,7 +2122,7 @@ export default function App() {
               </div>
             </div>
           </div>
-        )}
+        ))}
 
         {/* Read-Only Collaborator Viewer Notice Banner */}
         {!permission.canEdit && currentTrip.isCollaborative && (
@@ -2122,22 +2186,30 @@ export default function App() {
           })}
         </div>
 
-        {/* Smart 3-Phase Trip Context Strip (Pre-Trip / During-Trip / Post-Trip) */}
-        {!dismissedPhaseTripIds[currentTrip.id] && (
-          <TripPhaseBanner
-            trip={currentTrip}
-            lang={lang}
-            activeTab={activeTab}
-            onSwitchTab={switchTab}
-            onJumpToDay={(dayNum) => {
-              setRequestedTimelineDay({ dayNumber: dayNum, nonce: Date.now() });
-              switchTab('timeline');
-            }}
-            onDismiss={() =>
-              setDismissedPhaseTripIds((prev) => ({ ...prev, [currentTrip.id]: true }))
-            }
-          />
-        )}
+        {/* Smart 3-Phase Trip Context Strip (Shown on Timeline planner tab, persisted dismissal) */}
+        {activeTab === 'timeline' &&
+          currentTrip.tripMode !== 'memory' &&
+          !dismissedPhaseTripIds[currentTrip.id] && (
+            <TripPhaseBanner
+              trip={currentTrip}
+              lang={lang}
+              activeTab={activeTab}
+              onSwitchTab={switchTab}
+              onJumpToDay={(dayNum) => {
+                setRequestedTimelineDay({ dayNumber: dayNum, nonce: Date.now() });
+                switchTab('timeline');
+              }}
+              onDismiss={() => {
+                setDismissedPhaseTripIds((prev) => {
+                  const next = { ...prev, [currentTrip.id]: true };
+                  try {
+                    localStorage.setItem('hiyori_dismissed_phase_banners_v1', JSON.stringify(next));
+                  } catch {}
+                  return next;
+                });
+              }}
+            />
+          )}
 
         {/* Active Tab Content */}
         <Suspense fallback={<TabLoadingFallback />}>
@@ -2171,6 +2243,7 @@ export default function App() {
               }}
               isPickMode={isPickMode}
               onStartMapPick={handleStartMapPick}
+              onCancelMapPick={handleCancelMapPick}
               pickedCoords={pickedCoords}
               onPickLocation={handlePickLocation}
               onOpenMemories={(spotId) => {
@@ -2212,12 +2285,13 @@ export default function App() {
                 setRequestedTimelineDay({ dayNumber: dayNum, nonce: Date.now() });
                 switchTab('timeline');
               }}
-              onOpenQuickAction={(tab) => {
+              onOpenQuickAction={(tab, preferredDate) => {
                 if (currentTrip.isCollaborative && !permission.canEdit) {
                   showToast(isZh ? '目前為僅檢視權限' : 'View-only mode');
                   return;
                 }
                 setQuickActionTab(tab);
+                setQuickActionDate(preferredDate);
                 setShowQuickActionModal(true);
               }}
             />
@@ -2365,11 +2439,7 @@ export default function App() {
 
         {showItemModal && editingItemData && (
           <ItemEditModal
-            item={
-              itemDraftBackup
-                ? ({ ...(editingItemData.item || {}), ...itemDraftBackup } as ItineraryItem)
-                : editingItemData.item
-            }
+            item={mergedEditingItem}
             dayNumber={editingItemData.dayNumber}
             currency={currentTrip.currency}
             tripId={currentTrip.id}
@@ -2495,8 +2565,12 @@ export default function App() {
             lang={lang}
             canEdit={permission.canEdit}
             initialTab={quickActionTab}
+            defaultDate={quickActionDate}
             onUpdateTrip={handleUpdateTrip}
-            onClose={() => setShowQuickActionModal(false)}
+            onClose={() => {
+              setShowQuickActionModal(false);
+              setQuickActionDate(undefined);
+            }}
             onShowToast={showToast}
           />
         )}

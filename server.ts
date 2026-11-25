@@ -12,9 +12,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
 
-// Lightweight in-memory IP rate limiter for AI endpoints (30 requests / 10 minutes per IP)
+// Lightweight in-memory IP rate limiter for AI & Maps endpoints (30 requests / 10 minutes per IP)
 const aiRateBuckets = new Map<string, { count: number; resetAt: number }>();
 const AI_RATE_LIMIT_MAX = 30;
 const AI_RATE_WINDOW_MS = 10 * 60 * 1000;
@@ -22,6 +23,12 @@ const AI_RATE_WINDOW_MS = 10 * 60 * 1000;
 function checkAiRateLimit(req: express.Request, res: express.Response): boolean {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const now = Date.now();
+  // Periodically sweep expired buckets to prevent unbounded memory growth
+  if (aiRateBuckets.size > 500) {
+    for (const [k, v] of aiRateBuckets.entries()) {
+      if (now > v.resetAt) aiRateBuckets.delete(k);
+    }
+  }
   const entry = aiRateBuckets.get(ip);
   if (!entry || now > entry.resetAt) {
     aiRateBuckets.set(ip, { count: 1, resetAt: now + AI_RATE_WINDOW_MS });
@@ -70,42 +77,69 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Safe Google Maps short-link expander (strictly whitelisted Google Maps domains only)
-const ALLOWED_MAPS_HOSTS = new Set([
-  'maps.app.goo.gl',
-  'goo.gl',
-  'g.co',
-  'maps.google.com',
-  'www.google.com',
-  'google.com',
-]);
+function isAllowedGoogleMapsUrl(u: URL): boolean {
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+  const host = u.hostname.toLowerCase();
+  if (host === 'maps.app.goo.gl' || host === 'maps.google.com') return true;
+  if (host === 'goo.gl') return u.pathname.startsWith('/maps');
+  if (host === 'g.co') return u.pathname.startsWith('/kgs') || u.pathname.startsWith('/maps');
+  if (host === 'www.google.com' || host === 'google.com' || /^www\.google\.[a-z.]+$/.test(host)) {
+    return u.pathname.startsWith('/maps');
+  }
+  return false;
+}
 
 app.post('/api/resolve-maps-url', async (req, res) => {
+  if (!checkAiRateLimit(req, res)) return;
   try {
     const rawUrl = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
     if (!rawUrl || rawUrl.length > 2048) {
       return res.status(400).json({ error: 'Invalid URL' });
     }
-    const parsed = new URL(rawUrl);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      return res.status(400).json({ error: 'Unsupported protocol' });
-    }
-    if (!ALLOWED_MAPS_HOSTS.has(parsed.hostname.toLowerCase())) {
+    let currentUrl = new URL(rawUrl);
+    if (!isAllowedGoogleMapsUrl(currentUrl)) {
       return res.status(400).json({ error: 'Only Google Maps links are permitted' });
     }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
     try {
-      const response = await fetch(parsed.toString(), {
-        method: 'GET',
-        redirect: 'follow',
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; HiyoriTrip/1.0)',
-        },
-      });
-      return res.json({ resolvedUrl: response.url || parsed.toString() });
+      // Manual hop-by-hop redirect validation prevents open-redirect SSRF to internal networks
+      for (let hop = 0; hop < 5; hop++) {
+        const response = await fetch(currentUrl.toString(), {
+          method: 'GET',
+          redirect: 'manual',
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; HiyoriTrip/2.0)',
+          },
+        });
+        try {
+          await response.body?.cancel();
+        } catch {}
+
+        if (response.status >= 300 && response.status < 400) {
+          const loc = response.headers.get('location');
+          if (!loc) break;
+          const nextUrl = new URL(loc, currentUrl);
+          if (!isAllowedGoogleMapsUrl(nextUrl)) {
+            // If Google redirects onto /maps/place on localized ccTLD, check if path has /maps
+            if (
+              (nextUrl.protocol === 'https:' || nextUrl.protocol === 'http:') &&
+              /^(maps|www)\.google\.[a-z.]+$/i.test(nextUrl.hostname) &&
+              nextUrl.pathname.startsWith('/maps')
+            ) {
+              currentUrl = nextUrl;
+              continue;
+            }
+            return res.status(400).json({ error: 'Redirect target is not a valid Google Maps URL' });
+          }
+          currentUrl = nextUrl;
+          continue;
+        }
+        break;
+      }
+      return res.json({ resolvedUrl: currentUrl.toString() });
     } finally {
       clearTimeout(timer);
     }
@@ -512,6 +546,7 @@ async function startServer() {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
+        // Express middlewareMode without a bound WebSocket server disables Vite HMR to avoid React Fast Refresh preamble/WS mismatches
         hmr: false,
       },
       appType: 'spa',

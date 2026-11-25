@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { ItineraryItem } from '../../types/itinerary';
 import { getGoogleMapsNavigationUrl, isValidCoordinate } from '../../utils/geo';
 import { sanitizeExternalUrl } from '../../utils/url';
-import { MapPin, Lock, Unlock, Maximize2 } from 'lucide-react';
+import { useModalLayer } from '../../hooks/useModalHistory';
+import { MapPin, Lock, Unlock, Maximize2, X } from 'lucide-react';
 
 function escapeHtml(str?: string | number | null): string {
   if (str === null || str === undefined) return '';
@@ -21,6 +23,7 @@ interface LeafletMapProps {
   onSelectItem?: (item: ItineraryItem) => void;
   isPickMode?: boolean;
   onPickLocation?: (lat: number, lng: number) => void;
+  onCancelPickMode?: () => void;
   pickedLocation?: { lat: number; lng: number } | null;
   heightClass?: string;
 }
@@ -80,6 +83,7 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
   onSelectItem,
   isPickMode = false,
   onPickLocation,
+  onCancelPickMode,
   pickedLocation,
   heightClass = 'h-[360px] md:h-[460px]',
 }) => {
@@ -89,6 +93,11 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
   const markersByIdRef = useRef<Map<string, { marker: L.Marker; lat: number; lng: number; displayNumber: number; item: ItineraryItem }>>(new Map());
   const routeLineRef = useRef<L.Polyline | null>(null);
   const pickMarkerRef = useRef<L.Marker | null>(null);
+  const lastFittedSignatureRef = useRef<string>('');
+  const isPickModeRef = useRef(isPickMode);
+  isPickModeRef.current = isPickMode;
+
+  useModalLayer(isPickMode, () => onCancelPickMode?.());
 
   // Keep latest callbacks in refs so parent re-renders NEVER destroy markers or reset user pan/zoom
   const onSelectItemRef = useRef(onSelectItem);
@@ -114,11 +123,14 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
   const buildMarkerIcon = (item: ItineraryItem, displayNumber: number, isSelected: boolean) => {
     const color = CATEGORY_COLORS[item.category] || '#0d9488';
     const safeTitle = escapeHtml(item.title);
+    const showLabelAlways = isSelected || validIndexedItems.length <= 5;
     return L.divIcon({
       className: 'custom-itinerary-marker',
       html: `
         <div class="relative flex flex-col items-center group cursor-pointer" style="width:128px;margin-left:-44px;">
-          <div class="px-2 py-0.5 mb-0.5 rounded-md text-[11px] font-bold bg-white/95 dark:bg-slate-900/95 text-slate-800 dark:text-slate-100 shadow-md border border-slate-200 dark:border-slate-700 truncate max-w-[124px] pointer-events-none">
+          <div class="px-2 py-0.5 mb-0.5 rounded-md text-[11px] font-bold bg-white/95 dark:bg-slate-900/95 text-slate-800 dark:text-slate-100 shadow-md border border-slate-200 dark:border-slate-700 truncate max-w-[124px] pointer-events-none transition-opacity ${
+            showLabelAlways ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }">
             ${displayNumber}. ${safeTitle}
           </div>
           <div style="background-color: ${color};" class="w-8 h-8 rounded-full text-white flex items-center justify-center font-black text-xs shadow-lg border-2 border-white dark:border-slate-900 transition-transform transform ${
@@ -305,7 +317,12 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
         autoPanPaddingBottomRight: L.point(16, 24),
       });
 
-      marker.on('click', () => {
+      marker.on('click', (ev: L.LeafletMouseEvent) => {
+        if (isPickModeRef.current && onPickLocationRef.current) {
+          marker.closePopup();
+          onPickLocationRef.current(ev.latlng.lat, ev.latlng.lng);
+          return;
+        }
         if (onSelectItemRef.current) onSelectItemRef.current(item);
       });
 
@@ -323,9 +340,15 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       routeLineRef.current = polyline;
     }
 
-    // Fit map cleanly to this day's route
-    const bounds = L.latLngBounds(rawRouteLatLngs);
-    map.fitBounds(bounds, { padding: [44, 44], maxZoom: 16 });
+    // Fit map ONLY when the day's coordinate geometry changes (never reset user zoom when checking off spots!)
+    const coordSignature = validIndexedItems
+      .map((e) => `${e.item.id}:${e.item.lat?.toFixed(5)}:${e.item.lng?.toFixed(5)}`)
+      .join('|');
+    if (coordSignature !== lastFittedSignatureRef.current) {
+      lastFittedSignatureRef.current = coordSignature;
+      const bounds = L.latLngBounds(rawRouteLatLngs);
+      map.fitBounds(bounds, { padding: [44, 44], maxZoom: 16 });
+    }
   }, [validIndexedItems]);
 
   // Smoothly update selected highlight & pan WITHOUT rebuilding markers or wiping zoom
@@ -359,11 +382,23 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
     >
       <div ref={mapContainerRef} className="w-full h-full" />
 
-      {/* Pick Mode Overlay Tip */}
+      {/* Pick Mode Interactive Floating Bar (with explicit Cancel / Back to Form button!) */}
       {isPickMode && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[450] bg-slate-900/95 dark:bg-[#111827]/95 text-white px-4 py-2 rounded-2xl text-xs font-semibold shadow-lg border border-teal-500/40 flex items-center gap-2 backdrop-blur-md pointer-events-none whitespace-nowrap">
-          <MapPin className="w-4 h-4 text-teal-400 shrink-0" />
-          <span>點擊地圖任意位置以選取座標</span>
+        <div className="absolute top-3 inset-x-3 z-[450] flex items-center justify-between gap-2 bg-slate-900/95 dark:bg-[#111827]/95 text-white px-3.5 py-2 rounded-2xl text-xs font-semibold shadow-lg border border-teal-500/40 backdrop-blur-md">
+          <div className="flex items-center gap-2 min-w-0">
+            <MapPin className="w-4 h-4 text-teal-400 shrink-0" />
+            <span className="truncate">點擊地圖任意位置選取座標</span>
+          </div>
+          {onCancelPickMode && (
+            <button
+              type="button"
+              onClick={onCancelPickMode}
+              className="min-h-[32px] px-2.5 py-1 rounded-xl bg-white/15 hover:bg-white/25 text-white font-bold text-[11px] flex items-center gap-1 shrink-0 transition cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>取消返回</span>
+            </button>
+          )}
         </div>
       )}
 

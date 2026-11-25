@@ -3,7 +3,10 @@ import { Trip, BookingVoucher, BookingCategory, ItineraryItem } from '../../type
 import { Language } from '../../utils/i18n';
 import { copyTextToClipboard } from '../../utils/clipboard';
 import { sanitizeExternalUrl } from '../../utils/url';
-import { compressImageFile, storeImageAsMediaRef, garbageCollectOrphanedMedia } from '../../utils/image';
+import { compressImageFile, storeImageAsMediaRef, garbageCollectOrphanedMedia, isMediaRef, extractMediaId } from '../../utils/image';
+import { idbDeleteMedia } from '../../utils/indexedDb';
+import { normalizeDateKey } from '../../utils/date';
+import { generateQrSvgPath } from '../../utils/qrCode';
 import { getStoredTrips } from '../../utils/storage';
 import { MediaImage } from '../UI/MediaImage';
 import {
@@ -136,7 +139,63 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
   const [formNotes, setFormNotes] = useState('');
   const [formVoucherImages, setFormVoucherImages] = useState<string[]>([]);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [voucherImageError, setVoucherImageError] = useState<string | null>(null);
+  const [showGeneratedQrInCounter, setShowGeneratedQrInCounter] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const initialFormImagesRef = useRef<string[]>([]);
+  const formImagesRef = useRef<string[]>([]);
+  formImagesRef.current = formVoucherImages;
+
+  // Keep screen awake while showing a boarding pass / voucher at airport or hotel counters
+  useEffect(() => {
+    if (!counterCard) {
+      setShowGeneratedQrInCounter(false);
+      return;
+    }
+    let sentinel: { release: () => Promise<void> } | null = null;
+    let cancelled = false;
+    const requestWakeLock = async () => {
+      try {
+        const wl = (navigator as any)?.wakeLock;
+        if (!wl || typeof wl.request !== 'function' || cancelled) return;
+        sentinel = await wl.request('screen');
+      } catch {
+        // Ignore unsupported or battery-saver denial
+      }
+    };
+    requestWakeLock();
+    const onVis = () => {
+      if (document.visibilityState === 'visible' && !cancelled) requestWakeLock();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVis);
+      sentinel?.release().catch(() => {});
+    };
+  }, [counterCard]);
+
+  const counterQr = useMemo(() => {
+    if (!counterCard?.bookingCode) return null;
+    const trimmed = counterCard.bookingCode.trim();
+    if (!trimmed || trimmed.length > 180) return null;
+    return generateQrSvgPath(trimmed);
+  }, [counterCard?.bookingCode]);
+
+  const cleanupUnsavedVoucherImages = () => {
+    formImagesRef.current.forEach((ref) => {
+      if (isMediaRef(ref) && !initialFormImagesRef.current.includes(ref)) {
+        const mid = extractMediaId(ref);
+        if (mid) idbDeleteMedia(mid).catch(() => {});
+      }
+    });
+  };
+
+  const closeFormWithCleanup = () => {
+    cleanupUnsavedVoucherImages();
+    setShowForm(false);
+    resetForm();
+  };
 
   const resetForm = () => {
     setEditingVoucherId(null);
@@ -154,6 +213,8 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     setFormUrl('');
     setFormNotes('');
     setFormVoucherImages([]);
+    setVoucherImageError(null);
+    initialFormImagesRef.current = [];
     setExpandedFormPicker(null);
   };
 
@@ -192,6 +253,8 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     setFormUrl(v.url || '');
     setFormNotes(v.notes || '');
     setFormVoucherImages(v.voucherImages || []);
+    initialFormImagesRef.current = v.voucherImages || [];
+    setVoucherImageError(null);
     setShowForm(true);
   };
 
@@ -205,9 +268,11 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     }
 
     setIsUploadingImage(true);
+    setVoucherImageError(null);
     try {
       const selected = Array.from(files).slice(0, remainingSlots);
       const uploadedRefs: string[] = [];
+      let failed = 0;
       for (const file of selected) {
         try {
           // Keep QR codes sharp at 1280px max width and 0.85 quality
@@ -216,10 +281,18 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
           uploadedRefs.push(ref);
         } catch (err) {
           console.warn('Voucher image compression failed:', err);
+          failed += 1;
         }
       }
       if (uploadedRefs.length > 0) {
         setFormVoucherImages((prev) => [...prev, ...uploadedRefs].slice(0, 4));
+      }
+      if (failed > 0) {
+        setVoucherImageError(
+          isZh
+            ? `有 ${failed} 張圖片無法解碼或儲存，請確認格式為 JPG / PNG / WebP 後重試。`
+            : `${failed} image(s) failed to process. Please retry with JPG / PNG.`
+        );
       }
     } finally {
       setIsUploadingImage(false);
@@ -271,7 +344,14 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
             }
           : b
       );
-      onUpdateTrip({ ...trip, bookings: updated, updatedAt: now });
+      const updatedTrip: Trip = { ...trip, bookings: updated, updatedAt: now };
+      onUpdateTrip(updatedTrip);
+      const removedOldImages = initialFormImagesRef.current.some((ref) => !formVoucherImages.includes(ref));
+      if (removedOldImages) {
+        garbageCollectOrphanedMedia(
+          getStoredTrips().map((stored) => (stored.id === updatedTrip.id ? updatedTrip : stored))
+        ).catch(() => {});
+      }
     } else {
       const newVoucher: BookingVoucher = {
         id: `bk-${now}-${Math.random().toString(36).slice(2, 6)}`,
@@ -335,23 +415,30 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     }
   };
 
-  // Merge standalone bookings + auto-extracted itinerary items with bookingCode
+  // Merge standalone bookings + auto-extracted itinerary items (deduplicated by code + sorted chronologically)
   const unifiedEntries = useMemo<UnifiedBookingEntry[]>(() => {
     const list: UnifiedBookingEntry[] = [];
+    const seenVoucherCodes = new Set<string>();
 
     (trip.bookings || []).forEach((voucher) => {
+      const normCode = (voucher.bookingCode || '').trim().toUpperCase();
+      if (normCode) seenVoucherCodes.add(normCode);
       list.push({ source: 'voucher', voucher });
     });
 
+    const seenItinCodes = new Set<string>();
     (trip.days || []).forEach((day) => {
       (day.items || []).forEach((item) => {
-        if (item.bookingCode && item.bookingCode.trim()) {
+        const trimmed = (item.bookingCode || '').trim();
+        const normCode = trimmed.toUpperCase();
+        if (trimmed && !seenVoucherCodes.has(normCode) && !seenItinCodes.has(normCode)) {
+          seenItinCodes.add(normCode);
           list.push({
             source: 'itinerary',
             id: `itin-${day.dayNumber}-${item.id}`,
             category: mapItineraryCategoryToBooking(item.category),
             title: item.title,
-            bookingCode: item.bookingCode.trim(),
+            bookingCode: trimmed,
             dayNumber: day.dayNumber,
             date: day.date,
             timeLabel: item.endTime ? `${item.startTime} - ${item.endTime}` : item.startTime,
@@ -361,6 +448,25 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
           });
         }
       });
+    });
+
+    const getSortTuple = (entry: UnifiedBookingEntry): [number, string, number, string] => {
+      if (entry.source === 'voucher') {
+        const dKey = normalizeDateKey(entry.voucher.startDate) || '';
+        const dayNum = entry.voucher.dayNumber ?? 0;
+        const isWholeTrip = !dKey && !dayNum;
+        return [isWholeTrip ? 0 : 1, dKey || '9999-12-31', dayNum || 999, entry.voucher.timeLabel || ''];
+      }
+      return [1, normalizeDateKey(entry.date) || '9999-12-31', entry.dayNumber || 999, entry.timeLabel || ''];
+    };
+
+    list.sort((a, b) => {
+      const ta = getSortTuple(a);
+      const tb = getSortTuple(b);
+      if (ta[0] !== tb[0]) return ta[0] - tb[0];
+      if (ta[1] !== tb[1]) return ta[1].localeCompare(tb[1]);
+      if (ta[2] !== tb[2]) return ta[2] - tb[2];
+      return ta[3].localeCompare(tb[3]);
     });
 
     return list;
@@ -492,10 +598,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
       {/* Add / Edit Voucher iOS Sheet */}
       {showForm && (
         <IosModalSheet
-          onClose={() => {
-            setShowForm(false);
-            resetForm();
-          }}
+          onClose={closeFormWithCleanup}
           variant="grouped"
           maxWidthClass="sm:max-w-lg"
           zIndexClass="z-[75]"
@@ -508,10 +611,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                 : isZh ? '新增訂位憑證' : 'New Voucher'
             }
             leftLabel={isZh ? '取消' : 'Cancel'}
-            onLeftClick={() => {
-              setShowForm(false);
-              resetForm();
-            }}
+            onLeftClick={closeFormWithCleanup}
             rightLabel={editingVoucherId ? (isZh ? '儲存' : 'Save') : isZh ? '加入' : 'Add'}
             rightType="submit"
             rightFormId="booking-voucher-form"
@@ -642,7 +742,13 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                         />
                         <button
                           type="button"
-                          onClick={() => setFormVoucherImages((prev) => prev.filter((_, i) => i !== idx))}
+                          onClick={() => {
+                            if (isMediaRef(imgRef) && !initialFormImagesRef.current.includes(imgRef)) {
+                              const mid = extractMediaId(imgRef);
+                              if (mid) idbDeleteMedia(mid).catch(() => {});
+                            }
+                            setFormVoucherImages((prev) => prev.filter((_, i) => i !== idx));
+                          }}
                           className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/75 text-white flex items-center justify-center cursor-pointer"
                           aria-label="移除圖片"
                         >
@@ -651,6 +757,12 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                       </div>
                     ))}
                   </div>
+                )}
+
+                {voucherImageError && (
+                  <p className="text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                    {voucherImageError}
+                  </p>
                 )}
 
                 {formVoucherImages.length < 4 && (
@@ -1273,7 +1385,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
             </div>
 
             {/* Full-Width High-Contrast QR / Screenshot Showcase for Counter Scanning */}
-            {counterCard.voucherImages && counterCard.voucherImages.length > 0 && (
+            {counterCard.voucherImages && counterCard.voucherImages.length > 0 ? (
               <div className="space-y-3">
                 {counterCard.voucherImages.map((imgRef, idx) => (
                   <div
@@ -1290,8 +1402,52 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                     />
                   </div>
                 ))}
+                {counterQr && (
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      onClick={() => setShowGeneratedQrInCounter((v) => !v)}
+                      className="min-h-[36px] px-3 py-1 rounded-xl text-xs font-semibold text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-950/40 inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <QrCode className="w-3.5 h-3.5" />
+                      <span>
+                        {showGeneratedQrInCounter
+                          ? isZh ? '隱藏訂位代號 QR Code' : 'Hide Generated QR'
+                          : isZh ? '同時顯示訂位代號 QR Code' : 'Show Code as QR'}
+                      </span>
+                    </button>
+                    {showGeneratedQrInCounter && (
+                      <div className="mt-2 inline-flex flex-col items-center p-4 rounded-2xl bg-white border border-[#E5E2DC] shadow-xs">
+                        <svg
+                          viewBox={`0 0 ${counterQr.size} ${counterQr.size}`}
+                          className="w-44 h-44"
+                          shapeRendering="crispEdges"
+                          aria-label={counterCard.bookingCode}
+                        >
+                          <rect width={counterQr.size} height={counterQr.size} fill="#FFFFFF" />
+                          <path d={counterQr.path} fill="#0F172A" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            )}
+            ) : counterQr ? (
+              <div className="flex flex-col items-center py-4 px-5 rounded-2xl bg-white border border-[#E5E2DC] shadow-xs space-y-2">
+                <svg
+                  viewBox={`0 0 ${counterQr.size} ${counterQr.size}`}
+                  className="w-48 h-48 sm:w-52 sm:h-52"
+                  shapeRendering="crispEdges"
+                  aria-label={counterCard.bookingCode}
+                >
+                  <rect width={counterQr.size} height={counterQr.size} fill="#FFFFFF" />
+                  <path d={counterQr.path} fill="#0F172A" />
+                </svg>
+                <span className="text-[11px] font-medium text-slate-500">
+                  {isZh ? '離線即時產生 · 螢幕已保持常亮供櫃檯掃描' : 'Offline QR · Screen kept awake for scanning'}
+                </span>
+              </div>
+            ) : null}
 
             {(counterCard.dateLabel || counterCard.location || counterCard.notes) && (
               <IosInsetGroup>

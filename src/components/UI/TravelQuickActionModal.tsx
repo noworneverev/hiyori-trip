@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Trip, ExpenseItem } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
-import { getTodayLocal } from '../../utils/date';
+import { getTodayLocal, normalizeDateKey } from '../../utils/date';
 import { compressImageFile, resolveMediaSrc, storeImageAsMediaRef, extractMediaId, isMediaRef } from '../../utils/image';
 import { idbDeleteMedia } from '../../utils/indexedDb';
 import { MediaImage } from './MediaImage';
@@ -26,6 +26,7 @@ interface TravelQuickActionModalProps {
   onUpdateTrip: (updatedTrip: Trip) => void;
   onClose: () => void;
   initialTab?: 'expense' | 'todos';
+  defaultDate?: string;
   onShowToast?: (msg: string) => void;
 }
 
@@ -38,6 +39,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   onUpdateTrip,
   onClose,
   initialTab = 'expense',
+  defaultDate,
   onShowToast,
 }) => {
   const [activeTab, setActiveTab] = useState<'expense' | 'todos'>(initialTab);
@@ -49,7 +51,7 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   );
 
   const [draft, setDraft] = useState<TiantianExpenseDraft>(() => ({
-    date: getLocalTodayDate(),
+    date: normalizeDateKey(defaultDate) || getLocalTodayDate(),
     amount: '',
     currency: defaultTripCurrency,
     category: 'food',
@@ -109,9 +111,9 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
   }, [trip.id, splitMembersKey]);
 
   useEffect(() => {
-    setDraft((prev) => ({ ...prev, date: getLocalTodayDate() }));
+    setDraft((prev) => ({ ...prev, date: normalizeDateKey(defaultDate) || getLocalTodayDate() }));
     setIsSubPickerOpen(false);
-  }, [initialTab]);
+  }, [initialTab, defaultDate]);
 
   const handleClose = () => {
     draftReceiptsRef.current.forEach((ref) => {
@@ -183,7 +185,8 @@ export const TravelQuickActionModal: React.FC<TravelQuickActionModalProps> = ({
       catMeta.label || '旅途支出'
     );
     const isSplitMode = !trip.isSoloTrip && Boolean(trip.isSplitEnabled);
-    const matchedDay = (trip.days || []).find((d) => d.date === draft.date);
+    const normalizedDraftDate = normalizeDateKey(draft.date) || draft.date;
+    const matchedDay = (trip.days || []).find((d) => normalizeDateKey(d.date) === normalizedDraftDate);
 
     draft.receiptImages.forEach((ref) => persistedReceiptsRef.current.add(ref));
 

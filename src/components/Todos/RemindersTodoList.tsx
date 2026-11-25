@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Plus,
   Check,
@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { Trip, TodoItem } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
-import { getTodayLocal } from '../../utils/date';
+import { getTodayLocal, addDaysLocal, normalizeDateKey } from '../../utils/date';
 import { SwipeableActionRow } from '../UI/SwipeableExpenseRow';
 import {
   IosModalSheet,
@@ -338,14 +338,11 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
   };
 
   const todayStr = getTodayLocal();
-  const getTomorrowStr = () => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  };
+  const tomorrowStr = addDaysLocal(todayStr, 1);
+  const dayBeforeTripStr = useMemo(() => {
+    const startKey = normalizeDateKey(trip.startDate);
+    return startKey ? addDaysLocal(startKey, -1) : '';
+  }, [trip.startDate]);
 
   const renderReminderRow = (todo: TodoItem, allowSwipe: boolean) => {
     const isFocused = focusedTodoId === todo.id;
@@ -655,11 +652,11 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
 
               {detailHasDate && (
                 <div className="px-4 py-3 space-y-2.5 bg-[#FAF9F6]/65 dark:bg-slate-900/40 animate-in fade-in duration-150">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <button
                       type="button"
                       onClick={() => setDetailDueDate(todayStr)}
-                      className={`min-h-[40px] sm:min-h-[36px] px-3.5 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                      className={`min-h-[38px] sm:min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
                         detailDueDate === todayStr
                           ? 'bg-teal-700 text-white border-teal-700'
                           : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-[#E5E2DC] dark:border-slate-700'
@@ -669,15 +666,28 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setDetailDueDate(getTomorrowStr())}
-                      className={`min-h-[40px] sm:min-h-[36px] px-3.5 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
-                        detailDueDate === getTomorrowStr()
+                      onClick={() => setDetailDueDate(tomorrowStr)}
+                      className={`min-h-[38px] sm:min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                        detailDueDate === tomorrowStr
                           ? 'bg-teal-700 text-white border-teal-700'
                           : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-[#E5E2DC] dark:border-slate-700'
                       }`}
                     >
                       明天
                     </button>
+                    {dayBeforeTripStr && (
+                      <button
+                        type="button"
+                        onClick={() => setDetailDueDate(dayBeforeTripStr)}
+                        className={`min-h-[38px] sm:min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                          detailDueDate === dayBeforeTripStr
+                            ? 'bg-teal-700 text-white border-teal-700'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-[#E5E2DC] dark:border-slate-700'
+                        }`}
+                      >
+                        出發前 1 天
+                      </button>
+                    )}
                     {detailDueDate && (
                       <button
                         type="button"
@@ -685,7 +695,7 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
                           setDetailHasDate(false);
                           setDetailDueDate('');
                         }}
-                        className="min-h-[40px] sm:min-h-[36px] px-3 ml-auto text-xs text-slate-500 hover:text-rose-500 flex items-center gap-1 cursor-pointer"
+                        className="min-h-[38px] sm:min-h-[34px] px-2.5 ml-auto text-xs text-slate-500 hover:text-rose-500 flex items-center gap-1 cursor-pointer"
                       >
                         <X className="w-3.5 h-3.5" />
                         <span>清除</span>
@@ -771,7 +781,44 @@ export const RemindersTodoList: React.FC<RemindersTodoListProps> = ({
                 }}
               />
               {addSheetHasDate && (
-                <div className="px-4 py-3 bg-[#FAF9F6]/70 dark:bg-slate-900/40">
+                <div className="px-4 py-3 space-y-2.5 bg-[#FAF9F6]/70 dark:bg-slate-900/40 animate-in fade-in duration-150">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setAddSheetDueDate(todayStr)}
+                      className={`min-h-[38px] sm:min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                        addSheetDueDate === todayStr
+                          ? 'bg-teal-700 text-white border-teal-700'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-[#E5E2DC] dark:border-slate-700'
+                      }`}
+                    >
+                      今天
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAddSheetDueDate(tomorrowStr)}
+                      className={`min-h-[38px] sm:min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                        addSheetDueDate === tomorrowStr
+                          ? 'bg-teal-700 text-white border-teal-700'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-[#E5E2DC] dark:border-slate-700'
+                      }`}
+                    >
+                      明天
+                    </button>
+                    {dayBeforeTripStr && (
+                      <button
+                        type="button"
+                        onClick={() => setAddSheetDueDate(dayBeforeTripStr)}
+                        className={`min-h-[38px] sm:min-h-[34px] px-3 py-1 rounded-xl text-xs font-semibold border transition cursor-pointer ${
+                          addSheetDueDate === dayBeforeTripStr
+                            ? 'bg-teal-700 text-white border-teal-700'
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-[#E5E2DC] dark:border-slate-700'
+                        }`}
+                      >
+                        出發前 1 天
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="date"
                     value={addSheetDueDate}

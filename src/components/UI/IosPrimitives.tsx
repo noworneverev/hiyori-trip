@@ -4,6 +4,7 @@ import { Check, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { useVisualViewport } from '../../hooks/useVisualViewport';
 import { useModalLayer } from '../../hooks/useModalHistory';
+import { useIsMobileViewport } from '../../hooks/useIsMobileViewport';
 
 export interface IosModalSheetProps {
   onClose: () => void;
@@ -29,8 +30,12 @@ export const IosModalSheet: React.FC<IosModalSheetProps> = ({
   enableSwipeToDismiss = true,
 }) => {
   useBodyScrollLock(true);
-  useModalLayer(true, onClose, { disableEscape: disableBackdropClose });
+  useModalLayer(true, onClose, {
+    disableEscape: disableBackdropClose,
+    enableHistoryBack: !disableBackdropClose,
+  });
   const viewport = useVisualViewport(true);
+  const isMobileScreen = useIsMobileViewport();
 
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<{
@@ -99,7 +104,6 @@ export const IosModalSheet: React.FC<IosModalSheetProps> = ({
       : 'bg-white dark:bg-[#111827]';
 
   // Adapt modal height dynamically when iOS/Android software keyboard shrinks visualViewport
-  const isMobileScreen = typeof window !== 'undefined' && window.innerWidth < 640;
   const dynamicContainerStyle: React.CSSProperties | undefined =
     isMobileScreen && viewport.isKeyboardOpen && viewport.height
       ? {
@@ -633,7 +637,7 @@ export const IosActionSheet: React.FC<IosActionSheetProps> = ({
         onClick={(e) => e.stopPropagation()}
       >
         {/* Main Grouped Options Card */}
-        <div className="rounded-2xl bg-white/95 dark:bg-[#111827]/95 backdrop-blur-xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl overflow-y-auto max-h-[68dvh] divide-y divide-[#E5E2DC]/80 dark:divide-slate-800">
+        <div className="rounded-2xl bg-white/95 dark:bg-[#111827]/95 backdrop-blur-xl border border-[#E5E2DC] dark:border-slate-800 shadow-2xl overflow-y-auto overscroll-contain touch-pan-y max-h-[68dvh] divide-y divide-[#E5E2DC]/80 dark:divide-slate-800">
           {(title || message) && (
             <div className="px-5 py-4 text-center space-y-1.5">
               {title && (

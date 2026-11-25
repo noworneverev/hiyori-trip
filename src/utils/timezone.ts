@@ -5,6 +5,7 @@
 
 export interface DestinationTimezoneInfo {
   tz?: string;
+  utcOffsetHours?: number;
   flag: string;
   label: string;
   countryName: string;
@@ -364,12 +365,13 @@ const GLOBAL_RULES: DestinationRule[] = [
 ];
 
 function matchesKeyword(cleanDest: string, keyword: string): boolean {
-  const kw = keyword.toLowerCase();
-  // Short ASCII codes (e.g. 'uk', 'hk', 'nyc', 'usa') must match on word boundaries
-  // so 'uk' never matches 'Fukuoka', 'Fukushima', or 'Tsukiji'.
-  if (/^[a-z]{2,3}$/.test(kw)) {
+  const kw = keyword.toLowerCase().trim();
+  if (!kw) return false;
+  // All ASCII/Latin keywords MUST match on word boundaries so 'nice' never matches 'Venice',
+  // 'kobe' never matches 'Kobenhavn', 'nara' never matches 'Connemara', and 'uk' never matches 'Fukuoka'!
+  if (/^[a-z0-9\s.-]+$/.test(kw)) {
     const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(^|[^a-z])${escaped}([^a-z]|$)`).test(cleanDest);
+    return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`).test(cleanDest);
   }
   return cleanDest.includes(kw);
 }
@@ -469,6 +471,7 @@ export function resolveDestinationTimezone(
     const sign = offsetHours >= 0 ? '+' : '';
     return {
       tz: undefined,
+      utcOffsetHours: offsetHours,
       flag: '📍',
       label: `當地時間 (UTC${sign}${offsetHours})`,
       countryName: '當地',

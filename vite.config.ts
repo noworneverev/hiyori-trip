@@ -4,9 +4,9 @@ import path from 'path';
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig(() => {
+export default defineConfig(({ command }) => {
   return {
-    base: './',
+    base: command === 'build' ? './' : '/',
     plugins: [
       react(),
       tailwindcss(),
@@ -52,8 +52,29 @@ export default defineConfig(() => {
           navigateFallbackDenylist: [/^\/__\/auth/, /^\/__\/firebase/, /^\/api\//],
           maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-          globIgnores: ['assets/aistudio/**'],
+          globIgnores: [
+            'assets/aistudio/**',
+            'assets/PDFExportModal-*',
+            'assets/vendor-pdf-*',
+            'assets/html2canvas*',
+            'assets/jspdf*',
+            'assets/lite.esm-*',
+          ],
           runtimeCaching: [
+            {
+              urlPattern: /\/assets\/.*\.(?:js|css)$/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'hiyori-ondemand-assets',
+                expiration: {
+                  maxEntries: 80,
+                  maxAgeSeconds: 60 * 60 * 24 * 60,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'StaleWhileRevalidate',
@@ -106,6 +127,23 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname || '.', '.'),
+      },
+    },
+    build: {
+      chunkSizeWarningLimit: 700,
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              { name: 'vendor-react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/, priority: 30 },
+              { name: 'vendor-firebase', test: /node_modules[\\/](firebase|@firebase)[\\/]/, priority: 25 },
+              { name: 'vendor-leaflet', test: /node_modules[\\/]leaflet[\\/]/, priority: 25 },
+              { name: 'vendor-charts', test: /node_modules[\\/](recharts|d3-[^\\/]+|victory-vendor)[\\/]/, priority: 25 },
+              { name: 'vendor-pdf', test: /node_modules[\\/](jspdf|html2canvas|canvg|fflate|rgbcolor|stackblur-canvas)[\\/]/, priority: 25 },
+              { name: 'vendor-icons', test: /node_modules[\\/]lucide-react[\\/]/, priority: 20 },
+            ],
+          },
+        },
       },
     },
     server: {

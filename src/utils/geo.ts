@@ -161,8 +161,8 @@ export function parseGoogleMapsUrl(rawUrl: string): ParsedGoogleMapsPlace | null
   const trimmed = (rawUrl || '').trim();
   if (!trimmed) return null;
 
-  // Support pasting raw "lat, lng" directly as a convenience
-  const rawCoordMatch = trimmed.match(/^(-?\d{1,2}\.\d{3,})\s*[,，\s]\s*(-?\d{1,3}\.\d{3,})$/);
+  // Support pasting raw "lat, lng" directly as a convenience (accepts 2+ decimal digits)
+  const rawCoordMatch = trimmed.match(/^(-?\d{1,2}\.\d{2,})\s*[,，\s]\s*(-?\d{1,3}\.\d{2,})$/);
   if (rawCoordMatch) {
     const lat = Number(rawCoordMatch[1]);
     const lng = Number(rawCoordMatch[2]);

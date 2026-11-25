@@ -24,6 +24,17 @@ let originalHtmlOverscrollBehavior = '';
 let originalHtmlTouchAction = '';
 let savedScrollY = 0;
 
+/**
+ * Resets the saved scroll restoration target while a modal is open
+ * (e.g., when switching trips or tabs from inside a sheet so closing the sheet lands at top = 0).
+ */
+export function resetSavedScrollPosition(nextScrollY: number = 0) {
+  savedScrollY = Math.max(0, nextScrollY);
+  if (lockCount > 0 && typeof document !== 'undefined') {
+    document.body.style.top = `-${savedScrollY}px`;
+  }
+}
+
 export function useBodyScrollLock(isLocked: boolean = true) {
   useEffect(() => {
     if (!isLocked) return;

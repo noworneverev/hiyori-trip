@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { useModalLayer } from '../../hooks/useModalHistory';
 import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { Trip, ItineraryItem } from '../../types/itinerary';
 import { getGoogleMapsNavigationUrl, isValidCoordinate } from '../../utils/geo';
 import { formatDateSlash, getDayOfWeek } from '../../utils/date';
@@ -215,12 +216,15 @@ export const TripOverviewMap: React.FC<TripOverviewMapProps> = ({
         : CATEGORY_COLORS[spot.item.category] || '#0d9488';
     const dayBadgeColor = DAY_PALETTE[(spot.dayNumber - 1) % DAY_PALETTE.length];
     const safeTitle = escapeHtml(spot.item.title);
+    const showLabelAlways = isSelected || filteredSpots.length <= 5;
 
     return L.divIcon({
       className: 'custom-trip-overview-marker',
       html: `
         <div class="relative flex flex-col items-center group cursor-pointer" style="width:136px;margin-left:-47px;">
-          <div class="px-2 py-0.5 mb-1 rounded-md text-[10.5px] font-bold bg-white/95 dark:bg-slate-900/95 text-slate-800 dark:text-slate-100 shadow-md border border-slate-200 dark:border-slate-700 truncate max-w-[132px] pointer-events-none transition-transform group-hover:scale-105">
+          <div class="px-2 py-0.5 mb-1 rounded-md text-[10.5px] font-bold bg-white/95 dark:bg-slate-900/95 text-slate-800 dark:text-slate-100 shadow-md border border-slate-200 dark:border-slate-700 truncate max-w-[132px] pointer-events-none transition-all group-hover:scale-105 ${
+            showLabelAlways ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }">
             <span class="text-[9px] font-extrabold mr-1 px-1 rounded text-white" style="background-color: ${dayBadgeColor}">D${spot.dayNumber}</span>
             ${safeTitle}
           </div>
@@ -362,6 +366,14 @@ export const TripOverviewMap: React.FC<TripOverviewMapProps> = ({
       markersGroup.addLayer(marker);
       markersMapRef.current.set(spot.id, { marker, spot, lat, lng });
     });
+
+    if (initialSelectedSpotId) {
+      const targetEntry = markersMapRef.current.get(initialSelectedSpotId);
+      if (targetEntry) {
+        map.setView([targetEntry.lat, targetEntry.lng], 15, { animate: true });
+        return;
+      }
+    }
 
     if (rawBoundsCoords.length > 0) {
       const bounds = L.latLngBounds(rawBoundsCoords);

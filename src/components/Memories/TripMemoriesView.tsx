@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { useModalLayer } from '../../hooks/useModalHistory';
+import { useModalLayer, useHasActiveModalLayer } from '../../hooks/useModalHistory';
 import { Trip, TripMemoryItem, ItineraryItem } from '../../types/itinerary';
 import { formatDateSlash, formatMonthDaySlash, getDayOfWeek } from '../../utils/date';
 import { Language } from '../../utils/i18n';
@@ -389,6 +389,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
   // Form State for uploading new memory photo
   const [uploadSpotId, setUploadSpotId] = useState<string>(initialSpotId || '');
   const [isCustomSpot, setIsCustomSpot] = useState<boolean>(!initialSpotId);
+  const hasActiveModal = useHasActiveModalLayer();
   const [customLocationName, setCustomLocationName] = useState<string>('');
   const [customDayNumber, setCustomDayNumber] = useState<number | 'all'>('all');
   const [customDate, setCustomDate] = useState<string>('');
@@ -1124,52 +1125,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
     let driveFailedCount = 0;
     setIsSavingMemory(true);
     try {
+      let createdMemoryEntries: Array<{ idx: number; memId: string }> = [];
       if (hasNewPhotos) {
-        const driveToken = getDriveAccessToken();
-        const driveUploads = new Map<
-          number,
-          { driveFileId: string; driveFolderId: string; originalBytes: number; originalMimeType: string }
-        >();
-
-        const rawIndexes = uploadImagePreviews
-          .map((p, idx) => (p.rawFile ? idx : -1))
-          .filter((idx) => idx >= 0);
-
-        if (driveToken && rawIndexes.length > 0) {
-          driveAttemptedCount = rawIndexes.length;
-          setDriveUploadProgress({ done: 0, total: rawIndexes.length });
-          for (let step = 0; step < rawIndexes.length; step++) {
-            const idx = rawIndexes[step];
-            const preview = uploadImagePreviews[idx];
-            if (preview.rawFile) {
-              try {
-                const uploaded = await uploadOriginalPhotoToDrive(preview.rawFile, {
-                  token: driveToken,
-                  tripId: trip.id,
-                  tripTitle: trip.title,
-                  existingFolderId: nextDriveFolderId,
-                  takenDate: isCustom
-                    ? customDate || preview.takenDate || chosenDate
-                    : chosenDate || preview.takenDate,
-                });
-                nextDriveFolderId = uploaded.driveFolderId;
-                driveUploads.set(idx, uploaded);
-                driveUploadedCount++;
-              } catch (err) {
-                console.warn('Google Drive original photo upload skipped:', err);
-                driveFailedCount++;
-                if (err instanceof DriveAuthExpiredError) {
-                  setDriveConnected(false);
-                  driveFailedCount += rawIndexes.length - step - 1;
-                  break;
-                }
-              }
-            }
-            setDriveUploadProgress({ done: step + 1, total: rawIndexes.length });
-          }
-          setDriveUploadProgress(null);
-        }
-
         const newMemories: TripMemoryItem[] = uploadImagePreviews.map((preview, idx) => {
           const photoDate = isCustom
             ? (customDate || preview.takenDate || chosenDate)
@@ -1178,10 +1135,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             !isCustom
               ? chosenDayNum
               : chosenDayNum ?? (photoDate ? trip.days.find((d) => d.date === photoDate)?.dayNumber : undefined);
-          const driveInfo = driveUploads.get(idx);
+          const memId = `mem-${now}-${idx}-${Math.random().toString(36).slice(2, 7)}`;
+          createdMemoryEntries.push({ idx, memId });
 
           return {
-            id: `mem-${now}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
+            id: memId,
             imageUrl: preview.mediaRef,
             caption: uploadCaption.trim() || finalTitle,
             spotId: !isCustom ? uploadSpotId : undefined,
@@ -1193,12 +1151,11 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
             mood: uploadMood,
             location: finalLocation,
             googlePhotosUrl: safeGoogleUrl || undefined,
-            driveFileId: driveInfo?.driveFileId,
-            driveFolderId: driveInfo?.driveFolderId || nextDriveFolderId,
-            originalBytes: driveInfo?.originalBytes ?? preview.originalBytes,
+            driveFolderId: nextDriveFolderId,
+            originalBytes: preview.originalBytes,
             originalWidth: preview.originalWidth,
             originalHeight: preview.originalHeight,
-            originalMimeType: driveInfo?.originalMimeType ?? preview.originalMimeType,
+            originalMimeType: preview.originalMimeType,
             createdAt: now + idx * 50,
           };
         });
@@ -1290,7 +1247,8 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         }
       }
 
-      await onUpdateTrip({
+      // 1) Persist compressed media:// memories immediately (optimistic local save so uploads never lose photos)
+      const baseSavedTrip: Trip = {
         ...trip,
         days: updatedDays,
         memories: updatedMemories,
@@ -1298,8 +1256,99 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         destinationLng: nextDestLng,
         driveFolderId: nextDriveFolderId,
         updatedAt: Date.now(),
-      });
+      };
+      await onUpdateTrip(baseSavedTrip);
       didSave = true;
+
+      // 2) Sequentially back up originals to Google Drive if connected (with 1 auto-reauth retry on token expiry)
+      if (hasNewPhotos) {
+        let driveToken = getDriveAccessToken();
+        const rawEntries = createdMemoryEntries.filter((entry) => Boolean(uploadImagePreviews[entry.idx]?.rawFile));
+        if (driveToken && rawEntries.length > 0) {
+          driveAttemptedCount = rawEntries.length;
+          setDriveUploadProgress({ done: 0, total: rawEntries.length });
+          let attemptedReauth = false;
+          const drivePatchById = new Map<
+            string,
+            { driveFileId: string; driveFolderId: string; originalBytes: number; originalMimeType: string }
+          >();
+
+          for (let step = 0; step < rawEntries.length; step++) {
+            const { idx, memId } = rawEntries[step];
+            const preview = uploadImagePreviews[idx];
+            if (preview?.rawFile && driveToken) {
+              const runUpload = (tokenToUse: string) =>
+                uploadOriginalPhotoToDrive(preview.rawFile!, {
+                  token: tokenToUse,
+                  tripId: trip.id,
+                  tripTitle: trip.title,
+                  existingFolderId: nextDriveFolderId,
+                  takenDate: isCustom
+                    ? customDate || preview.takenDate || chosenDate
+                    : chosenDate || preview.takenDate,
+                });
+              try {
+                const uploaded = await runUpload(driveToken);
+                nextDriveFolderId = uploaded.driveFolderId;
+                drivePatchById.set(memId, uploaded);
+                driveUploadedCount++;
+              } catch (err) {
+                if (err instanceof DriveAuthExpiredError && !attemptedReauth) {
+                  attemptedReauth = true;
+                  const refreshed = await connectGoogleDrive().catch(() => null);
+                  if (refreshed) {
+                    driveToken = refreshed;
+                    setDriveConnected(true);
+                    try {
+                      const uploaded = await runUpload(driveToken);
+                      nextDriveFolderId = uploaded.driveFolderId;
+                      drivePatchById.set(memId, uploaded);
+                      driveUploadedCount++;
+                      setDriveUploadProgress({ done: step + 1, total: rawEntries.length });
+                      continue;
+                    } catch {
+                      // Fall through to failure counter below
+                    }
+                  } else {
+                    setDriveConnected(false);
+                    driveFailedCount += rawEntries.length - step;
+                    break;
+                  }
+                }
+                console.warn('Google Drive original photo upload skipped:', err);
+                driveFailedCount++;
+                if (err instanceof DriveAuthExpiredError) {
+                  setDriveConnected(false);
+                  driveFailedCount += rawEntries.length - step - 1;
+                  break;
+                }
+              }
+            }
+            setDriveUploadProgress({ done: step + 1, total: rawEntries.length });
+          }
+          setDriveUploadProgress(null);
+
+          if (drivePatchById.size > 0) {
+            const patchedMemories = updatedMemories.map((m) => {
+              const info = drivePatchById.get(m.id);
+              if (!info) return m;
+              return {
+                ...m,
+                driveFileId: info.driveFileId,
+                driveFolderId: info.driveFolderId,
+                originalBytes: info.originalBytes,
+                originalMimeType: info.originalMimeType,
+              };
+            });
+            await onUpdateTrip({
+              ...baseSavedTrip,
+              memories: patchedMemories,
+              driveFolderId: nextDriveFolderId,
+              updatedAt: Date.now(),
+            });
+          }
+        }
+      }
 
       if (driveAttemptedCount > 0 && driveFailedCount > 0) {
         setToastMessage(
@@ -2251,15 +2300,15 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
         </div>
       ) : viewMode === 'gallery' ? (
         /* ================= 2A. APPLE PHOTOS STYLE GALLERY GRID ================= */
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5 sm:gap-4 pb-24">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 sm:gap-4 pb-24">
           {filteredMemories.map((mem) => (
             <div
               key={mem.id}
-              className="group rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 overflow-hidden shadow-2xs hover:shadow-lg transition flex flex-col"
+              className="group rounded-2xl sm:rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 overflow-hidden shadow-2xs hover:shadow-lg transition flex flex-col"
             >
-              {/* Image Container with Hover Zoom */}
+              {/* Image Container: Crisp Apple Photos square tile on mobile, 4:3 editorial on sm+ */}
               <div
-                className="relative aspect-4/3 bg-slate-100 dark:bg-slate-800 overflow-hidden cursor-pointer"
+                className="relative aspect-square sm:aspect-4/3 bg-slate-100 dark:bg-slate-800 overflow-hidden cursor-pointer"
                 onClick={() => setLightboxMemory(mem)}
               >
                 <MediaImage
@@ -2273,18 +2322,40 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                 />
 
                 {/* Sync Status Badge (Click to force sync) */}
-                <div className="absolute top-3 right-3 z-10">
+                <div className="absolute top-2 right-2 sm:top-3 sm:right-3 z-10">
                   {renderSyncBadge(mem)}
                 </div>
 
-                {/* Quick Expand Icon */}
-                <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition p-2 rounded-xl bg-slate-900/70 text-white backdrop-blur-md">
+                {/* Mobile Bottom Gradient Overlay (Apple Photos clean metadata) */}
+                <div className="sm:hidden absolute inset-x-0 bottom-0 px-2.5 pt-6 pb-2 bg-gradient-to-t from-black/75 via-black/30 to-transparent pointer-events-none flex items-end justify-between gap-1.5 text-white">
+                  <span className="text-[11px] font-bold truncate drop-shadow-xs">
+                    {mem.location || mem.spotTitle || trip.destination}
+                  </span>
+                  {mem.dayNumber && (
+                    <span className="text-[10px] font-mono tabular-nums font-bold px-1.5 py-0.5 rounded-md bg-black/45 backdrop-blur-xs shrink-0">
+                      D{mem.dayNumber}
+                    </span>
+                  )}
+                </div>
+
+                {/* Desktop Quick Expand Icon */}
+                <div className="hidden sm:block absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition p-2 rounded-xl bg-slate-900/70 text-white backdrop-blur-md">
                   <ZoomIn className="w-4 h-4" />
                 </div>
               </div>
 
-              {/* Caption & Location Details */}
-              <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+              {/* Mobile Minimal 1-Line Caption (Tap opens Lightbox with full Edit/Delete/Download) */}
+              {mem.caption && mem.caption !== (mem.location || mem.spotTitle) && (
+                <div
+                  onClick={() => setLightboxMemory(mem)}
+                  className="sm:hidden px-2.5 py-1.5 text-[11px] text-slate-600 dark:text-slate-300 truncate cursor-pointer"
+                >
+                  {mem.mood ? `${mem.mood} ` : ''}{mem.caption}
+                </div>
+              )}
+
+              {/* Desktop / Tablet Editorial Caption & Action Footer */}
+              <div className="hidden sm:flex p-4 flex-1 flex-col justify-between space-y-3">
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-bold text-teal-700 dark:text-teal-400 flex items-center gap-1 truncate min-w-0">
@@ -2302,7 +2373,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     </div>
                   </div>
 
-                  <p className="text-xs text-slate-700 dark:text-slate-300 font-medium leading-relaxed italic py-0.5">
+                  <p className="text-xs text-slate-700 dark:text-slate-300 font-medium leading-relaxed italic py-0.5 line-clamp-2">
                     「{mem.caption}」
                   </p>
                 </div>
@@ -2332,7 +2403,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       <button
                         type="button"
                         onClick={(e) => handleOpenEditMemory(mem, e)}
-                        className="min-w-[40px] min-h-[40px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-lg text-slate-400 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
+                        className="min-w-[34px] min-h-[34px] flex items-center justify-center rounded-lg text-slate-400 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-teal-950/40 transition cursor-pointer"
                         title="編輯回憶文字與標籤"
                         aria-label="編輯回憶"
                       >
@@ -2341,7 +2412,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                       <button
                         type="button"
                         onClick={() => setConfirmDeleteMemId(mem.id)}
-                        className="min-w-[40px] min-h-[40px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                        className="min-w-[34px] min-h-[34px] flex items-center justify-center rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
                         title="刪除此照片"
                         aria-label="刪除此照片"
                       >
@@ -2845,6 +2916,22 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
                     onClick={() => {
                       setIsCustomSpot(false);
                       setActiveUploadPicker('none');
+                      const matched = uploadSpotId ? allSpots.find((s) => s.spot.id === uploadSpotId) : null;
+                      const existingCount = matched?.spot.memoryPhotos?.length || 0;
+                      const maxAllowed = Math.max(0, 3 - existingCount);
+                      if (uploadImagePreviews.length > maxAllowed) {
+                        const dropped = uploadImagePreviews.slice(maxAllowed);
+                        dropped.forEach((p) => {
+                          if (isMediaRef(p.mediaRef)) {
+                            const mid = extractMediaId(p.mediaRef);
+                            if (mid) idbDeleteMedia(mid).catch(() => {});
+                          }
+                        });
+                        setUploadImagePreviews((prev) => prev.slice(0, maxAllowed));
+                        setUploadLimitWarning(
+                          `單一行程景點最多保留 3 張相片，已自動保留前 ${maxAllowed} 張（大量相片建議使用「自訂隨拍打卡」）。`
+                        );
+                      }
                     }}
                     className={`min-h-[38px] px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
                       !isCustomSpot
@@ -3682,6 +3769,7 @@ export const TripMemoriesView: React.FC<TripMemoriesViewProps> = ({
 
       {/* ================= 7. UNIFIED BOTTOM-RIGHT FLOATING (+) UPLOAD BUTTON ================= */}
       {canShowUploadAction &&
+        !hasActiveModal &&
         !showUploadModal &&
         !lightboxMemory &&
         !editingMemory &&

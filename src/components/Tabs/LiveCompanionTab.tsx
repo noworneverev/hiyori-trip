@@ -10,9 +10,9 @@ import {
   formatDateSlash,
   formatMonthDaySlash,
   getTodayInTimezone,
-  getCurrentMinutesInTimezone,
   normalizeDateKey,
   parseTimeToMinutes,
+  isOvernightTimeRange,
   getSuggestedNextStartTime,
 } from '../../utils/date';
 import { resolveDestinationTimezone } from '../../utils/timezone';
@@ -69,7 +69,7 @@ interface LiveCompanionTabProps {
   onNavigateToTimelineDay?: (dayNumber: number) => void;
   onOpenEditItem?: (item: ItineraryItem, dayNumber: number) => void;
   onOpenAddItem?: (dayNumber: number, suggestedStartTime?: string) => void;
-  onOpenQuickAction?: (tab: 'expense' | 'todos') => void;
+  onOpenQuickAction?: (tab: 'expense' | 'todos', preferredDate?: string) => void;
   requireAuth?: (action: () => void, reason?: string) => boolean;
 }
 
@@ -83,18 +83,52 @@ const CATEGORY_TAGS: Record<CategoryType, { label: string; Icon: React.Component
   other: { label: '其他', Icon: Bookmark },
 };
 
-function formatDestClock(tz?: string): string {
-  try {
-    return new Intl.DateTimeFormat('en-GB', {
-      timeZone: tz || undefined,
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(new Date());
-  } catch {
-    const now = new Date();
-    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * Resolve the destination wall-clock. Prefers IANA tz; falls back to a fixed UTC offset
+ * (longitude-derived) so travellers never see their HOME device clock labelled as destination time.
+ */
+function getDestinationNow(tz?: string, utcOffsetHours?: number): { clock: string; minutes: number; dateKey: string } {
+  const now = new Date();
+  if (tz) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: tz,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      }).formatToParts(now);
+      const get = (type: string) => parts.find((p) => p.type === type)?.value || '00';
+      const hh = Number(get('hour')) % 24;
+      const mm = Number(get('minute'));
+      return {
+        clock: `${pad2(hh)}:${pad2(mm)}`,
+        minutes: hh * 60 + mm,
+        dateKey: `${get('year')}-${get('month')}-${get('day')}`,
+      };
+    } catch {
+      // fall through to offset / device clock
+    }
   }
+  if (typeof utcOffsetHours === 'number' && Number.isFinite(utcOffsetHours)) {
+    const shifted = new Date(now.getTime() + utcOffsetHours * 3600 * 1000);
+    const hh = shifted.getUTCHours();
+    const mm = shifted.getUTCMinutes();
+    return {
+      clock: `${pad2(hh)}:${pad2(mm)}`,
+      minutes: hh * 60 + mm,
+      dateKey: `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`,
+    };
+  }
+  return {
+    clock: `${pad2(now.getHours())}:${pad2(now.getMinutes())}`,
+    minutes: now.getHours() * 60 + now.getMinutes(),
+    dateKey: `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`,
+  };
 }
 
 export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
@@ -128,21 +162,28 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
     [trip.destination, firstTripCoords]
   );
 
-  const [destClock, setDestClock] = useState<string>(() => formatDestClock(destTzInfo.tz));
-  const [nowMinutes, setNowMinutes] = useState<number>(() => getCurrentMinutesInTimezone(destTzInfo.tz));
+  const [destNow, setDestNow] = useState(() => getDestinationNow(destTzInfo.tz, destTzInfo.utcOffsetHours));
+  const destClock = destNow.clock;
+  const nowMinutes = destNow.minutes;
 
   useEffect(() => {
     const updateClock = () => {
-      setDestClock(formatDestClock(destTzInfo.tz));
-      setNowMinutes(getCurrentMinutesInTimezone(destTzInfo.tz));
+      setDestNow(getDestinationNow(destTzInfo.tz, destTzInfo.utcOffsetHours));
     };
     updateClock();
     const timer = setInterval(updateClock, 30000);
-    return () => clearInterval(timer);
-  }, [destTzInfo.tz]);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') updateClock();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [destTzInfo.tz, destTzInfo.utcOffsetHours]);
 
   const computeInitialDayNumber = (targetTrip: Trip, tz?: string) => {
-    const today = getTodayInTimezone(tz);
+    const today = tz ? getTodayInTimezone(tz) : getDestinationNow(undefined, destTzInfo.utcOffsetHours).dateKey;
     const match = (targetTrip.days || []).find((d) => normalizeDateKey(d.date) === today);
     if (match) return match.dayNumber;
 
@@ -217,46 +258,75 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
     items: [],
   };
 
-  const destTodayStr = getTodayInTimezone(destTzInfo.tz);
+  const destTodayStr = destTzInfo.tz ? getTodayInTimezone(destTzInfo.tz) : destNow.dateKey;
   const activeDayDateKey = normalizeDateKey(activeDay.date) || destTodayStr;
   const isViewingToday = activeDayDateKey === destTodayStr;
 
-  // Smart time-aware selection of "Now / Up Next" item
+  // Flighty-standard "Now / Up Next" selection:
+  // (1) unchecked item currently in progress → (2) earliest upcoming unchecked → (3) first unchecked fallback
+  const getItemWindow = (it: ItineraryItem): { s: number; e: number; overnight: boolean } | null => {
+    const s = parseTimeToMinutes(it.startTime);
+    if (s === 99999) return null;
+    const rawEnd = parseTimeToMinutes(it.endTime);
+    if (rawEnd !== 99999 && isOvernightTimeRange(s, rawEnd)) return { s, e: rawEnd, overnight: true };
+    const e = rawEnd !== 99999 && rawEnd >= s ? rawEnd : s + 60;
+    return { s, e, overnight: false };
+  };
+  const isInWindow = (w: { s: number; e: number; overnight: boolean }, m: number) =>
+    w.overnight ? m >= w.s || m <= w.e : m >= w.s && m <= w.e;
+
   const nextItem = useMemo(() => {
     const unchecked = activeDay.items.filter((it) => !it.completed);
     if (unchecked.length === 0) return null;
     if (!isViewingToday) return unchecked[0];
 
-    // If an unchecked item is currently in progress, prioritize it first
     const inProgress = unchecked.find((it) => {
-      const s = parseTimeToMinutes(it.startTime);
-      const e = parseTimeToMinutes(it.endTime);
-      if (s === 99999) return false;
-      const effectiveEnd = e !== 99999 && e >= s ? e : s + 60;
-      return nowMinutes >= s && nowMinutes <= effectiveEnd;
+      const w = getItemWindow(it);
+      return w ? isInWindow(w, nowMinutes) : false;
     });
-    return inProgress || unchecked[0];
+    if (inProgress) return inProgress;
+
+    const upcoming = unchecked
+      .map((it) => ({ it, w: getItemWindow(it) }))
+      .filter((x) => x.w && x.w.s > nowMinutes)
+      .sort((a, b) => a.w!.s - b.w!.s)[0];
+    return upcoming?.it || unchecked[0];
   }, [activeDay.items, isViewingToday, nowMinutes]);
+
+  // The leg AFTER the hero spot (what comes next once you're done here)
+  const followingLeg = useMemo(() => {
+    if (!nextItem) return null;
+    const idx = activeDay.items.findIndex((it) => it.id === nextItem.id);
+    const following = activeDay.items.slice(idx + 1).find((it) => !it.completed);
+    if (!following) return null;
+    let distance: string | null = null;
+    if (isValidCoordinate(nextItem.lat, nextItem.lng) && isValidCoordinate(following.lat, following.lng)) {
+      const km = calculateDistanceKm(
+        { lat: nextItem.lat!, lng: nextItem.lng! },
+        { lat: following.lat!, lng: following.lng! }
+      );
+      distance = formatDistance(km, lang);
+    }
+    return { item: following, distance };
+  }, [nextItem, activeDay.items, lang]);
 
   // Compute live schedule badge ("進行中" / "還有 X 分鐘" / "已過預定時間")
   const liveStatusChip = useMemo(() => {
     if (!nextItem || !isViewingToday) return null;
-    const s = parseTimeToMinutes(nextItem.startTime);
-    if (s === 99999) return null;
-    const e = parseTimeToMinutes(nextItem.endTime);
-    const effectiveEnd = e !== 99999 && e >= s ? e : s + 60;
+    const w = getItemWindow(nextItem);
+    if (!w) return null;
 
-    if (nowMinutes >= s && nowMinutes <= effectiveEnd) {
+    if (isInWindow(w, nowMinutes)) {
       return { kind: 'now' as const, label: isZh ? '正在進行中' : 'Happening Now' };
     }
-    const diff = s - nowMinutes;
+    const diff = w.s - nowMinutes;
     if (diff > 0 && diff <= 180) {
       const hrs = Math.floor(diff / 60);
       const mins = diff % 60;
       const timeText = hrs > 0 ? `${hrs}h ${mins}m` : `${mins} ${isZh ? '分鐘' : 'min'}`;
       return { kind: 'soon' as const, label: isZh ? `${timeText}後開始` : `In ${timeText}` };
     }
-    if (nowMinutes > effectiveEnd) {
+    if (!w.overnight && nowMinutes > w.e) {
       return { kind: 'late' as const, label: isZh ? '已過預定時段' : 'Past scheduled time' };
     }
     return null;
@@ -265,6 +335,9 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   const completedCount = activeDay.items.filter((it) => it.completed).length;
   const totalCount = activeDay.items.length;
   const progressPercent = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+  const [showCompletedItems, setShowCompletedItems] = useState(false);
+  const shouldGroupCompleted = completedCount >= 2;
+  const hasDayFocus = Boolean(activeDay.theme?.trim() || activeDay.notes?.trim());
 
   // Daily expenses using normalized YYYY-MM-DD comparison
   const tripCurrency = trip.currency || detectTripCurrency(trip);
@@ -551,129 +624,168 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
       {/* Responsive Workbench: Left Column | Right Column */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
         <div className="lg:col-span-5 space-y-3.5 lg:sticky lg:top-20">
-          {/* 0. In-Transit Spending Snapshot */}
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200/70 dark:border-teal-800/70 flex items-center justify-center text-teal-700 dark:text-teal-400 shrink-0">
-                <DollarSign className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tabular-nums truncate">
-                  {isViewingToday
-                    ? `今日支出 (${todayExpenses.length})`
-                    : `Day ${activeDay.dayNumber} · ${formatMonthDaySlash(activeDayDateKey)} 支出 (${todayExpenses.length})`}
-                </div>
-                <div className="text-base sm:text-lg font-black font-mono tabular-nums text-slate-900 dark:text-white">
-                  {formatCurrencyAmount(todayTotalSpent, tripCurrency)}
-                </div>
-              </div>
-            </div>
+          {/* 1. Hero "Now / Up Next" Card — Refined Light & Dark Editorial Theme */}
+          {nextItem ? (
+            <div className="rounded-3xl bg-gradient-to-br from-[#F0FDFA] via-white to-[#FAF9F6] dark:from-[#0E1E22] dark:via-[#111827] dark:to-[#0D1320] border border-teal-200/90 dark:border-teal-800/60 text-slate-900 dark:text-white p-5 sm:p-6 shadow-sm relative overflow-hidden">
+              {/* Top Teal Editorial Accent Bar */}
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-teal-600 via-teal-500 to-emerald-500" />
 
-            {onOpenQuickAction && canEdit && (
-              <button
-                type="button"
-                onClick={() => onOpenQuickAction('expense')}
-                className="min-h-[42px] sm:min-h-[36px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs shadow-2xs transition active:scale-95 flex items-center gap-1 shrink-0 cursor-pointer"
-                title="記帳"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>記一筆</span>
-              </button>
-            )}
-          </div>
-
-          {/* 2. Daily Theme & Day Highlights Card (Inline Editable, fixed trailing middot) */}
-          {(activeDay.theme || activeDay.notes || canEdit) && (
-            <div className="rounded-2xl bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-3.5 sm:p-4 shadow-2xs">
-              {isEditingFocus ? (
-                <div className="space-y-2.5 text-xs animate-in fade-in duration-100">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-teal-700 dark:text-teal-400 flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5" />
-                      <span>{isZh ? `Day ${activeDay.dayNumber} 焦點與備註` : `Day ${activeDay.dayNumber} Focus & Notes`}</span>
+              <div className="flex items-center justify-between text-xs font-semibold mb-2 flex-wrap gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-teal-700 dark:text-teal-400">
+                    <Navigation className="w-3.5 h-3.5" />
+                    <span>{liveStatusChip?.kind === 'now' ? (isZh ? '現在行程' : 'Now') : t.upNext}</span>
+                  </span>
+                  {liveStatusChip && (
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        liveStatusChip.kind === 'now'
+                          ? 'bg-teal-700 text-white'
+                          : liveStatusChip.kind === 'soon'
+                            ? 'bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-300'
+                            : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
+                      }`}
+                    >
+                      {liveStatusChip.label}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingFocus(false)}
-                      className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 px-2 py-1 rounded-lg cursor-pointer"
-                    >
-                      {isZh ? '取消' : 'Cancel'}
-                    </button>
+                  )}
+                  {nextItem.category && CATEGORY_TAGS[nextItem.category] && (
+                    <span className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1 font-medium">
+                      {React.createElement(CATEGORY_TAGS[nextItem.category].Icon, {
+                        className: 'w-3 h-3 text-teal-700 dark:text-teal-400',
+                      })}
+                      <span>{CATEGORY_TAGS[nextItem.category].label}</span>
+                    </span>
+                  )}
+                </div>
+
+                {nextItem.startTime && (
+                  <span className="font-mono tabular-nums text-slate-700 dark:text-slate-300 flex items-center gap-1 text-xs font-bold">
+                    <Clock className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                    <span>{nextItem.startTime}</span>
+                    {nextItem.endTime ? <span>~ {nextItem.endTime}</span> : ''}
+                  </span>
+                )}
+              </div>
+
+              <h3 className="font-black text-xl sm:text-2xl mt-1 tracking-tight text-slate-900 dark:text-white">
+                {nextItem.title}
+              </h3>
+
+              {(nextItem.locationName || nextItem.address) && (
+                <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm flex items-center gap-1.5 mt-1.5">
+                  <MapPin className="w-4 h-4 shrink-0 text-teal-700 dark:text-teal-400" />
+                  <span className="truncate">{nextItem.locationName || nextItem.address}</span>
+                </p>
+              )}
+
+              {nextItem.notes && (
+                <div className="mt-3 pt-3 border-t border-teal-200/60 dark:border-slate-800 text-xs space-y-1">
+                  <div className="flex items-center gap-1.5 text-teal-700 dark:text-teal-300 font-bold text-[11px]">
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>{isZh ? '重點備註' : 'Notes'}</span>
                   </div>
-                  <input
-                    type="text"
-                    value={focusThemeInput}
-                    onChange={(e) => setFocusThemeInput(e.target.value)}
-                    placeholder={isZh ? '今日主題（例如：京都古寺巡禮）' : 'Day focus title...'}
-                    className="w-full min-h-[44px] sm:min-h-[38px] px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-teal-600"
-                  />
-                  <textarea
-                    rows={2}
-                    value={focusNotesInput}
-                    onChange={(e) => setFocusNotesInput(e.target.value)}
-                    placeholder={isZh ? '提醒事項（例如：記得帶 ICOCA、提前預約車票）' : 'Day notes...'}
-                    className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-teal-600 resize-none"
-                  />
-                  <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={handleSaveDayFocus}
-                      className="min-h-[42px] sm:min-h-[36px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      <span>{isZh ? '儲存焦點' : 'Save'}</span>
-                    </button>
+                  <p className="text-slate-700 dark:text-slate-200 text-xs leading-relaxed whitespace-pre-wrap">
+                    {nextItem.notes}
+                  </p>
+                </div>
+              )}
+
+              {nextItem.transportNote && (
+                <div className="mt-3 pt-3 border-t border-teal-200/60 dark:border-slate-800 text-slate-700 dark:text-slate-100 text-xs flex items-start gap-2">
+                  <Bus className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-[11px] text-teal-700 dark:text-teal-300 block">
+                      {isZh ? '交通指引' : 'Transit'}
+                    </span>
+                    <span>{nextItem.transportNote}</span>
                   </div>
                 </div>
-              ) : (
-                <div className="flex items-start justify-between gap-2.5">
-                  <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                    <div className="p-2 rounded-xl bg-teal-700 dark:bg-teal-600 text-white shrink-0 mt-0.5 shadow-2xs">
-                      <MapPin className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-                        <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400">
-                          {isViewingToday ? (isZh ? '今日焦點' : 'Today Focus') : `Day ${activeDay.dayNumber} 焦點`}
-                        </span>
-                        {activeDay.theme?.trim() ? (
-                          <>
-                            <span className="text-slate-300 dark:text-slate-600">·</span>
-                            <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
-                              {activeDay.theme.trim()}
-                            </h4>
-                          </>
-                        ) : (
-                          <span className="text-xs text-slate-400 dark:text-slate-500 font-normal">
-                            {isZh ? '尚未設定主題' : 'No focus set'}
-                          </span>
-                        )}
-                      </div>
-                      {activeDay.notes && (
-                        <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mt-1 flex items-start gap-1.5">
-                          <FileText className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
-                          <span>{activeDay.notes}</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onClick={handleStartEditFocus}
-                      className="min-w-[40px] min-h-[40px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 hover:bg-white dark:hover:bg-slate-800 border border-transparent hover:border-[#E5E2DC] dark:hover:border-slate-700 transition shrink-0 cursor-pointer"
-                      title={isZh ? '編輯焦點與備註' : 'Edit day focus'}
-                      aria-label={isZh ? '編輯焦點與備註' : 'Edit day focus'}
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+              )}
+
+              {(nextItem.bookingCode || (typeof nextItem.cost === 'number' && nextItem.cost > 0)) && (
+                <div className="flex items-center gap-2 flex-wrap mt-3 text-xs font-mono tabular-nums text-slate-600 dark:text-slate-300">
+                  {nextItem.bookingCode && (
+                    <span className="inline-flex items-center gap-1 text-teal-800 dark:text-teal-300 font-bold">
+                      <Bookmark className="w-3.5 h-3.5" />
+                      <span>#{nextItem.bookingCode}</span>
+                    </span>
+                  )}
+                  {nextItem.bookingCode && typeof nextItem.cost === 'number' && nextItem.cost > 0 && (
+                    <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">·</span>
+                  )}
+                  {typeof nextItem.cost === 'number' && nextItem.cost > 0 && (
+                    <span className="inline-flex items-center gap-1 font-semibold">
+                      <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                      <span>預估 {formatCurrencyAmount(nextItem.cost, trip.currency || tripCurrency)}</span>
+                    </span>
                   )}
                 </div>
               )}
+
+              {followingLeg && (
+                <div className="mt-3 pt-3 border-t border-teal-200/60 dark:border-slate-800 flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 min-w-0">
+                  <span className="text-[11px] font-bold text-slate-400 dark:text-slate-500 shrink-0">
+                    {isZh ? '接著' : 'Then'}
+                  </span>
+                  <span className="font-semibold text-slate-800 dark:text-slate-100 truncate">
+                    {followingLeg.item.startTime ? `${followingLeg.item.startTime} · ` : ''}
+                    {followingLeg.item.title}
+                  </span>
+                  {followingLeg.distance && (
+                    <span className="ml-auto font-mono tabular-nums text-[11px] text-teal-700 dark:text-teal-400 font-bold shrink-0">
+                      {followingLeg.distance}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Action Buttons: Google Maps, Edit, Check Off */}
+              <div className="mt-5 space-y-2">
+                <a
+                  href={getGoogleMapsNavigationUrl(nextItem)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full min-h-[44px] py-2.5 px-4 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95"
+                >
+                  <Navigation className="w-4 h-4 shrink-0" />
+                  <span className="truncate">{t.navGoogle}</span>
+                </a>
+
+                {canEdit && (
+                  <div className={`grid gap-2 ${onOpenEditItem ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                    {onOpenEditItem && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenEditItem(nextItem, activeDay.dayNumber)}
+                        className="min-h-[42px] py-2 px-3 rounded-xl bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-100 font-bold text-xs flex items-center justify-center gap-1.5 border border-[#E5E2DC] dark:border-slate-700 transition active:scale-95 cursor-pointer"
+                      >
+                        <Edit2 className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+                        <span>{isZh ? '編輯景點' : 'Edit'}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => handleToggleComplete(nextItem.id, e)}
+                      className="min-h-[42px] py-2 px-3 rounded-xl bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-800 dark:text-teal-200 font-bold text-xs flex items-center justify-center gap-1.5 border border-teal-200 dark:border-teal-800 transition active:scale-95 cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
+                      <span>{t.checked}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-3xl bg-teal-50/90 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800/60 text-teal-900 dark:text-teal-100 p-6 shadow-xs text-center">
+              <h3 className="font-bold text-base flex items-center justify-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-teal-700 dark:text-teal-400" />
+                <span>{totalCount === 0 ? (isZh ? '本日尚無排定景點' : 'No spots planned today') : t.doneToday}</span>
+              </h3>
             </div>
           )}
 
-          {/* 3. Micro Weather Capsule (Visible error states, Day forecast support, Stale offline cache) */}
+          {/* 2. Micro Weather Capsule (Visible error states, Day forecast support, Stale offline cache) */}
           <div className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs overflow-hidden transition-all duration-200">
             <div className="p-3 sm:px-4 sm:py-3 flex items-center justify-between gap-2.5 flex-wrap">
               <button
@@ -780,18 +892,47 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                     <RefreshCw className="w-3.5 h-3.5 animate-spin text-teal-700 dark:text-teal-400" />
                     <span>{t.fetchingWeather}</span>
                   </div>
+                ) : showingDayForecast && dayForecast ? (
+                  <>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                      <span className="truncate">📍 {dayForecast.locationName}</span>
+                      <span className="font-mono text-[10px] shrink-0">
+                        {dayForecast.source === 'archive' ? '歷史同期氣候' : `Day ${activeDay.dayNumber} 預報`}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC]/80 dark:border-slate-800 divide-x divide-[#E5E2DC]/70 dark:divide-slate-800 text-xs overflow-hidden">
+                      <div className="px-3 py-2">
+                        <span className="text-slate-400 text-[10px] block">最高 / 最低</span>
+                        <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">
+                          {dayForecast.maxTemp}° / {dayForecast.minTemp}°
+                        </span>
+                      </div>
+                      <div className="px-3 py-2">
+                        <span className="text-slate-400 text-[10px] block">降雨機率</span>
+                        <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">
+                          {dayForecast.rainProbability}%
+                        </span>
+                      </div>
+                      <div className="px-3 py-2">
+                        <span className="text-slate-400 text-[10px] block">最大風速</span>
+                        <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">
+                          {dayForecast.windSpeedMax} km/h
+                        </span>
+                      </div>
+                    </div>
+                    {weatherAdvice && (
+                      <div className="pt-2 border-t border-[#E5E2DC]/70 dark:border-slate-800 text-xs text-teal-800 dark:text-teal-200 flex items-center gap-1.5">
+                        <Info className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
+                        <span className="truncate">{weatherAdvice}</span>
+                      </div>
+                    )}
+                  </>
                 ) : weather ? (
                   <>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
-                      <span className="truncate">
-                        📍 {showingDayForecast ? dayForecast!.locationName : weather.locationName}
-                      </span>
+                      <span className="truncate">📍 {weather.locationName}</span>
                       <span className="font-mono text-[10px] shrink-0">
-                        {showingDayForecast
-                          ? dayForecast!.source === 'archive'
-                            ? '當日歷史實測'
-                            : `Day ${activeDay.dayNumber} 預報`
-                          : '目前即時天氣'}
+                        {weatherMode === 'gps' ? 'GPS 即時天氣' : '目的地即時天氣'}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-4 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/60 border border-[#E5E2DC]/80 dark:border-slate-800 divide-y sm:divide-y-0 sm:divide-x divide-[#E5E2DC]/70 dark:divide-slate-800 text-xs overflow-hidden">
@@ -804,7 +945,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                       <div className="px-3 py-2">
                         <span className="text-slate-400 text-[10px] block">最高 / 最低</span>
                         <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">
-                          {showingDayForecast ? `${dayForecast!.maxTemp}° / ${dayForecast!.minTemp}°` : `${weather.maxTemp}° / ${weather.minTemp}°`}
+                          {weather.maxTemp}° / {weather.minTemp}°
                         </span>
                       </div>
                       <div className="px-3 py-2 max-sm:border-r max-sm:border-[#E5E2DC]/70 max-sm:dark:border-slate-800">
@@ -816,7 +957,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                       <div className="px-3 py-2">
                         <span className="text-slate-400 text-[10px] block">風速</span>
                         <span className="font-mono tabular-nums font-bold text-slate-800 dark:text-slate-200">
-                          {showingDayForecast ? dayForecast!.windSpeedMax : weather.windSpeed} km/h
+                          {weather.windSpeed} km/h
                         </span>
                       </div>
                     </div>
@@ -840,156 +981,152 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
             )}
           </div>
 
-          {/* 4. Hero "Up Next" Card — Refined Light & Dark Editorial Theme */}
-          {nextItem ? (
-            <div className="rounded-3xl bg-gradient-to-br from-[#F0FDFA] via-white to-[#FAF9F6] dark:from-[#0E1E22] dark:via-[#111827] dark:to-[#0D1320] border border-teal-200/90 dark:border-teal-800/60 text-slate-900 dark:text-white p-5 sm:p-6 shadow-sm relative overflow-hidden">
-              {/* Top Teal Editorial Accent Bar */}
-              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-teal-600 via-teal-500 to-emerald-500" />
-
-              <div className="flex items-center justify-between text-xs font-semibold mb-2 flex-wrap gap-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-teal-700 dark:text-teal-400">
-                    <Navigation className="w-3.5 h-3.5" />
-                    <span>{liveStatusChip?.kind === 'now' ? (isZh ? '現在行程' : 'Now') : t.upNext}</span>
-                  </span>
-                  {liveStatusChip && (
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        liveStatusChip.kind === 'now'
-                          ? 'bg-teal-700 text-white'
-                          : liveStatusChip.kind === 'soon'
-                            ? 'bg-teal-100 dark:bg-teal-900/60 text-teal-800 dark:text-teal-300'
-                            : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
-                      }`}
-                    >
-                      {liveStatusChip.label}
-                    </span>
-                  )}
-                  {nextItem.category && CATEGORY_TAGS[nextItem.category] && (
-                    <span className="text-[11px] text-slate-600 dark:text-slate-300 flex items-center gap-1 font-medium">
-                      {React.createElement(CATEGORY_TAGS[nextItem.category].Icon, {
-                        className: 'w-3 h-3 text-teal-700 dark:text-teal-400',
-                      })}
-                      <span>{CATEGORY_TAGS[nextItem.category].label}</span>
-                    </span>
-                  )}
-                </div>
-
-                {nextItem.startTime && (
-                  <span className="font-mono tabular-nums text-slate-700 dark:text-slate-300 flex items-center gap-1 text-xs font-bold">
-                    <Clock className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                    <span>{nextItem.startTime}</span>
-                    {nextItem.endTime ? <span>~ {nextItem.endTime}</span> : ''}
-                  </span>
-                )}
+          {/* 3. In-Transit Spending Snapshot */}
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200/70 dark:border-teal-800/70 flex items-center justify-center text-teal-700 dark:text-teal-400 shrink-0">
+                <DollarSign className="w-4 h-4" />
               </div>
-
-              <h3 className="font-black text-xl sm:text-2xl mt-1 tracking-tight text-slate-900 dark:text-white">
-                {nextItem.title}
-              </h3>
-
-              {(nextItem.locationName || nextItem.address) && (
-                <p className="text-slate-600 dark:text-slate-300 text-xs sm:text-sm flex items-center gap-1.5 mt-1.5">
-                  <MapPin className="w-4 h-4 shrink-0 text-teal-700 dark:text-teal-400" />
-                  <span className="truncate">{nextItem.locationName || nextItem.address}</span>
-                </p>
-              )}
-
-              {nextItem.notes && (
-                <div className="mt-3 pt-3 border-t border-teal-200/60 dark:border-slate-800 text-xs space-y-1">
-                  <div className="flex items-center gap-1.5 text-teal-700 dark:text-teal-300 font-bold text-[11px]">
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>{isZh ? '重點備註' : 'Notes'}</span>
-                  </div>
-                  <p className="text-slate-700 dark:text-slate-200 text-xs leading-relaxed whitespace-pre-wrap">
-                    {nextItem.notes}
-                  </p>
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tabular-nums truncate">
+                  {isViewingToday
+                    ? `今日支出 (${todayExpenses.length})`
+                    : `Day ${activeDay.dayNumber} · ${formatMonthDaySlash(activeDayDateKey)} 支出 (${todayExpenses.length})`}
                 </div>
-              )}
-
-              {nextItem.transportNote && (
-                <div className="mt-3 pt-3 border-t border-teal-200/60 dark:border-slate-800 text-slate-700 dark:text-slate-100 text-xs flex items-start gap-2">
-                  <Bus className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold text-[11px] text-teal-700 dark:text-teal-300 block">
-                      {isZh ? '交通指引' : 'Transit'}
-                    </span>
-                    <span>{nextItem.transportNote}</span>
-                  </div>
+                <div className="text-base sm:text-lg font-black font-mono tabular-nums text-slate-900 dark:text-white">
+                  {formatCurrencyAmount(todayTotalSpent, tripCurrency)}
                 </div>
-              )}
-
-              {(nextItem.bookingCode || (typeof nextItem.cost === 'number' && nextItem.cost > 0)) && (
-                <div className="flex items-center gap-2 flex-wrap mt-3 text-xs font-mono tabular-nums text-slate-600 dark:text-slate-300">
-                  {nextItem.bookingCode && (
-                    <span className="inline-flex items-center gap-1 text-teal-800 dark:text-teal-300 font-bold">
-                      <Bookmark className="w-3.5 h-3.5" />
-                      <span>#{nextItem.bookingCode}</span>
-                    </span>
-                  )}
-                  {nextItem.bookingCode && typeof nextItem.cost === 'number' && nextItem.cost > 0 && (
-                    <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">·</span>
-                  )}
-                  {typeof nextItem.cost === 'number' && nextItem.cost > 0 && (
-                    <span className="inline-flex items-center gap-1 font-semibold">
-                      <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                      <span>預估 {formatCurrencyAmount(nextItem.cost, trip.currency || tripCurrency)}</span>
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {/* Action Buttons: Google Maps, Edit, Check Off */}
-              <div className="mt-5 space-y-2">
-                <a
-                  href={getGoogleMapsNavigationUrl(nextItem)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-full min-h-[44px] py-2.5 px-4 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95"
-                >
-                  <Navigation className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{t.navGoogle}</span>
-                </a>
-
-                {canEdit && (
-                  <div className={`grid gap-2 ${onOpenEditItem ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                    {onOpenEditItem && (
-                      <button
-                        type="button"
-                        onClick={() => onOpenEditItem(nextItem, activeDay.dayNumber)}
-                        className="min-h-[42px] py-2 px-3 rounded-xl bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-100 font-bold text-xs flex items-center justify-center gap-1.5 border border-[#E5E2DC] dark:border-slate-700 transition active:scale-95 cursor-pointer"
-                      >
-                        <Edit2 className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0" />
-                        <span>{isZh ? '編輯景點' : 'Edit'}</span>
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={(e) => handleToggleComplete(nextItem.id, e)}
-                      className="min-h-[42px] py-2 px-3 rounded-xl bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 text-teal-800 dark:text-teal-200 font-bold text-xs flex items-center justify-center gap-1.5 border border-teal-200 dark:border-teal-800 transition active:scale-95 cursor-pointer"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0" />
-                      <span>{t.checked}</span>
-                    </button>
-                  </div>
-                )}
               </div>
             </div>
-          ) : (
-            <div className="rounded-3xl bg-teal-50/90 dark:bg-teal-950/50 border border-teal-200 dark:border-teal-800/60 text-teal-900 dark:text-teal-100 p-6 shadow-xs text-center">
-              <h3 className="font-bold text-base flex items-center justify-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-teal-700 dark:text-teal-400" />
-                <span>{totalCount === 0 ? (isZh ? '本日尚無排定景點' : 'No spots planned today') : t.doneToday}</span>
-              </h3>
+
+            {onOpenQuickAction && canEdit && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => onOpenQuickAction('todos', activeDayDateKey)}
+                  className="min-h-[42px] sm:min-h-[36px] px-3 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600/60 text-slate-700 dark:text-slate-200 font-bold text-xs transition active:scale-95 flex items-center gap-1 cursor-pointer"
+                  title="新增待辦"
+                >
+                  <Plus className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                  <span>待辦</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpenQuickAction('expense', activeDayDateKey)}
+                  className="min-h-[42px] sm:min-h-[36px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs shadow-2xs transition active:scale-95 flex items-center gap-1 cursor-pointer"
+                  title="記帳"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>記一筆</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 4. Daily Theme & Day Highlights Card (Inline Editable, fixed trailing middot) */}
+          {(activeDay.theme?.trim() || activeDay.notes?.trim() || isEditingFocus) && (
+            <div className="rounded-2xl bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-3.5 sm:p-4 shadow-2xs">
+              {isEditingFocus ? (
+                <div className="space-y-2.5 text-xs animate-in fade-in duration-100">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-teal-700 dark:text-teal-400 flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5" />
+                      <span>{isZh ? `Day ${activeDay.dayNumber} 焦點與備註` : `Day ${activeDay.dayNumber} Focus & Notes`}</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingFocus(false)}
+                      className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 px-2 py-1 rounded-lg cursor-pointer"
+                    >
+                      {isZh ? '取消' : 'Cancel'}
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    value={focusThemeInput}
+                    onChange={(e) => setFocusThemeInput(e.target.value)}
+                    placeholder={isZh ? '今日主題（例如：京都古寺巡禮）' : 'Day focus title...'}
+                    className="w-full min-h-[44px] sm:min-h-[38px] px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-teal-600"
+                  />
+                  <textarea
+                    rows={2}
+                    value={focusNotesInput}
+                    onChange={(e) => setFocusNotesInput(e.target.value)}
+                    placeholder={isZh ? '提醒事項（例如：記得帶 ICOCA、提前預約車票）' : 'Day notes...'}
+                    className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-teal-600 resize-none"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveDayFocus}
+                      className="min-h-[42px] sm:min-h-[36px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{isZh ? '儲存焦點' : 'Save'}</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                    <div className="p-2 rounded-xl bg-teal-700 dark:bg-teal-600 text-white shrink-0 mt-0.5 shadow-2xs">
+                      <MapPin className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+                        <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400">
+                          {isViewingToday ? (isZh ? '今日焦點' : 'Today Focus') : `Day ${activeDay.dayNumber} 焦點`}
+                        </span>
+                        {activeDay.theme?.trim() ? (
+                          <>
+                            <span className="text-slate-300 dark:text-slate-600">·</span>
+                            <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
+                              {activeDay.theme.trim()}
+                            </h4>
+                          </>
+                        ) : (
+                          <span className="text-xs text-slate-400 dark:text-slate-500 font-normal">
+                            {isZh ? '尚未設定主題' : 'No focus set'}
+                          </span>
+                        )}
+                      </div>
+                      {activeDay.notes && (
+                        <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mt-1 flex items-start gap-1.5">
+                          <FileText className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
+                          <span>{activeDay.notes}</span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={handleStartEditFocus}
+                      className="min-w-[40px] min-h-[40px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 hover:bg-white dark:hover:bg-slate-800 border border-transparent hover:border-[#E5E2DC] dark:hover:border-slate-700 transition shrink-0 cursor-pointer"
+                      title={isZh ? '編輯焦點與備註' : 'Edit day focus'}
+                      aria-label={isZh ? '編輯焦點與備註' : 'Edit day focus'}
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
           {/* Today's Key Booking Codes Quick-Copy Strip (Normalized dates + Expand All toggle) */}
           {(() => {
             const dayBookings: Array<{ id: string; title: string; code: string; sub?: string }> = [];
+            const seenCodes = new Set<string>();
+            const pushUnique = (entry: { id: string; title: string; code: string; sub?: string }) => {
+              const key = entry.code.trim().toUpperCase();
+              if (!key || seenCodes.has(key)) return;
+              seenCodes.add(key);
+              dayBookings.push(entry);
+            };
             activeDay.items.forEach((it) => {
               if (it.bookingCode && it.bookingCode.trim()) {
-                dayBookings.push({
+                pushUnique({
                   id: `it-${it.id}`,
                   title: it.title,
                   code: it.bookingCode.trim(),
@@ -998,15 +1135,16 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
               }
             });
             (trip.bookings || []).forEach((b) => {
+              if (!b.bookingCode || !b.bookingCode.trim()) return;
               const bStart = normalizeDateKey(b.startDate);
               const bEnd = normalizeDateKey(b.endDate);
               const matchesDay = b.dayNumber === activeDay.dayNumber || (bStart && bStart === activeDayDateKey);
               const spansDay = Boolean(bStart && bEnd && activeDayDateKey >= bStart && activeDayDateKey <= bEnd);
               if (matchesDay || spansDay || (!b.dayNumber && !bStart)) {
-                dayBookings.push({
+                pushUnique({
                   id: `bk-${b.id}`,
                   title: b.title,
-                  code: b.bookingCode,
+                  code: b.bookingCode.trim(),
                   sub: b.secondaryCode || b.timeLabel,
                 });
               }
@@ -1093,6 +1231,16 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
               <span className="font-mono tabular-nums font-bold text-xs text-teal-700 dark:text-teal-400">
                 {completedCount} / {totalCount} · {progressPercent}%
               </span>
+              {canEdit && !hasDayFocus && !isEditingFocus && (
+                <button
+                  type="button"
+                  onClick={handleStartEditFocus}
+                  className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-400 flex items-center gap-0.5 cursor-pointer"
+                >
+                  <Edit2 className="w-3 h-3" />
+                  <span>{isZh ? '當日主題' : 'Day focus'}</span>
+                </button>
+              )}
               {onNavigateToTimelineDay && (
                 <button
                   type="button"
@@ -1114,7 +1262,9 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
           </div>
 
           <div className="space-y-3 pt-1">
-            {activeDay.items.map((item) => {
+            {activeDay.items
+              .filter((it) => !(shouldGroupCompleted && it.completed && !showCompletedItems))
+              .map((item) => {
               const isExpanded = expandedItemIds[item.id] ?? true;
               const catTag = CATEGORY_TAGS[item.category] || CATEGORY_TAGS.spot;
 
@@ -1173,10 +1323,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                         </div>
 
                         <h5
-                          onClick={(e) => canEdit && handleToggleComplete(item.id, e)}
                           className={`text-sm sm:text-base font-bold transition ${
-                            canEdit ? 'cursor-pointer hover:text-teal-700 dark:hover:text-teal-300' : 'cursor-default'
-                          } ${
                             item.completed
                               ? 'line-through text-slate-400 dark:text-slate-500'
                               : 'text-slate-900 dark:text-white'
@@ -1292,6 +1439,22 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                 </div>
               );
             })}
+
+            {shouldGroupCompleted && (
+              <button
+                type="button"
+                onClick={() => setShowCompletedItems((prev) => !prev)}
+                className="w-full min-h-[40px] px-3 rounded-xl bg-[#FAF9F6] dark:bg-slate-900/50 border border-[#E5E2DC]/80 dark:border-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                <span className="tabular-nums">
+                  {showCompletedItems
+                    ? isZh ? `隱藏已完成 ${completedCount} 站` : `Hide ${completedCount} completed`
+                    : isZh ? `已完成 ${completedCount} 站` : `${completedCount} completed`}
+                </span>
+                {showCompletedItems ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              </button>
+            )}
 
             {canEdit && onOpenAddItem && (
               <button

@@ -83,7 +83,8 @@ export const TravelHubAnalyticsView: React.FC<TravelHubAnalyticsViewProps> = ({
       const startY = t.startDate?.slice(0, 4);
       const endY = t.endDate?.slice(0, 4);
       const hasMatchingDay = (t.days || []).some((d) => d.date?.startsWith(reviewYear));
-      return startY === reviewYear || endY === reviewYear || hasMatchingDay;
+      const hasMatchingMemory = (t.memories || []).some((m) => m.date?.startsWith(reviewYear));
+      return startY === reviewYear || endY === reviewYear || hasMatchingDay || hasMatchingMemory;
     });
 
     const tripMap = new Map<string, Trip>(matchedTrips.map((t) => [t.id, t]));

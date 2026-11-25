@@ -244,35 +244,43 @@ export async function geocodeCity(
   }
 
   const candidates = extractGeocodeCandidates(normalized);
+  let sawNetworkError = false;
 
   for (const candidate of candidates) {
-    try {
-      const cleanName = encodeURIComponent(candidate);
-      const res = await fetch(
-        `https://geocoding-api.open-meteo.com/v1/search?name=${cleanName}&count=1&language=en&format=json`,
-        { signal }
-      );
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (data.results && data.results.length > 0) {
-        const match = data.results[0];
-        if (isValidCoordinate(match.latitude, match.longitude)) {
-          const hit = {
-            lat: match.latitude,
-            lng: match.longitude,
-            name: match.name || candidate,
-          };
-          memoryGeocodeCache.set(cacheKey, hit);
-          writeGeocodeDiskCache(cacheKey, hit);
-          return hit;
+    const cleanName = encodeURIComponent(candidate);
+    // Try Traditional Chinese first (for exonyms like 首爾, 釜山, 清邁), then English fallback
+    for (const langCode of ['zh', 'en']) {
+      try {
+        const res = await fetch(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${cleanName}&count=1&language=${langCode}&format=json`,
+          { signal }
+        );
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (data.results && data.results.length > 0) {
+          const match = data.results[0];
+          if (isValidCoordinate(match.latitude, match.longitude)) {
+            const hit = {
+              lat: match.latitude,
+              lng: match.longitude,
+              name: match.name || candidate,
+            };
+            memoryGeocodeCache.set(cacheKey, hit);
+            writeGeocodeDiskCache(cacheKey, hit);
+            return hit;
+          }
         }
+      } catch (e: any) {
+        if (e?.name === 'AbortError') return null;
+        sawNetworkError = true;
       }
-    } catch (e: any) {
-      if (e?.name === 'AbortError') return null;
     }
   }
 
-  memoryGeocodeCache.set(cacheKey, null);
+  // Only cache negative miss when network succeeded cleanly (so retry buttons actually retry after transient errors!)
+  if (!sawNetworkError) {
+    memoryGeocodeCache.set(cacheKey, null);
+  }
   return null;
 }
 

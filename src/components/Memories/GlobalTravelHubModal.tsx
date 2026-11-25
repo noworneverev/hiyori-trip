@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { User } from 'firebase/auth';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import { useModalLayer } from '../../hooks/useModalHistory';
 import { CategoryType, Trip } from '../../types/itinerary';
 import { formatDateSlash, getDayOfWeek } from '../../utils/date';
 import { Language } from '../../utils/i18n';
@@ -141,6 +143,19 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
   // Overlays
   const [showShareStudio, setShowShareStudio] = useState(false);
   const [lightboxState, setLightboxState] = useState<LightboxPhotoState | null>(null);
+
+  // Register Global Travel Hub with modal history stack (handles iOS swipe-back & hides underlying + FABs)
+  useModalLayer(true, () => {
+    if (lightboxState) {
+      setLightboxState(null);
+    } else if (showShareStudio) {
+      setShowShareStudio(false);
+    } else if (showMobileFilters) {
+      setShowMobileFilters(false);
+    } else {
+      onClose();
+    }
+  });
 
   // Escape key closes topmost overlay cleanly
   useEffect(() => {
@@ -979,9 +994,9 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
     { id: 'review', label: '年度回顧', shortLabel: '年鑑', icon: BarChart3 },
   ];
 
-  return (
+  const modalTree = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 backdrop-blur-sm sm:p-4 overflow-hidden"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/75 backdrop-blur-sm sm:p-4 overflow-hidden"
       onClick={onClose}
     >
       <div
@@ -1664,4 +1679,6 @@ export const GlobalTravelHubModal: React.FC<GlobalTravelHubModalProps> = ({
       )}
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalTree, document.body) : modalTree;
 };

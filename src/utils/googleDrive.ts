@@ -14,7 +14,9 @@ export class DriveAuthExpiredError extends Error {
 }
 
 let cachedRootFolderId: string | null = null;
+let inFlightRootFolderPromise: Promise<string> | null = null;
 const tripFolderCache = new Map<string, string>();
+const inFlightTripFolderPromises = new Map<string, Promise<string>>();
 const originalObjectUrlCache = new Map<string, { url: string; mimeType: string }>();
 const inFlightOriginalFetches = new Map<string, Promise<string>>();
 
@@ -53,46 +55,63 @@ async function driveFetch(url: string, token: string, init: RequestInit = {}): P
   const headers = new Headers(init.headers || {});
   headers.set('Authorization', `Bearer ${token}`);
   const res = await fetch(url, { ...init, headers });
-  if (res.status === 401 || res.status === 403) {
+  // Only invalidate OAuth session on 401 Unauthorized (expired/revoked token).
+  // Never wipe User B's valid token or revoke active blob: URLs on 403 Forbidden (e.g., viewing Collaborator A's private Drive file)!
+  if (res.status === 401) {
     clearDriveAccessToken();
-    clearDriveClientCaches();
     throw new DriveAuthExpiredError();
+  }
+  if (res.status === 403) {
+    const cloned = res.clone();
+    const errJson = await cloned.json().catch(() => null);
+    const reason = errJson?.error?.errors?.[0]?.reason || '';
+    if (reason === 'insufficientPermissions' || reason === 'authError') {
+      clearDriveAccessToken();
+      throw new DriveAuthExpiredError();
+    }
   }
   return res;
 }
 
 export async function ensureHiyoriRootFolder(token: string): Promise<string> {
   if (cachedRootFolderId) return cachedRootFolderId;
+  if (inFlightRootFolderPromise) return inFlightRootFolderPromise;
 
-  const q = `name = '${escapeDriveQueryValue(HIYORI_ROOT_FOLDER_NAME)}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-  const searchUrl = `${DRIVE_API_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive&pageSize=5`;
-  const searchRes = await driveFetch(searchUrl, token);
-  if (!searchRes.ok) {
-    const errText = await searchRes.text().catch(() => '');
-    throw new Error(`無法讀取 Google Drive 資料夾 (${searchRes.status}): ${errText}`);
-  }
-  const searchData = await searchRes.json();
-  if (Array.isArray(searchData.files) && searchData.files.length > 0 && searchData.files[0].id) {
-    cachedRootFolderId = searchData.files[0].id;
-    return cachedRootFolderId!;
-  }
+  inFlightRootFolderPromise = (async () => {
+    const q = `name = '${escapeDriveQueryValue(HIYORI_ROOT_FOLDER_NAME)}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
+    const searchUrl = `${DRIVE_API_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive&pageSize=5`;
+    const searchRes = await driveFetch(searchUrl, token);
+    if (!searchRes.ok) {
+      const errText = await searchRes.text().catch(() => '');
+      throw new Error(`無法讀取 Google Drive 資料夾 (${searchRes.status}): ${errText}`);
+    }
+    const searchData = await searchRes.json();
+    if (Array.isArray(searchData.files) && searchData.files.length > 0 && searchData.files[0].id) {
+      cachedRootFolderId = searchData.files[0].id;
+      return cachedRootFolderId!;
+    }
 
-  const createRes = await driveFetch(`${DRIVE_API_BASE}/files?fields=id,name`, token, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: HIYORI_ROOT_FOLDER_NAME,
-      mimeType: 'application/vnd.google-apps.folder',
-      appProperties: { hiyoriRoot: 'true' },
-    }),
+    const createRes = await driveFetch(`${DRIVE_API_BASE}/files?fields=id,name`, token, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: HIYORI_ROOT_FOLDER_NAME,
+        mimeType: 'application/vnd.google-apps.folder',
+        appProperties: { hiyoriRoot: 'true' },
+      }),
+    });
+    if (!createRes.ok) {
+      const errText = await createRes.text().catch(() => '');
+      throw new Error(`無法建立 Google Drive 根資料夾 (${createRes.status}): ${errText}`);
+    }
+    const created = await createRes.json();
+    cachedRootFolderId = created.id;
+    return created.id as string;
+  })().finally(() => {
+    inFlightRootFolderPromise = null;
   });
-  if (!createRes.ok) {
-    const errText = await createRes.text().catch(() => '');
-    throw new Error(`無法建立 Google Drive 根資料夾 (${createRes.status}): ${errText}`);
-  }
-  const created = await createRes.json();
-  cachedRootFolderId = created.id;
-  return created.id;
+
+  return inFlightRootFolderPromise;
 }
 
 export async function ensureTripDriveFolder(
@@ -101,60 +120,70 @@ export async function ensureTripDriveFolder(
   tripTitle: string,
   existingFolderId?: string
 ): Promise<string> {
-  if (existingFolderId) {
-    try {
-      const checkRes = await driveFetch(
-        `${DRIVE_API_BASE}/files/${encodeURIComponent(existingFolderId)}?fields=id,trashed`,
-        token
-      );
-      if (checkRes.ok) {
-        const meta = await checkRes.json();
-        if (meta?.id && !meta?.trashed) {
-          tripFolderCache.set(tripId, meta.id);
-          return meta.id;
-        }
-      }
-    } catch (err) {
-      if (err instanceof DriveAuthExpiredError) throw err;
-    }
-  }
-
   const cached = tripFolderCache.get(tripId);
   if (cached) return cached;
 
-  const rootId = await ensureHiyoriRootFolder(token);
-  const safeTitle = sanitizeFolderName(tripTitle);
+  const inflight = inFlightTripFolderPromises.get(tripId);
+  if (inflight) return inflight;
 
-  const q = `'${escapeDriveQueryValue(rootId)}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false and appProperties has { key='hiyoriTripId' and value='${escapeDriveQueryValue(tripId)}' }`;
-  const searchUrl = `${DRIVE_API_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive&pageSize=5`;
-  const searchRes = await driveFetch(searchUrl, token);
-  if (searchRes.ok) {
-    const searchData = await searchRes.json();
-    if (Array.isArray(searchData.files) && searchData.files.length > 0 && searchData.files[0].id) {
-      const foundId = searchData.files[0].id as string;
-      tripFolderCache.set(tripId, foundId);
-      return foundId;
+  const task = (async () => {
+    if (existingFolderId) {
+      try {
+        const checkRes = await driveFetch(
+          `${DRIVE_API_BASE}/files/${encodeURIComponent(existingFolderId)}?fields=id,trashed`,
+          token
+        );
+        if (checkRes.ok) {
+          const meta = await checkRes.json();
+          if (meta?.id && !meta?.trashed) {
+            tripFolderCache.set(tripId, meta.id);
+            return meta.id as string;
+          }
+        }
+      } catch (err) {
+        if (err instanceof DriveAuthExpiredError) throw err;
+      }
     }
-  }
 
-  const createRes = await driveFetch(`${DRIVE_API_BASE}/files?fields=id,name`, token, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: safeTitle,
-      mimeType: 'application/vnd.google-apps.folder',
-      parents: [rootId],
-      appProperties: { hiyoriTripId: tripId },
-    }),
+    const rootId = await ensureHiyoriRootFolder(token);
+    const safeTitle = sanitizeFolderName(tripTitle);
+
+    const q = `'${escapeDriveQueryValue(rootId)}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false and appProperties has { key='hiyoriTripId' and value='${escapeDriveQueryValue(tripId)}' }`;
+    const searchUrl = `${DRIVE_API_BASE}/files?q=${encodeURIComponent(q)}&fields=files(id,name)&spaces=drive&pageSize=5`;
+    const searchRes = await driveFetch(searchUrl, token);
+    if (searchRes.ok) {
+      const searchData = await searchRes.json();
+      if (Array.isArray(searchData.files) && searchData.files.length > 0 && searchData.files[0].id) {
+        const foundId = searchData.files[0].id as string;
+        tripFolderCache.set(tripId, foundId);
+        return foundId;
+      }
+    }
+
+    const createRes = await driveFetch(`${DRIVE_API_BASE}/files?fields=id,name`, token, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: safeTitle,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [rootId],
+        appProperties: { hiyoriTripId: tripId },
+      }),
+    });
+
+    if (!createRes.ok) {
+      const errText = await createRes.text().catch(() => '');
+      throw new Error(`無法建立旅程相簿資料夾 (${createRes.status}): ${errText}`);
+    }
+    const created = await createRes.json();
+    tripFolderCache.set(tripId, created.id);
+    return created.id as string;
+  })().finally(() => {
+    inFlightTripFolderPromises.delete(tripId);
   });
 
-  if (!createRes.ok) {
-    const errText = await createRes.text().catch(() => '');
-    throw new Error(`無法建立旅程相簿資料夾 (${createRes.status}): ${errText}`);
-  }
-  const created = await createRes.json();
-  tripFolderCache.set(tripId, created.id);
-  return created.id;
+  inFlightTripFolderPromises.set(tripId, task);
+  return task;
 }
 
 export interface DriveUploadResult {

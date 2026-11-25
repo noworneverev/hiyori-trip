@@ -238,7 +238,7 @@ export const SwipeableActionRow: React.FC<SwipeableActionRowProps> = ({
           data-swipe-action="true"
           aria-hidden={!isOpen}
           style={{ width: `${trayWidth}px` }}
-          className={`lg:hidden absolute inset-y-0 right-0 flex items-stretch ios-chrome ${
+          className={`absolute inset-y-0 right-0 flex items-stretch ios-chrome ${
             isOpen ? 'pointer-events-auto' : 'pointer-events-none'
           }`}
         >

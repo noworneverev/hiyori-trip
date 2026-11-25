@@ -1,8 +1,8 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { useModalLayer } from '../../hooks/useModalHistory';
-import { Trip, ExpenseItem } from '../../types/itinerary';
+import { useModalLayer, useHasActiveModalLayer } from '../../hooks/useModalHistory';
+import { Trip, ExpenseItem, SettlementRecord } from '../../types/itinerary';
 import { formatDateSlash, getTodayLocal } from '../../utils/date';
 import { Language, TRANSLATIONS } from '../../utils/i18n';
 import { compressImageFile, storeImageAsMediaRef, resolveMediaSrc, garbageCollectOrphanedMedia, isMediaRef, extractMediaId } from '../../utils/image';
@@ -60,6 +60,7 @@ import {
   ShoppingBag,
   CreditCard,
   Check,
+  RotateCcw,
 } from 'lucide-react';
 import { calculateTripSplits, formatSplitsForSharing } from '../../utils/billSplitter';
 import { CategoryManageModal } from '../Modals/CategoryManageModal';
@@ -198,25 +199,45 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
   // Navigation subtabs (Consolidated into 3 crisp tabs: 明細 / 統計 / 分帳)
   const [expenseSubTab, setExpenseSubTab] = useState<'records' | 'stats' | 'split'>('records');
   const effectiveSubTab = (trip.isSoloTrip || !trip.isSplitEnabled) && expenseSubTab === 'split' ? 'records' : expenseSubTab;
+  const hasActiveModal = useHasActiveModalLayer();
 
-  const getTransferSettlementKey = (from: string, to: string, amount: number) =>
-    `${from.trim()}->${to.trim()}::${baseCurrency}::${Math.round(amount * 100)}`;
-
-  const handleToggleTransferSettled = (from: string, to: string, amount: number) => {
-    if (!canEdit) return;
-    const key = getTransferSettlementKey(from, to, amount);
-    const prevMap = trip.settledTransfers || {};
-    const nextSettled = !prevMap[key]?.settled;
-    const nextMap: Record<string, { settled: boolean; settledAt?: number }> = { ...prevMap };
-    if (nextSettled) {
-      nextMap[key] = { settled: true, settledAt: Date.now() };
-    } else {
-      delete nextMap[key];
+  // First-class Splitwise settlement ledger (immune to currency view switches or FX fluctuations)
+  const handleRecordSettlement = (from: string, to: string, amount: number) => {
+    if (!canEdit || amount <= 0) return;
+    if (requireAuth && !requireAuth(() => handleRecordSettlement(from, to, amount), lang === 'zh' ? '標記已還款結清' : 'Record repayment')) {
+      return;
     }
+    const now = Date.now();
+    const record: SettlementRecord = {
+      id: `stl-${now}-${Math.random().toString(36).slice(2, 6)}`,
+      from,
+      to,
+      amount,
+      currency: baseCurrency,
+      settledAt: now,
+    };
     onUpdateTrip({
       ...trip,
-      settledTransfers: Object.keys(nextMap).length > 0 ? nextMap : undefined,
-      updatedAt: Date.now(),
+      settlements: [...(trip.settlements || []), record],
+      updatedAt: now,
+    });
+  };
+
+  const handleUndoSettlement = (recordId: string) => {
+    if (!canEdit) return;
+    if (requireAuth && !requireAuth(() => handleUndoSettlement(recordId), lang === 'zh' ? '撤銷已還款紀錄' : 'Undo settlement')) {
+      return;
+    }
+    const now = Date.now();
+    const nextSettlements = (trip.settlements || []).filter((s) => s.id !== recordId);
+    onUpdateTrip({
+      ...trip,
+      settlements: nextSettlements,
+      deletedItemIds: {
+        ...(trip.deletedItemIds || {}),
+        [recordId]: now,
+      },
+      updatedAt: now,
     });
   };
   const [expandedTableDate, setExpandedTableDate] = useState<string | null>(null);
@@ -411,7 +432,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
       }, 0);
   }, [trip.expenses, initialCashCur, trip.customExchangeRates, ratesVersion]);
 
-  const remainingCash = initialCashAmt - totalCashSpent;
+  const cashDecimals = CURRENCY_MAP[initialCashCur]?.decimals ?? 0;
+  const rawRemainingCash = Number((initialCashAmt - totalCashSpent).toFixed(cashDecimals));
+  const remainingCash = Object.is(rawRemainingCash, -0) ? 0 : rawRemainingCash;
   const cashSpentPercent = initialCashAmt > 0
     ? Math.min(100, Math.round((totalCashSpent / initialCashAmt) * 100))
     : (totalCashSpent > 0 ? 100 : 0);
@@ -1744,7 +1767,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                     >
                       {isCreditor && `應收回 +${formatCurrencyAmount(net, baseCurrency)}`}
                       {isDebtor && `應補付 -${formatCurrencyAmount(-net, baseCurrency)}`}
-                      {!isCreditor && !isDebtor && '已平衡'}
+                      {!isCreditor && !isDebtor && (summary.settledOut > 0 || summary.settledIn > 0 ? '已結清 ✓' : '已平衡')}
                     </span>
                   </div>
 
@@ -1763,6 +1786,17 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                       </span>
                     </div>
                   </div>
+
+                  {(summary.settledOut > 0 || summary.settledIn > 0) && (
+                    <div className="px-4 py-2 flex items-center justify-between text-[11px] text-emerald-700 dark:text-emerald-400 bg-emerald-50/40 dark:bg-emerald-950/20">
+                      <span>{summary.settledOut > 0 ? '已還出款項' : '已收回款項'}</span>
+                      <span className="font-mono tabular-nums font-bold">
+                        {summary.settledOut > 0
+                          ? `-${formatCurrencyAmount(roundForBase(summary.settledOut), baseCurrency)}`
+                          : `+${formatCurrencyAmount(roundForBase(summary.settledIn), baseCurrency)}`}
+                      </span>
+                    </div>
+                  )}
 
                   {summary.personalExpense > 0 && (
                     <div className="px-4 py-2.5 flex items-center justify-between text-[11px] text-slate-400 bg-[#FAF9F6]/60 dark:bg-slate-900/30">
@@ -1813,112 +1847,124 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               </button>
             </div>
 
-            {/* Transfers List with Settled Checkboxes */}
+            {/* Pending Transfers + First-Class Settled Repayment Ledger */}
             {splitsResult.transfers.length === 0 ? (
-              <div className="py-6 px-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-800/50 border border-[#E5E2DC]/80 dark:border-slate-800 text-center space-y-1">
+              <div className="py-6 px-4 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200/70 dark:border-emerald-900/40 text-center space-y-1">
                 <Sparkles className="w-6 h-6 mx-auto text-teal-600 dark:text-teal-400 mb-1" />
                 <p className="font-bold text-slate-800 dark:text-slate-100 text-sm">
-                  太棒了！大家的代墊與消費完全打平，目前無須轉帳！
+                  {splitsResult.settledRecords.length > 0
+                    ? '太棒了！所有待轉帳款項已全數結清！'
+                    : '太棒了！大家的代墊與消費完全打平，目前無須轉帳！'}
                 </p>
-                <p className="text-xs text-slate-400">
-                  所有公費支出皆已平衡
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  所有公費餘額皆已歸零平衡
                 </p>
               </div>
-            ) : (() => {
-              const settledCount = splitsResult.transfers.filter((tr) =>
-                Boolean(trip.settledTransfers?.[getTransferSettlementKey(tr.from, tr.to, tr.amount)]?.settled)
-              ).length;
-              return (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-[11px] px-1">
-                    <span className="text-slate-500 dark:text-slate-400 font-medium">
-                      點擊左側圓圈可標記已完成轉帳
-                    </span>
-                    <span
-                      className={`font-mono tabular-nums font-bold ${
-                        settledCount === splitsResult.transfers.length
-                          ? 'text-emerald-700 dark:text-emerald-400'
-                          : 'text-teal-700 dark:text-teal-400'
-                      }`}
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-[11px] px-1">
+                  <span className="text-slate-500 dark:text-slate-400 font-medium">
+                    標記已還款後，上方成員淨額與 LINE 結算將即時更新歸零
+                  </span>
+                  <span className="font-mono tabular-nums font-bold text-teal-700 dark:text-teal-400 shrink-0">
+                    待轉帳 {splitsResult.transfers.length} 筆
+                  </span>
+                </div>
+                <div className="rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/40 border border-[#E5E2DC] dark:border-slate-800 divide-y divide-[#E5E2DC]/75 dark:divide-slate-800 overflow-hidden">
+                  {splitsResult.transfers.map((tr, idx) => (
+                    <div
+                      key={`${tr.from}-${tr.to}-${idx}`}
+                      className="px-3.5 sm:px-4 py-3 flex items-center justify-between gap-3 transition"
                     >
-                      已結清 {settledCount} / {splitsResult.transfers.length} 筆
-                    </span>
-                  </div>
-                  <div className="rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/40 border border-[#E5E2DC] dark:border-slate-800 divide-y divide-[#E5E2DC]/75 dark:divide-slate-800 overflow-hidden">
-                    {splitsResult.transfers.map((tr, idx) => {
-                      const settleKey = getTransferSettlementKey(tr.from, tr.to, tr.amount);
-                      const isSettled = Boolean(trip.settledTransfers?.[settleKey]?.settled);
-                      return (
-                        <div
-                          key={settleKey || idx}
-                          className={`px-3.5 sm:px-4 py-3 flex items-center justify-between gap-3 transition ${
-                            isSettled ? 'bg-emerald-50/50 dark:bg-emerald-950/20' : ''
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <button
-                              type="button"
-                              disabled={!canEdit}
-                              onClick={() => handleToggleTransferSettled(tr.from, tr.to, tr.amount)}
-                              className={`w-7 h-7 rounded-full border-2 flex items-center justify-center shrink-0 transition cursor-pointer disabled:opacity-50 ${
-                                isSettled
-                                  ? 'bg-emerald-600 border-emerald-600 text-white'
-                                  : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 hover:border-teal-600'
-                              }`}
-                              title={isSettled ? '取消已還清標記' : '標記為已還清'}
-                              aria-label={isSettled ? '取消已還清標記' : '標記為已還清'}
-                            >
-                              {isSettled && <Check className="w-4 h-4 stroke-[2.8]" />}
-                            </button>
-                            <div className="min-w-0">
-                              <div
-                                className={`flex items-center gap-1.5 text-xs font-bold flex-wrap ${
-                                  isSettled ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-800 dark:text-slate-200'
-                                }`}
-                              >
-                                <span className={isSettled ? '' : 'text-rose-600 dark:text-rose-400'}>{tr.from}</span>
-                                <span className="text-slate-400 font-normal">➜ 應付給</span>
-                                <span className={isSettled ? '' : 'text-emerald-700 dark:text-emerald-400'}>{tr.to}</span>
-                              </div>
-                              {isSettled && (
-                                <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400">
-                                  已還清結案
-                                </span>
-                              )}
-                            </div>
-                          </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 text-xs font-bold flex-wrap text-slate-800 dark:text-slate-200">
+                          <span className="text-rose-600 dark:text-rose-400">{tr.from}</span>
+                          <span className="text-slate-400 font-normal">➜ 應付給</span>
+                          <span className="text-emerald-700 dark:text-emerald-400">{tr.to}</span>
+                        </div>
+                      </div>
 
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span
-                              className={`font-black font-mono tabular-nums text-base ${
-                                isSettled
-                                  ? 'line-through text-slate-400 dark:text-slate-500'
-                                  : 'text-teal-700 dark:text-teal-300'
-                              }`}
-                            >
-                              {formatCurrencyAmount(tr.amount, baseCurrency)}
-                            </span>
-                            {canEdit && (
-                              <button
-                                type="button"
-                                onClick={() => handleToggleTransferSettled(tr.from, tr.to, tr.amount)}
-                                className={`hidden sm:inline-flex min-h-[30px] px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
-                                  isSettled
-                                    ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300'
-                                    : 'bg-white dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-teal-600'
-                                }`}
-                              >
-                                {isSettled ? '已結清' : '標記已還'}
-                              </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="font-black font-mono tabular-nums text-base text-teal-700 dark:text-teal-300">
+                          {formatCurrencyAmount(tr.amount, baseCurrency)}
+                        </span>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => handleRecordSettlement(tr.from, tr.to, tr.amount)}
+                            className="min-h-[36px] px-3 py-1 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 text-white text-[11px] font-bold flex items-center gap-1 transition active:scale-95 cursor-pointer"
+                          >
+                            <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>標記已還</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Recorded Repayment Ledger (with 1-tap Undo) */}
+            {splitsResult.settledRecords.length > 0 && (
+              <div className="space-y-2 pt-2 border-t border-[#E5E2DC]/70 dark:border-slate-800">
+                <div className="flex items-center justify-between text-[11px] px-1">
+                  <span className="font-bold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" />
+                    <span>已完成還款紀錄 ({splitsResult.settledRecords.length})</span>
+                  </span>
+                </div>
+                <div className="rounded-2xl bg-emerald-50/40 dark:bg-emerald-950/15 border border-emerald-200/70 dark:border-emerald-900/40 divide-y divide-emerald-200/50 dark:divide-emerald-900/30 overflow-hidden">
+                  {splitsResult.settledRecords.map((rec) => {
+                    const isRecDiffCur = rec.currency !== baseCurrency;
+                    const settledDateStr = rec.settledAt
+                      ? new Date(rec.settledAt).toLocaleDateString('zh-TW', { month: '2-digit', day: '2-digit' })
+                      : '';
+                    return (
+                      <div
+                        key={rec.id}
+                        className="px-3.5 sm:px-4 py-2.5 flex items-center justify-between gap-2.5 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-200 flex-wrap">
+                            <span>{rec.from}</span>
+                            <span className="text-slate-400 font-normal">已還給</span>
+                            <span>{rec.to}</span>
+                            {settledDateStr && (
+                              <span className="text-[10px] font-mono text-slate-400">· {settledDateStr}</span>
                             )}
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="text-right font-mono tabular-nums">
+                            <span className="font-bold text-emerald-700 dark:text-emerald-400">
+                              {formatCurrencyAmount(rec.amount, rec.currency)}
+                            </span>
+                            {isRecDiffCur && (
+                              <span className="block text-[10px] text-slate-400">
+                                ≈ {formatCurrencyAmount(rec.convertedAmount, baseCurrency)}
+                              </span>
+                            )}
+                          </div>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={() => handleUndoSettlement(rec.id)}
+                              className="min-h-[34px] px-2.5 rounded-xl bg-white dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 hover:border-rose-400 text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
+                              title="撤銷此筆還款紀錄"
+                            >
+                              <RotateCcw className="w-3 h-3" />
+                              <span>撤銷</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })()}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2569,120 +2615,9 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
               </div>
           )}
 
-          {/* ================= SECTION B: LAYERED CARDS (PIE CHART + RECENT TRANSACTIONS) ================= */}
+          {/* ================= SECTION B: RECENT TRANSACTIONS (Pie chart lives exclusively in 統計 subtab) ================= */}
           {effectiveSubTab === 'records' && (
             <>
-              {/* Card 2: 支出圓餅圖與類別佔比卡 */}
-              <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-4 animate-in fade-in duration-150">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-slate-100 dark:border-slate-800/80">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 flex items-center justify-center shrink-0">
-                      <PieChartIcon className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-slate-900 dark:text-white text-xs sm:text-sm">
-                        {lang === 'zh' ? '支出圓餅圖與類別佔比' : 'Spending Breakdown by Category'}
-                      </h4>
-                      <p className="text-[11px] text-slate-400">
-                        {lang === 'zh' ? '點擊扇形或標籤可直接篩選下方交易明細' : 'Tap any category slice to filter transactions below'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 self-start sm:self-auto">
-                    {selectedCategoryFilter !== 'all' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedCategoryFilter('all');
-                          setChartCategoryDetail(null);
-                        }}
-                        className="px-2.5 py-1 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 text-xs font-bold hover:underline transition"
-                      >
-                        重設全部類別
-                      </button>
-                    )}
-                    <span className="text-[11px] font-mono text-slate-400 font-bold px-2 py-0.5 rounded-lg bg-slate-100 dark:bg-slate-800">
-                      {baseCurrency} 計價
-                    </span>
-                  </div>
-                </div>
-
-                {pieChartData.length === 0 ? (
-                  <div className="py-8 text-center text-slate-400 text-xs space-y-2">
-                    <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
-                      <PieChartIcon className="w-6 h-6 stroke-1 text-slate-300 dark:text-slate-600" />
-                    </div>
-                    <p>{lang === 'zh' ? '目前尚無花費記錄，點擊右下角 ＋ 即可快速記一筆' : 'No expenses yet. Tap + at bottom-right to add one.'}</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-5 items-center">
-                    {/* High-DPI Interactive SVG Donut Chart */}
-                    <div className="md:col-span-5 flex flex-col items-center justify-center w-full">
-                      <CategoryDonutChart
-                        data={pieChartData}
-                        totalValue={totalSpentInBase}
-                        baseCurrency={baseCurrency}
-                        selectedKey={selectedCategoryFilter !== 'all' ? selectedCategoryFilter : null}
-                        onSelectKey={(key) => {
-                          const nextKey = selectedCategoryFilter === key ? 'all' : key;
-                          setSelectedCategoryFilter(nextKey);
-                          setChartCategoryDetail(nextKey === 'all' ? null : nextKey);
-                        }}
-                        totalLabel={lang === 'zh' ? '總支出' : 'Total'}
-                      />
-                    </div>
-
-                    {/* Category List Breakdown */}
-                    <div className="md:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {pieChartData.map((item) => {
-                        const isSelected = selectedCategoryFilter === item.key;
-                        return (
-                          <div
-                            key={item.key}
-                            onClick={() => {
-                              const nextKey = isSelected ? 'all' : item.key;
-                              setSelectedCategoryFilter(nextKey);
-                              setChartCategoryDetail(nextKey === 'all' ? null : nextKey);
-                            }}
-                            className={`p-2.5 rounded-2xl border flex items-center justify-between text-xs cursor-pointer transition select-none ${
-                              isSelected
-                                ? 'bg-teal-50/90 dark:bg-teal-950/70 border-teal-500 ring-2 ring-teal-500/25 shadow-2xs'
-                                : 'bg-slate-50 dark:bg-slate-800/60 border-slate-100 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800/90'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span
-                                className="w-2.5 h-2.5 rounded-full shrink-0"
-                                style={{ backgroundColor: item.color }}
-                              />
-                              <span className="font-semibold text-slate-800 dark:text-slate-200 truncate flex items-center gap-1.5">
-                                <item.Icon className="w-3 h-3 shrink-0 text-slate-500" />
-                                <span>{item.name}</span>
-                              </span>
-                              {isSelected && (
-                                <span className="text-[9px] font-bold text-teal-600 dark:text-teal-400 shrink-0">
-                                  ✓ 已選
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-1.5 font-mono shrink-0 pl-1">
-                              <span className="text-[10px] font-bold text-slate-400">
-                                {item.percentage}%
-                              </span>
-                              <span className="font-black text-slate-900 dark:text-white text-xs">
-                                {formatCurrencyAmount(item.value, baseCurrency)}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-
               {/* Card 3: 近期交易明細記錄卡 */}
               <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-6 shadow-xs space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-slate-100 dark:border-slate-800">
@@ -3074,11 +3009,11 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
                         <div className="flex items-center gap-3 shrink-0">
                           <div className="text-right font-mono">
                             <div className="font-extrabold text-xs sm:text-sm text-slate-900 dark:text-slate-100 tabular-nums">
-                              {formatCurrencyAmount(convertedEquivalent, baseCurrency)}
+                              {formatCurrencyAmount(item.amount, item.currency)}
                             </div>
                             {isDiffCurrency && (
                               <div className="text-[10px] text-teal-600 dark:text-teal-400 tabular-nums font-medium">
-                                ≈ {formatCurrencyAmount(item.amount, item.currency)}
+                                ≈ {formatCurrencyAmount(convertedEquivalent, baseCurrency)}
                               </div>
                             )}
                           </div>
@@ -3693,6 +3628,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
 
       {/* Bottom-Right Floating Action Button (+) for Quick Add Expense */}
       {canEdit &&
+        !hasActiveModal &&
         !showAddModal &&
         !showRateModal &&
         !showCashModal &&

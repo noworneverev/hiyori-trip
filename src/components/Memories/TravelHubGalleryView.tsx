@@ -114,7 +114,26 @@ export const TravelHubGalleryView: React.FC<TravelHubGalleryViewProps> = ({
         </div>
       </div>
 
-      {/* Responsive Masonry Waterfall */}
+      {/* Responsive Masonry Waterfall or Filter Empty State */}
+      {visiblePhotos.length === 0 ? (
+        <div className="py-12 px-4 rounded-2xl bg-[#FAF9F6] dark:bg-slate-900/50 border border-[#E5E2DC] dark:border-slate-800 text-center space-y-2.5">
+          <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+            目前沒有包含文字故事附註的相片
+          </p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            點擊任一張回憶相片編輯心得文字後，就會自動收錄在此清單中。
+          </p>
+          {featuredOnly && (
+            <button
+              type="button"
+              onClick={() => setFeaturedOnly(false)}
+              className="mt-1 min-h-[38px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold cursor-pointer"
+            >
+              顯示全部 {photos.length} 張相片
+            </button>
+          )}
+        </div>
+      ) : (
       <div className="columns-2 sm:columns-3 xl:columns-4 gap-3 sm:gap-4 space-y-3 sm:space-y-4">
         {visiblePhotos.map((photo, idx) => (
           <div
@@ -186,6 +205,7 @@ export const TravelHubGalleryView: React.FC<TravelHubGalleryViewProps> = ({
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 };

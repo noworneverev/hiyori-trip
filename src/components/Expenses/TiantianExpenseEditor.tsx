@@ -305,28 +305,20 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
   const isSplitMode = !trip.isSoloTrip && Boolean(trip.isSplitEnabled);
 
   const handleAmountChange = (rawVal: string) => {
-    // Allow digits, commas, dots, and simple arithmetic operators (+ - * / × ÷)
-    let cleaned = rawVal
+    // Allow digits, commas, dots (even for zero-decimal math like `1.08*500`), and operators (+ - * / × ÷ x)
+    const cleaned = rawVal
       .replace(/＋/g, '+')
       .replace(/[－−]/g, '-')
-      .replace(/[×✕＊]/g, '*')
+      .replace(/[×✕＊xX]/g, '*')
       .replace(/[÷／]/g, '/')
       .replace(/[^0-9.,+\-*/]/g, '');
 
-    // If zero-decimal currency and no arithmetic operators, strip fractional part cleanly
-    // while keeping thousands commas ignored rather than turned into decimals!
-    if (currencyDecimals === 0 && !/[+\-*/]/.test(cleaned)) {
-      cleaned = cleaned.replace(/,/g, '');
-      if (cleaned.includes('.')) {
-        cleaned = cleaned.split('.')[0];
-      }
-    }
     onChangeDraft((prev) => ({ ...prev, amount: cleaned }));
   };
 
   const handleAmountBlur = () => {
     if (!draft.amount.trim()) return;
-    if (hasMathExpression || draft.amount.includes(',')) {
+    if (hasMathExpression || draft.amount.includes(',') || (currencyDecimals === 0 && draft.amount.includes('.'))) {
       const evaluated = evaluateExpenseAmount(draft.amount, currencyDecimals);
       if (evaluated > 0) {
         onChangeDraft((prev) => ({ ...prev, amount: String(evaluated) }));
@@ -452,9 +444,15 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
   };
 
   const handleRemoveCustomTagFromTrip = (tag: string) => {
+    const cleanedExpenses = (trip.expenses || []).map((ex) => {
+      if (!ex.tags || !ex.tags.includes(tag)) return ex;
+      const nextTags = ex.tags.filter((t) => t !== tag);
+      return { ...ex, tags: nextTags.length > 0 ? nextTags : undefined };
+    });
     onUpdateTrip({
       ...trip,
       customExpenseTags: customTags.filter((t) => t !== tag),
+      expenses: cleanedExpenses,
       updatedAt: Date.now(),
     });
     onChangeDraft((prev) => ({

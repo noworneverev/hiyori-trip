@@ -89,14 +89,15 @@ export const CategoryDonutChart: React.FC<CategoryDonutChartProps> = ({
 
     return positiveData.map((item) => {
       const sweep = (item.value / sum) * 360;
-      const start = cursor + gapDeg / 2;
-      const end = Math.max(start + 1.2, cursor + sweep - gapDeg / 2);
+      const effectiveGap = Math.min(gapDeg, sweep * 0.4);
+      const start = cursor + effectiveGap / 2;
+      const end = Math.max(start + 0.4, cursor + sweep - effectiveGap / 2);
       cursor += sweep;
       return {
         item,
         isFullCircle: false,
         startAngle: start,
-        endAngle: Math.min(end, cursor),
+        endAngle: Math.min(end, start + Math.max(0.4, sweep)),
       };
     });
   })();

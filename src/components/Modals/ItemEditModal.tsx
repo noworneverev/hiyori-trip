@@ -99,7 +99,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 }) => {
   const [title, setTitle] = useState(item?.title || '');
   const [category, setCategory] = useState<CategoryType>(item?.category || 'spot');
-  const [startTime, setStartTime] = useState(item?.startTime || defaultStartTime || '09:00');
+  const [startTime, setStartTime] = useState(item ? (item.startTime ?? '') : (defaultStartTime ?? '09:00'));
   const [endTime, setEndTime] = useState(item?.endTime || '');
   const [showEndTimeInput, setShowEndTimeInput] = useState(Boolean(item?.endTime));
 
@@ -141,6 +141,7 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
   const [photoError, setPhotoError] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const initialPhotosRef = useRef<string[]>(item?.memoryPhotos || []);
+  const trackedItemIdRef = useRef<string | undefined>(item?.id);
   const memoryPhotosRef = useRef<string[]>(memoryPhotos);
   const didSaveRef = useRef(false);
   const isPickingMapRef = useRef(false);
@@ -181,10 +182,15 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
 
   useEffect(() => {
     if (item) {
-      initialPhotosRef.current = item.memoryPhotos || [];
+      // Only update initialPhotosRef when switching to a genuinely different persisted item,
+      // NOT when remounting with an unsaved draft returned from Map Pick Mode.
+      if (trackedItemIdRef.current !== item.id) {
+        trackedItemIdRef.current = item.id;
+        initialPhotosRef.current = item.memoryPhotos || [];
+      }
       setTitle(item.title || '');
       setCategory(item.category || 'spot');
-      setStartTime(item.startTime || defaultStartTime || '09:00');
+      setStartTime(item.startTime ?? '');
       setEndTime(item.endTime || '');
       setShowEndTimeInput(Boolean(item.endTime));
       setLocationName(item.locationName || '');
@@ -418,8 +424,8 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
       {
         title: title.trim(),
         category,
-        startTime: startTime || '09:00',
-        endTime: showEndTimeInput && endTime ? endTime : undefined,
+        startTime: startTime.trim(),
+        endTime: startTime.trim() && showEndTimeInput && endTime ? endTime : undefined,
         locationName: locationName.trim() || undefined,
         address: address.trim() || undefined,
         lat: finalLat,
@@ -542,8 +548,14 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
             subtitle={timeWarnings.length > 0 ? timeWarnings[0] : undefined}
             value={
               <span className="font-mono tabular-nums">
-                {startTime}
-                {showEndTimeInput && endTime ? ` – ${endTime}` : ''}
+                {startTime ? (
+                  <>
+                    {startTime}
+                    {showEndTimeInput && endTime ? ` – ${endTime}` : ''}
+                  </>
+                ) : (
+                  '未定時間'
+                )}
               </span>
             }
             valueAccent
@@ -610,6 +622,14 @@ export const ItemEditModal: React.FC<ItemEditModalProps> = ({
                   { label: '12:00', onClick: () => setStartTime('12:00') },
                   { label: '15:00', onClick: () => setStartTime('15:00') },
                   { label: '18:00', onClick: () => setStartTime('18:00') },
+                  {
+                    label: '未定',
+                    onClick: () => {
+                      setStartTime('');
+                      setEndTime('');
+                      setShowEndTimeInput(false);
+                    },
+                  },
                 ].map((btn) => (
                   <button
                     key={btn.label}

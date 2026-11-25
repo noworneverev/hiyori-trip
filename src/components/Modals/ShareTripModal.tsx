@@ -123,7 +123,8 @@ export const ShareTripModal: React.FC<ShareTripModalProps> = ({
     trip.days.forEach((day) => {
       text += `\nDay ${day.dayNumber}（${day.theme || '當日行程'}）：\n`;
       day.items.forEach((item) => {
-        text += `• ${item.startTime} ${item.title}${item.locationName ? ` (${item.locationName})` : ''}\n`;
+        const timePart = item.startTime?.trim() ? `${item.startTime.trim()} ` : '';
+        text += `• ${timePart}${item.title}${item.locationName ? ` (${item.locationName})` : ''}\n`;
       });
     });
     const ok = await copyTextToClipboard(text);
