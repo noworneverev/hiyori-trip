@@ -23,6 +23,8 @@ import {
   doc,
   getDoc,
   getDocFromServer,
+  getDocs,
+  getDocsFromServer,
   collection,
   query,
   onSnapshot,
@@ -59,24 +61,18 @@ const app = initializeApp(firebaseConfig);
 
 const firestoreDatabaseId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
 
-// CRITICAL: Use multi-tab IndexedDB persistent cache + configured databaseId
+// CRITICAL: Use multi-tab IndexedDB persistent cache + auto long-polling fallback for iOS PWA reliability
 function createFirestoreInstance(): Firestore {
+  const settings = {
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager(),
+    }),
+    experimentalAutoDetectLongPolling: true,
+  };
   try {
     return firestoreDatabaseId
-      ? initializeFirestore(
-          app,
-          {
-            localCache: persistentLocalCache({
-              tabManager: persistentMultipleTabManager(),
-            }),
-          },
-          firestoreDatabaseId
-        )
-      : initializeFirestore(app, {
-          localCache: persistentLocalCache({
-            tabManager: persistentMultipleTabManager(),
-          }),
-        });
+      ? initializeFirestore(app, settings, firestoreDatabaseId)
+      : initializeFirestore(app, settings);
   } catch {
     return firestoreDatabaseId ? getFirestore(app, firestoreDatabaseId) : getFirestore(app);
   }
@@ -856,6 +852,32 @@ export async function recordCloudTripTombstone(userId: string, tripId: string): 
 export interface SnapshotMeta {
   hasPendingWrites: boolean;
   fromCache: boolean;
+}
+
+export async function fetchUserTripsFromServer(
+  userId: string
+): Promise<{ trips: Trip[]; fromServer: boolean } | null> {
+  const tripsPath = `users/${userId}/trips`;
+  const q = query(collection(db, tripsPath));
+  try {
+    if (typeof navigator === 'undefined' || navigator.onLine !== false) {
+      const serverSnap = await getDocsFromServer(q);
+      const trips: Trip[] = [];
+      serverSnap.forEach((d) => {
+        trips.push(normalizeTripData(d.id, d.data(), userId));
+      });
+      return { trips, fromServer: true };
+    }
+    const cacheSnap = await getDocs(q);
+    const trips: Trip[] = [];
+    cacheSnap.forEach((d) => {
+      trips.push(normalizeTripData(d.id, d.data(), userId));
+    });
+    return { trips, fromServer: !cacheSnap.metadata.fromCache };
+  } catch (err) {
+    console.warn('[Firestore] fetchUserTripsFromServer warning:', err);
+    return null;
+  }
 }
 
 export function subscribeUserTrips(

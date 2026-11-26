@@ -113,11 +113,19 @@ export const OfflineIndicator: React.FC = () => {
 
   if (showSyncSuccess) {
     return (
-      <div className="fixed top-[calc(3.75rem+env(safe-area-inset-top,0px))] left-1/2 -translate-x-1/2 max-w-[calc(100vw-1.5rem)] z-[55] pointer-events-auto flex items-center gap-2 rounded-full bg-emerald-950/95 text-white px-4 py-2 shadow-xl backdrop-blur-md border border-emerald-500/40 animate-in fade-in slide-in-from-top-2 duration-200">
+      <div className="fixed top-[calc(3.75rem+env(safe-area-inset-top,0px))] left-1/2 -translate-x-1/2 max-w-[calc(100vw-1.5rem)] z-[55] pointer-events-auto flex items-center gap-2 rounded-full bg-emerald-950/95 text-white pl-3.5 pr-1.5 py-1.5 shadow-xl backdrop-blur-md border border-emerald-500/40 animate-in fade-in slide-in-from-top-2 duration-200">
         <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
         <span className="text-xs font-semibold whitespace-nowrap truncate">
           已連線 · 已自動同步 {syncedCount} 筆離線變更
         </span>
+        <button
+          type="button"
+          onClick={() => setShowSyncSuccess(false)}
+          className="min-w-[28px] min-h-[28px] rounded-full flex items-center justify-center text-emerald-200/80 hover:text-white transition cursor-pointer shrink-0"
+          aria-label="關閉同步提示"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
       </div>
     );
   }

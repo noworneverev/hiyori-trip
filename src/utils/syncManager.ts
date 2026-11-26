@@ -333,7 +333,29 @@ export function summarizeTripForConflict(trip: Trip): TripConflictSummary {
   };
 }
 
-function stableContentSignature(trip: Trip): string {
+function canonicalizeForSignature(value: unknown): unknown {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value !== 'object') {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => (item === undefined ? null : canonicalizeForSignature(item)));
+  }
+  const obj = value as Record<string, unknown>;
+  const sortedKeys = Object.keys(obj).sort();
+  const out: Record<string, unknown> = {};
+  for (const key of sortedKeys) {
+    const v = obj[key];
+    if (v === undefined) continue;
+    out[key] = canonicalizeForSignature(v);
+  }
+  return out;
+}
+
+export function stableContentSignature(trip: Trip): string {
   const normalized = {
     title: trip.title || '',
     destination: trip.destination || '',
@@ -342,17 +364,17 @@ function stableContentSignature(trip: Trip): string {
     currency: trip.currency || '',
     budgetTotal: trip.budgetTotal || 0,
     notes: trip.notes || '',
-    coverGradient: trip.coverGradient || '',
+    coverGradient: trip.coverGradient || 'from-emerald-600 via-teal-600 to-cyan-700',
     tripMode: trip.tripMode || 'planner',
-    destinationLat: trip.destinationLat ?? null,
-    destinationLng: trip.destinationLng ?? null,
+    destinationLat: typeof trip.destinationLat === 'number' ? trip.destinationLat : null,
+    destinationLng: typeof trip.destinationLng === 'number' ? trip.destinationLng : null,
     isSoloTrip: Boolean(trip.isSoloTrip),
     isSplitEnabled: Boolean(trip.isSplitEnabled),
     splitMembers: trip.splitMembers || [],
     settlements: trip.settlements || [],
     settledTransfers: trip.settledTransfers || {},
     initialCashAmount: trip.initialCashAmount ?? null,
-    initialCashCurrency: trip.initialCashCurrency ?? null,
+    initialCashCurrency: trip.initialCashCurrency || null,
     customExchangeRates: trip.customExchangeRates || {},
     customExpenseCategories: trip.customExpenseCategories || [],
     customCategoryLabels: trip.customCategoryLabels || {},
@@ -371,11 +393,12 @@ function stableContentSignature(trip: Trip): string {
     emergencyContacts: trip.emergencyContacts || [],
     deletedItemIds: trip.deletedItemIds || {},
   };
-  return JSON.stringify(normalized);
+  return JSON.stringify(canonicalizeForSignature(normalized));
 }
 
 /**
- * Deep substantive comparison ignoring volatile metadata (`updatedAt`, `lastSyncedAt`).
+ * Deep substantive comparison ignoring volatile metadata (`updatedAt`, `lastSyncedAt`)
+ * and object property insertion order differences from Firestore round-trips.
  */
 export function hasTripContentDifference(a: Trip, b: Trip): boolean {
   return stableContentSignature(a) !== stableContentSignature(b);
@@ -485,7 +508,7 @@ export function mergeTrips(
         continue;
       }
 
-      if (isServerAuthoritative && lTrip.lastSyncedAt) {
+      if (isServerAuthoritative && lTrip.lastSyncedAt && !pendingSaveIds?.has(lTrip.id)) {
         deletedLocalTripIds.push(lTrip.id);
         continue;
       }

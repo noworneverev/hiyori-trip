@@ -20,11 +20,12 @@ import {
   IosRow,
   IosActionSheet,
 } from '../UI/IosPrimitives';
-import { CloudCheck, HardDrive, LogOut, UploadCloud, User as UserIcon, Check, X } from 'lucide-react';
+import { CloudCheck, HardDrive, LogOut, RefreshCw, User as UserIcon, Check, X } from 'lucide-react';
 
 interface AuthButtonProps {
   lang: Language;
   localTrips: Trip[];
+  onManualBidirectionalSync?: () => Promise<{ totalTrips: number; failed: number }>;
   onCloudSyncSuccess?: () => void;
   onOpenChange?: (isOpen: boolean) => void;
 }
@@ -32,6 +33,7 @@ interface AuthButtonProps {
 export const AuthButton: React.FC<AuthButtonProps> = ({
   lang,
   localTrips,
+  onManualBidirectionalSync,
   onCloudSyncSuccess,
   onOpenChange,
 }) => {
@@ -127,11 +129,27 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
     setShowDropdown(false);
   };
 
-  const handleUploadAllLocalToCloud = async () => {
+  const handleManualSync = async () => {
     if (!user || isSyncing) return;
     setIsSyncing(true);
     setSyncError(null);
     try {
+      if (onManualBidirectionalSync) {
+        const result = await onManualBidirectionalSync();
+        if (result.failed > 0) {
+          setSyncError(
+            isZh
+              ? `有 ${result.failed} 筆旅程同步失敗，請確認網路連線後重試`
+              : `${result.failed} trip(s) failed to sync. Please check your connection.`
+          );
+        } else {
+          setSyncDone(true);
+          if (onCloudSyncSuccess) onCloudSyncSuccess();
+          setTimeout(() => setSyncDone(false), 3000);
+        }
+        return;
+      }
+
       const localDeletedIds = new Set(getDeletedTripIds());
       const cloudTombstones = (await fetchUserTombstones(user.uid)) || {};
       const TOMBSTONE_SKEW_MS = 15 * 60 * 1000;
@@ -280,10 +298,14 @@ export const AuthButton: React.FC<AuthButtonProps> = ({
     <div className="space-y-3">
       <IosInsetGroup header={isZh ? '雲端與備份' : 'Cloud & Backup'}>
         <IosRow
-          onClick={handleUploadAllLocalToCloud}
+          onClick={handleManualSync}
           disabled={isSyncing}
-          icon={<UploadCloud className="w-4 h-4 text-teal-700 dark:text-teal-400" />}
-          label={isZh ? '同步我的旅程至雲端' : 'Sync My Trips to Cloud'}
+          icon={
+            <RefreshCw
+              className={`w-4 h-4 text-teal-700 dark:text-teal-400 ${isSyncing ? 'animate-spin' : ''}`}
+            />
+          }
+          label={isZh ? '立即雙向同步（上傳＋拉取最新）' : 'Sync Now (Upload & Refresh)'}
           trailing={
             syncDone ? (
               <Check className="w-4 h-4 text-teal-700 dark:text-teal-400" />
