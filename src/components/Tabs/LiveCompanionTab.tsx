@@ -26,8 +26,9 @@ import {
   geocodeCity,
   getWeatherDescription,
 } from '../../utils/weather';
-import { detectTripCurrency, convertAmount, formatCurrencyAmount } from '../../utils/currency';
+import { detectTripCurrency, formatCurrencyAmount } from '../../utils/currency';
 import { copyTextToClipboard } from '../../utils/clipboard';
+import { isPlaceholderBookingCode } from '../Vault/BookingVaultView';
 import {
   Navigation,
   Clock,
@@ -37,6 +38,12 @@ import {
   Bookmark,
   Bus,
   CloudSun,
+  Sun,
+  Cloud,
+  CloudFog,
+  CloudRain,
+  Snowflake,
+  CloudLightning,
   RefreshCw,
   LocateFixed,
   Umbrella,
@@ -58,6 +65,8 @@ import {
   Edit2,
   AlertCircle,
   ArrowUpRight,
+  CalendarClock,
+  CheckSquare,
 } from 'lucide-react';
 import { MediaImage } from '../UI/MediaImage';
 
@@ -67,10 +76,26 @@ interface LiveCompanionTabProps {
   canEdit?: boolean;
   onUpdateTrip: (updatedTrip: Trip) => void;
   onNavigateToTimelineDay?: (dayNumber: number) => void;
+  onNavigateToPrep?: (subTab: 'checklist' | 'bookings') => void;
   onOpenEditItem?: (item: ItineraryItem, dayNumber: number) => void;
   onOpenAddItem?: (dayNumber: number, suggestedStartTime?: string) => void;
-  onOpenQuickAction?: (tab: 'expense' | 'todos', preferredDate?: string) => void;
   requireAuth?: (action: () => void, reason?: string) => boolean;
+}
+
+function renderCrispWeatherIcon(code?: number): React.ReactNode {
+  if (code === undefined) return <CloudSun className="w-5 h-5 text-teal-700 dark:text-teal-400" />;
+  if (code === 0) return <Sun className="w-5 h-5 text-amber-500 dark:text-amber-400" />;
+  if (code === 1 || code === 2) return <CloudSun className="w-5 h-5 text-amber-500 dark:text-amber-300" />;
+  if (code === 3) return <Cloud className="w-5 h-5 text-slate-500 dark:text-slate-300" />;
+  if (code === 45 || code === 48) return <CloudFog className="w-5 h-5 text-slate-500 dark:text-slate-300" />;
+  if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) {
+    return <CloudRain className="w-5 h-5 text-sky-600 dark:text-sky-400" />;
+  }
+  if ((code >= 71 && code <= 77) || code === 85 || code === 86) {
+    return <Snowflake className="w-5 h-5 text-cyan-500 dark:text-cyan-300" />;
+  }
+  if (code >= 95) return <CloudLightning className="w-5 h-5 text-amber-600 dark:text-amber-400" />;
+  return <CloudSun className="w-5 h-5 text-teal-700 dark:text-teal-400" />;
 }
 
 const CATEGORY_TAGS: Record<CategoryType, { label: string; Icon: React.ComponentType<{ className?: string }> }> = {
@@ -137,9 +162,9 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   canEdit = true,
   onUpdateTrip,
   onNavigateToTimelineDay,
+  onNavigateToPrep,
   onOpenEditItem,
   onOpenAddItem,
-  onOpenQuickAction,
   requireAuth,
 }) => {
   const t = TRANSLATIONS[lang];
@@ -209,7 +234,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
     if (prevTripIdRef.current !== trip.id) {
       prevTripIdRef.current = trip.id;
       setSelectedDayNumber(computeInitialDayNumber(trip, destTzInfo.tz));
-      setShowAllBookings(false);
+      setIsBookingsExpanded(false);
     }
   }, [trip.id, destTzInfo.tz]);
 
@@ -221,7 +246,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   }, [trip.days, selectedDayNumber]);
 
   const [expandedItemIds, setExpandedItemIds] = useState<Record<string, boolean>>({});
-  const [showAllBookings, setShowAllBookings] = useState(false);
+  const [isBookingsExpanded, setIsBookingsExpanded] = useState(false);
 
   // Weather States (supports live current weather AND day-specific forecasts when viewing future/past days)
   const [weather, setWeather] = useState<WeatherData | null>(null);
@@ -261,6 +286,32 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   const destTodayStr = destTzInfo.tz ? getTodayInTimezone(destTzInfo.tz) : destNow.dateKey;
   const activeDayDateKey = normalizeDateKey(activeDay.date) || destTodayStr;
   const isViewingToday = activeDayDateKey === destTodayStr;
+
+  // Pre-Trip Readiness Intelligence (shown before departure day!)
+  const preTripReadiness = useMemo(() => {
+    const startKey = normalizeDateKey(trip.startDate || trip.days?.[0]?.date);
+    if (!startKey || destTodayStr >= startKey) return null;
+    const [sy, sm, sd] = startKey.split('-').map(Number);
+    const [ty, tm, td] = destTodayStr.split('-').map(Number);
+    const startUtc = Date.UTC(sy, (sm || 1) - 1, sd || 1);
+    const todayUtc = Date.UTC(ty, (tm || 1) - 1, td || 1);
+    const daysUntil = Math.round((startUtc - todayUtc) / (24 * 60 * 60 * 1000));
+    if (daysUntil <= 0) return null;
+
+    const totalTodos = (trip.todos || []).length;
+    const pendingTodos = (trip.todos || []).filter((tdItem) => !tdItem.completed).length;
+    const pendingVoucherCodes = (trip.bookings || []).filter((b) =>
+      isPlaceholderBookingCode(b.bookingCode)
+    ).length;
+
+    return {
+      daysUntil,
+      startKey,
+      totalTodos,
+      pendingTodos,
+      pendingVoucherCodes,
+    };
+  }, [trip.startDate, trip.days, trip.todos, trip.bookings, destTodayStr]);
 
   // Flighty-standard "Now / Up Next" selection:
   // (1) unchecked item currently in progress → (2) earliest upcoming unchecked → (3) first unchecked fallback
@@ -339,20 +390,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
   const shouldGroupCompleted = completedCount >= 2;
   const hasDayFocus = Boolean(activeDay.theme?.trim() || activeDay.notes?.trim());
 
-  // Daily expenses using normalized YYYY-MM-DD comparison
   const tripCurrency = trip.currency || detectTripCurrency(trip);
-  const todayExpenses = useMemo(
-    () => (trip.expenses || []).filter((e) => normalizeDateKey(e.date) === activeDayDateKey),
-    [trip.expenses, activeDayDateKey]
-  );
-  const todayTotalSpent = useMemo(
-    () =>
-      todayExpenses.reduce(
-        (sum, e) => sum + convertAmount(e.amount, e.currency || tripCurrency, tripCurrency, trip.customExchangeRates),
-        0
-      ),
-    [todayExpenses, tripCurrency, trip.customExchangeRates]
-  );
 
   const toggleItemExpanded = (id: string) => {
     setExpandedItemIds((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -584,31 +622,37 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
     <div className="space-y-4">
       {/* 1. Day Selector Ribbon + Live Destination Clock */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none flex-1 min-w-0">
-          {trip.days.map((day) => {
-            const isDayToday = normalizeDateKey(day.date) === destTodayStr;
-            const isActive = day.dayNumber === selectedDayNumber;
-            return (
-              <button
-                key={day.id}
-                type="button"
-                onClick={() => setSelectedDayNumber(day.dayNumber)}
-                className={`min-h-[42px] sm:min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 cursor-pointer ${
-                  isActive
-                    ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
-                    : isDayToday
-                      ? 'bg-teal-50/80 dark:bg-teal-950/40 text-teal-800 dark:text-teal-300 border border-teal-400/70 dark:border-teal-700'
-                      : 'bg-white dark:bg-[#111827] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-800'
-                }`}
-              >
-                <span>D{day.dayNumber}</span>
-                <span className="opacity-75 font-mono tabular-nums text-[10px]">{formatMonthDaySlash(day.date)}</span>
-                {isDayToday && (
-                  <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-teal-200' : 'bg-teal-600 dark:bg-teal-400'}`} />
-                )}
-              </button>
-            );
-          })}
+        <div className="relative flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pr-5 scrollbar-none">
+            {trip.days.map((day) => {
+              const isDayToday = normalizeDateKey(day.date) === destTodayStr;
+              const isActive = day.dayNumber === selectedDayNumber;
+              return (
+                <button
+                  key={day.id}
+                  type="button"
+                  onClick={() => setSelectedDayNumber(day.dayNumber)}
+                  className={`min-h-[42px] sm:min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                    isActive
+                      ? 'bg-teal-700 dark:bg-teal-600 text-white shadow-2xs'
+                      : isDayToday
+                        ? 'bg-teal-50/80 dark:bg-teal-950/40 text-teal-800 dark:text-teal-300 border border-teal-400/70 dark:border-teal-700'
+                        : 'bg-white dark:bg-[#111827] hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-[#E5E2DC] dark:border-slate-800'
+                  }`}
+                >
+                  <span>D{day.dayNumber}</span>
+                  <span className="opacity-75 font-mono tabular-nums text-[10px]">{formatMonthDaySlash(day.date)}</span>
+                  {isDayToday && (
+                    <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-teal-200' : 'bg-teal-600 dark:bg-teal-400'}`} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute right-0 top-0 bottom-1 w-6 bg-gradient-to-l from-[#FAF9F6] dark:from-[#090D16] to-transparent"
+          />
         </div>
 
         {/* Local Destination Clock Badge */}
@@ -620,6 +664,47 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
           <span className="font-bold text-slate-900 dark:text-white">{destClock}</span>
         </div>
       </div>
+
+      {/* 1.5 Ultra-Slim 1-Line Pre-Trip Pill (Before Departure Date) */}
+      {preTripReadiness && (
+        <div className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 px-3.5 py-2.5 shadow-2xs flex items-center justify-between gap-2 flex-wrap">
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-100">
+            <CalendarClock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>
+              {isZh
+                ? `距離出發還有 ${preTripReadiness.daysUntil} 天`
+                : `${preTripReadiness.daysUntil}d to departure`}
+            </span>
+          </span>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            {preTripReadiness.pendingTodos > 0 && onNavigateToPrep && (
+              <button
+                type="button"
+                onClick={() => onNavigateToPrep('checklist')}
+                className="min-h-[32px] px-2.5 py-1 rounded-lg bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600 text-[11px] font-bold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1 transition cursor-pointer"
+              >
+                <CheckSquare className="w-3 h-3 text-teal-700 dark:text-teal-400" />
+                <span>{isZh ? `待辦 ${preTripReadiness.pendingTodos}` : `Todos ${preTripReadiness.pendingTodos}`}</span>
+              </button>
+            )}
+            {preTripReadiness.pendingVoucherCodes > 0 && onNavigateToPrep && (
+              <button
+                type="button"
+                onClick={() => onNavigateToPrep('bookings')}
+                className="min-h-[32px] px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/50 border border-amber-200/80 dark:border-amber-800/70 text-[11px] font-bold text-amber-800 dark:text-amber-300 inline-flex items-center gap-1 transition cursor-pointer"
+              >
+                <Ticket className="w-3 h-3" />
+                <span>
+                  {isZh
+                    ? `待補憑證 ${preTripReadiness.pendingVoucherCodes}`
+                    : `${preTripReadiness.pendingVoucherCodes} Pending`}
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Responsive Workbench: Left Column | Right Column */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
@@ -793,8 +878,8 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
                 onClick={() => setIsWeatherExpanded(!isWeatherExpanded)}
                 className="flex items-center gap-2 min-w-0 text-left hover:opacity-85 transition group cursor-pointer flex-1"
               >
-                <span className="text-xl shrink-0 select-none flex items-center justify-center">
-                  {weatherDesc?.icon || <CloudSun className="w-5 h-5 text-teal-700 dark:text-teal-400" />}
+                <span className="w-9 h-9 rounded-xl bg-[#FAF9F6] dark:bg-slate-800/90 border border-[#E5E2DC]/80 dark:border-slate-700/80 shrink-0 select-none flex items-center justify-center">
+                  {renderCrispWeatherIcon(activeWeatherCode)}
                 </span>
                 <div className="flex items-center gap-1.5 flex-wrap text-xs text-slate-700 dark:text-slate-300 min-w-0">
                   <span className="font-black font-mono tabular-nums text-sm sm:text-base text-slate-900 dark:text-white">
@@ -981,140 +1066,7 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
             )}
           </div>
 
-          {/* 3. In-Transit Spending Snapshot */}
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/60 border border-teal-200/70 dark:border-teal-800/70 flex items-center justify-center text-teal-700 dark:text-teal-400 shrink-0">
-                <DollarSign className="w-4 h-4" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 tabular-nums truncate">
-                  {isViewingToday
-                    ? `今日支出 (${todayExpenses.length})`
-                    : `Day ${activeDay.dayNumber} · ${formatMonthDaySlash(activeDayDateKey)} 支出 (${todayExpenses.length})`}
-                </div>
-                <div className="text-base sm:text-lg font-black font-mono tabular-nums text-slate-900 dark:text-white">
-                  {formatCurrencyAmount(todayTotalSpent, tripCurrency)}
-                </div>
-              </div>
-            </div>
-
-            {onOpenQuickAction && canEdit && (
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => onOpenQuickAction('todos', activeDayDateKey)}
-                  className="min-h-[42px] sm:min-h-[36px] px-3 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600/60 text-slate-700 dark:text-slate-200 font-bold text-xs transition active:scale-95 flex items-center gap-1 cursor-pointer"
-                  title="新增待辦"
-                >
-                  <Plus className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                  <span>待辦</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onOpenQuickAction('expense', activeDayDateKey)}
-                  className="min-h-[42px] sm:min-h-[36px] px-3.5 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs shadow-2xs transition active:scale-95 flex items-center gap-1 cursor-pointer"
-                  title="記帳"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>記一筆</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* 4. Daily Theme & Day Highlights Card (Inline Editable, fixed trailing middot) */}
-          {(activeDay.theme?.trim() || activeDay.notes?.trim() || isEditingFocus) && (
-            <div className="rounded-2xl bg-[#FAF9F6] dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-3.5 sm:p-4 shadow-2xs">
-              {isEditingFocus ? (
-                <div className="space-y-2.5 text-xs animate-in fade-in duration-100">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-teal-700 dark:text-teal-400 flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5" />
-                      <span>{isZh ? `Day ${activeDay.dayNumber} 焦點與備註` : `Day ${activeDay.dayNumber} Focus & Notes`}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingFocus(false)}
-                      className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 px-2 py-1 rounded-lg cursor-pointer"
-                    >
-                      {isZh ? '取消' : 'Cancel'}
-                    </button>
-                  </div>
-                  <input
-                    type="text"
-                    value={focusThemeInput}
-                    onChange={(e) => setFocusThemeInput(e.target.value)}
-                    placeholder={isZh ? '今日主題（例如：京都古寺巡禮）' : 'Day focus title...'}
-                    className="w-full min-h-[44px] sm:min-h-[38px] px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-teal-600"
-                  />
-                  <textarea
-                    rows={2}
-                    value={focusNotesInput}
-                    onChange={(e) => setFocusNotesInput(e.target.value)}
-                    placeholder={isZh ? '提醒事項（例如：記得帶 ICOCA、提前預約車票）' : 'Day notes...'}
-                    className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-teal-600 resize-none"
-                  />
-                  <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={handleSaveDayFocus}
-                      className="min-h-[42px] sm:min-h-[36px] px-4 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 dark:hover:bg-teal-500 text-white font-bold text-xs flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                      <span>{isZh ? '儲存焦點' : 'Save'}</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-start justify-between gap-2.5">
-                  <div className="flex items-start gap-2.5 min-w-0 flex-1">
-                    <div className="p-2 rounded-xl bg-teal-700 dark:bg-teal-600 text-white shrink-0 mt-0.5 shadow-2xs">
-                      <MapPin className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-                        <span className="text-[11px] font-bold text-teal-700 dark:text-teal-400">
-                          {isViewingToday ? (isZh ? '今日焦點' : 'Today Focus') : `Day ${activeDay.dayNumber} 焦點`}
-                        </span>
-                        {activeDay.theme?.trim() ? (
-                          <>
-                            <span className="text-slate-300 dark:text-slate-600">·</span>
-                            <h4 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white">
-                              {activeDay.theme.trim()}
-                            </h4>
-                          </>
-                        ) : (
-                          <span className="text-xs text-slate-400 dark:text-slate-500 font-normal">
-                            {isZh ? '尚未設定主題' : 'No focus set'}
-                          </span>
-                        )}
-                      </div>
-                      {activeDay.notes && (
-                        <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mt-1 flex items-start gap-1.5">
-                          <FileText className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
-                          <span>{activeDay.notes}</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onClick={handleStartEditFocus}
-                      className="min-w-[40px] min-h-[40px] sm:min-w-[34px] sm:min-h-[34px] flex items-center justify-center rounded-xl text-slate-400 hover:text-teal-700 dark:hover:text-teal-300 hover:bg-white dark:hover:bg-slate-800 border border-transparent hover:border-[#E5E2DC] dark:hover:border-slate-700 transition shrink-0 cursor-pointer"
-                      title={isZh ? '編輯焦點與備註' : 'Edit day focus'}
-                      aria-label={isZh ? '編輯焦點與備註' : 'Edit day focus'}
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Today's Key Booking Codes Quick-Copy Strip (Normalized dates + Expand All toggle) */}
+          {/* 3. Compact Collapsible Booking Codes Capsule (Zero clutter until needed at counter) */}
           {(() => {
             const dayBookings: Array<{ id: string; title: string; code: string; sub?: string }> = [];
             const seenCodes = new Set<string>();
@@ -1151,107 +1103,154 @@ export const LiveCompanionTab: React.FC<LiveCompanionTabProps> = ({
             });
 
             if (dayBookings.length === 0) return null;
-            const visibleBookings = showAllBookings ? dayBookings : dayBookings.slice(0, 5);
 
             return (
               <div className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 shadow-2xs overflow-hidden">
-                <div className="px-4 py-3 border-b border-[#E5E2DC]/80 dark:border-slate-800 flex items-center justify-between text-xs font-bold text-slate-900 dark:text-white">
+                <button
+                  type="button"
+                  onClick={() => setIsBookingsExpanded((v) => !v)}
+                  className="w-full px-4 py-3 flex items-center justify-between text-xs font-bold text-slate-900 dark:text-white hover:bg-[#FAF9F6] dark:hover:bg-slate-800/40 transition cursor-pointer"
+                >
                   <span className="flex items-center gap-1.5">
                     <Ticket className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                    <span>{isZh ? '訂位代號速查' : 'Booking Codes'}</span>
+                    <span>{isZh ? '當日訂位代號速查' : 'Day Booking Codes'}</span>
+                    <span className="font-mono tabular-nums text-[11px] font-semibold text-slate-400">
+                      ({dayBookings.length})
+                    </span>
                   </span>
-                  <span className="font-mono tabular-nums text-[11px] text-slate-400">
-                    {dayBookings.length}
+                  <span className="text-slate-400">
+                    {isBookingsExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </span>
-                </div>
-                <div className="divide-y divide-[#E5E2DC]/75 dark:divide-slate-800">
-                  {visibleBookings.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="flex items-center justify-between gap-2.5 px-4 py-2.5 text-xs"
-                    >
-                      <div className="min-w-0">
-                        <div className="font-semibold text-slate-800 dark:text-slate-100 truncate">
-                          {entry.title}
-                        </div>
-                        <div className="font-mono tabular-nums text-[11px] text-teal-700 dark:text-teal-400 font-bold truncate">
-                          {entry.code}
-                          {entry.sub ? ` · ${entry.sub}` : ''}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleCopyBookingCode(entry.code, entry.id)}
-                        className={`min-h-[38px] sm:min-h-[34px] px-3 rounded-xl text-xs sm:text-[11px] font-bold flex items-center gap-1 shrink-0 transition cursor-pointer ${
-                          copiedBookingKey === entry.id
-                            ? 'bg-teal-700 text-white'
-                            : 'bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-teal-600'
-                        }`}
+                </button>
+                {isBookingsExpanded && (
+                  <div className="border-t border-[#E5E2DC]/80 dark:border-slate-800 divide-y divide-[#E5E2DC]/75 dark:divide-slate-800 animate-in fade-in duration-150">
+                    {dayBookings.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className="flex items-center justify-between gap-2.5 px-4 py-2.5 text-xs"
                       >
-                        {copiedBookingKey === entry.id ? (
-                          <>
-                            <Check className="w-3.5 h-3.5" />
-                            <span>{isZh ? '已複製' : 'Copied'}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                            <span>{isZh ? '複製' : 'Copy'}</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                {dayBookings.length > 5 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllBookings((prev) => !prev)}
-                    className="w-full py-2.5 text-xs font-bold text-teal-700 dark:text-teal-400 bg-[#FAF9F6] dark:bg-slate-900/50 border-t border-[#E5E2DC]/80 dark:border-slate-800 hover:bg-teal-50/50 dark:hover:bg-teal-950/30 transition cursor-pointer"
-                  >
-                    {showAllBookings
-                      ? isZh ? '收合清單' : 'Show less'
-                      : isZh
-                        ? `查看全部 ${dayBookings.length} 筆憑證代號`
-                        : `View all ${dayBookings.length} codes`}
-                  </button>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-800 dark:text-slate-100 truncate">
+                            {entry.title}
+                          </div>
+                          <div className="font-mono tabular-nums text-[11px] text-teal-700 dark:text-teal-400 font-bold truncate">
+                            {entry.code}
+                            {entry.sub ? ` · ${entry.sub}` : ''}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyBookingCode(entry.code, entry.id)}
+                          className={`min-h-[36px] sm:min-h-[34px] px-3 rounded-xl text-xs sm:text-[11px] font-bold flex items-center gap-1 shrink-0 transition cursor-pointer ${
+                            copiedBookingKey === entry.id
+                              ? 'bg-teal-700 text-white'
+                              : 'bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-teal-600'
+                          }`}
+                        >
+                          {copiedBookingKey === entry.id ? (
+                            <>
+                              <Check className="w-3.5 h-3.5" />
+                              <span>{isZh ? '已複製' : 'Copied'}</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                              <span>{isZh ? '複製' : 'Copy'}</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             );
           })()}
         </div>
 
-        {/* 5. Progress & Complete Day Itinerary Checklist */}
+        {/* 4. Progress & Complete Day Itinerary Checklist (with integrated Day Theme & Notes) */}
         <div className="lg:col-span-7 bg-white dark:bg-[#111827] rounded-3xl p-4 sm:p-6 border border-[#E5E2DC] dark:border-slate-800 shadow-2xs space-y-4">
-          <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#E5E2DC] dark:border-slate-800 flex-wrap">
-            <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm">
-              {t.day.replace('{n}', String(activeDay.dayNumber))} ({formatDateSlash(activeDay.date)}) {isZh ? '行程清單' : 'Itinerary'}
-            </h4>
-            <div className="flex items-center gap-3 shrink-0">
-              <span className="font-mono tabular-nums font-bold text-xs text-teal-700 dark:text-teal-400">
-                {completedCount} / {totalCount} · {progressPercent}%
-              </span>
-              {canEdit && !hasDayFocus && !isEditingFocus && (
-                <button
-                  type="button"
-                  onClick={handleStartEditFocus}
-                  className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-400 flex items-center gap-0.5 cursor-pointer"
-                >
-                  <Edit2 className="w-3 h-3" />
-                  <span>{isZh ? '當日主題' : 'Day focus'}</span>
-                </button>
-              )}
-              {onNavigateToTimelineDay && (
-                <button
-                  type="button"
-                  onClick={() => onNavigateToTimelineDay(activeDay.dayNumber)}
-                  className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-400 flex items-center gap-0.5 cursor-pointer"
-                >
-                  <span>完整時序</span>
-                  <ArrowUpRight className="w-3.5 h-3.5" />
-                </button>
-              )}
+          <div className="space-y-2 pb-3 border-b border-[#E5E2DC] dark:border-slate-800">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <h4 className="font-bold text-slate-900 dark:text-slate-100 text-xs sm:text-sm">
+                {t.day.replace('{n}', String(activeDay.dayNumber))} ({formatDateSlash(activeDay.date)}) {isZh ? '行程清單' : 'Itinerary'}
+              </h4>
+              <div className="flex items-center gap-3 shrink-0">
+                <span className="font-mono tabular-nums font-bold text-xs text-teal-700 dark:text-teal-400">
+                  {completedCount} / {totalCount} · {progressPercent}%
+                </span>
+                {canEdit && !isEditingFocus && (
+                  <button
+                    type="button"
+                    onClick={handleStartEditFocus}
+                    className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-400 flex items-center gap-0.5 cursor-pointer"
+                    title={isZh ? '編輯當日主題與備註' : 'Edit day focus'}
+                  >
+                    <Edit2 className="w-3 h-3" />
+                    <span>{hasDayFocus ? (isZh ? '編輯備註' : 'Edit') : isZh ? '當日主題' : 'Day focus'}</span>
+                  </button>
+                )}
+                {onNavigateToTimelineDay && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToTimelineDay(activeDay.dayNumber)}
+                    className="text-[11px] font-bold text-slate-500 dark:text-slate-400 hover:text-teal-700 dark:hover:text-teal-400 flex items-center gap-0.5 cursor-pointer"
+                  >
+                    <span>完整時序</span>
+                    <ArrowUpRight className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
+
+            {isEditingFocus ? (
+              <div className="space-y-2 pt-1 text-xs animate-in fade-in duration-100">
+                <input
+                  type="text"
+                  value={focusThemeInput}
+                  onChange={(e) => setFocusThemeInput(e.target.value)}
+                  placeholder={isZh ? '當日主題（例：廣島城・宮島夕陽）' : 'Day focus title...'}
+                  className="w-full min-h-[40px] px-3 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs font-bold text-slate-900 dark:text-white outline-none focus:border-teal-600"
+                />
+                <textarea
+                  rows={2}
+                  value={focusNotesInput}
+                  onChange={(e) => setFocusNotesInput(e.target.value)}
+                  placeholder={isZh ? '當日重點備註或提醒...' : 'Day notes...'}
+                  className="w-full px-3 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-900 border border-[#E5E2DC] dark:border-slate-700 text-[16px] sm:text-xs text-slate-700 dark:text-slate-200 outline-none focus:border-teal-600 resize-none"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingFocus(false)}
+                    className="min-h-[34px] px-3 rounded-xl text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-semibold text-xs cursor-pointer"
+                  >
+                    {isZh ? '取消' : 'Cancel'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveDayFocus}
+                    className="min-h-[34px] px-3.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white font-bold text-xs flex items-center gap-1 cursor-pointer"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{isZh ? '儲存' : 'Save'}</span>
+                  </button>
+                </div>
+              </div>
+            ) : hasDayFocus ? (
+              <div className="space-y-0.5">
+                {activeDay.theme?.trim() && (
+                  <p className="text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-100">
+                    {activeDay.theme.trim()}
+                  </p>
+                )}
+                {activeDay.notes && (
+                  <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                    {activeDay.notes}
+                  </p>
+                )}
+              </div>
+            ) : null}
           </div>
 
           <div className="w-full bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC]/60 dark:border-slate-700/50 h-2 rounded-full overflow-hidden">

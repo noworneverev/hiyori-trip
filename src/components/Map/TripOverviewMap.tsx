@@ -556,7 +556,7 @@ export const TripOverviewMap: React.FC<TripOverviewMapProps> = ({
 
       {/* 2. Interactive Map Container */}
       <div
-        className={`relative w-full ${heightClass} rounded-2xl overflow-hidden shadow-inner border border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-950 ${
+        className={`relative isolate z-0 w-full ${heightClass} rounded-2xl overflow-hidden shadow-inner border border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-950 ${
           !effectiveDragEnabled ? 'touch-pan-y' : ''
         }`}
       >

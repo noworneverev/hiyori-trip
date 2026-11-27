@@ -25,8 +25,9 @@ interface ItineraryOverviewTableProps {
 }
 
 const LODGING_KEYWORD_REGEX =
-  /(飯店|酒店|旅館|民宿|賓館|青旅|青年旅舍|度假村|渡假村|溫泉宿|商旅|行館|酒店|hotel|hostel|ryokan|inn|resort|lodge|b&b|airbnb)/i;
+  /(飯店|酒店|旅館|民宿|賓館|青旅|青年旅舍|度假村|渡假村|溫泉宿|商旅|行館|hotel|hostel|ryokan|inn|resort|lodge|b&b|airbnb)/i;
 const FALSE_LODGING_PLACES_REGEX = /(新宿|原宿|指宿|宿霧|宿迁|宿遷|宿州)/;
+const NON_OVERNIGHT_LODGING_REGEX = /(早餐|午餐|晚餐|免費餐|免費晚|日歸|日帰り|泡湯|溫泉浴場|大浴場|退房|check-?out|寄放行李)/i;
 
 export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
   trip,
@@ -72,15 +73,46 @@ export const ItineraryOverviewTable: React.FC<ItineraryOverviewTableProps> = ({
     return transports.slice(0, 2);
   };
 
-  // Extract accommodation info for a day without false positives on places like 新宿 / 原宿 / 指宿
+  // Extract accurate tonight's accommodation:
+  // (1) explicit hotel check-in item on that day -> (2) multi-night hotel booking covering [startDate, endDate) ->
+  // (3) non-food/non-day-use lodging keyword match -> (4) explicit day notes
   const getDayLodging = (day: DayPlan): string | null => {
-    const explicitHotel = day.items.find((i) => i.category === 'hotel');
-    if (explicitHotel) return explicitHotel.title;
+    const cleanHotelLabel = (raw: string) =>
+      raw
+        .replace(/\s*(Check-?in|辦理入住|入住|連泊|續住|（.*?）|\(.*?\))\s*$/gi, '')
+        .trim() || raw;
+
+    const explicitHotel = day.items.find(
+      (i) => i.category === 'hotel' && !NON_OVERNIGHT_LODGING_REGEX.test(i.title)
+    );
+    if (explicitHotel) return cleanHotelLabel(explicitHotel.locationName || explicitHotel.title);
+
+    const dayKey = (day.date || '').slice(0, 10);
+    if (dayKey && Array.isArray(trip.bookings) && trip.bookings.length > 0) {
+      const matchedBooking = trip.bookings.find((b) => {
+        if (b.category !== 'hotel') return false;
+        const start = (b.startDate || '').slice(0, 10);
+        const end = (b.endDate || '').slice(0, 10);
+        if (start && end && end > start) {
+          // Stay covers nights from check-in date inclusive through check-out date exclusive
+          return dayKey >= start && dayKey < end;
+        }
+        return Boolean(start && dayKey === start);
+      });
+      if (matchedBooking) {
+        return cleanHotelLabel(matchedBooking.title);
+      }
+    }
 
     const keywordHotel = day.items.find(
-      (i) => LODGING_KEYWORD_REGEX.test(i.title) && !FALSE_LODGING_PLACES_REGEX.test(i.title)
+      (i) =>
+        i.category !== 'food' &&
+        i.category !== 'transport' &&
+        LODGING_KEYWORD_REGEX.test(i.title) &&
+        !FALSE_LODGING_PLACES_REGEX.test(i.title) &&
+        !NON_OVERNIGHT_LODGING_REGEX.test(i.title)
     );
-    if (keywordHotel) return keywordHotel.title;
+    if (keywordHotel) return cleanHotelLabel(keywordHotel.title);
 
     if (day.notes) {
       const match = day.notes.match(/(?:住宿|入住|下榻|晚宿)[：:]\s*([^，。\n]+)/);

@@ -86,6 +86,14 @@ type UnifiedBookingEntry =
       item: ItineraryItem;
     };
 
+export function isPlaceholderBookingCode(code?: string): boolean {
+  const trimmed = (code || '').trim();
+  if (!trimmed) return true;
+  return /(待填|待補|待兌換|待確認|待預約|待綁定|待購買|待領取|待開通|未填|未定|尚未|預定後|預約後|TBD|TBA|PENDING|N\/A|PLACEHOLDER)/i.test(
+    trimmed
+  );
+}
+
 function mapItineraryCategoryToBooking(cat: ItineraryItem['category']): BookingCategory {
   if (cat === 'hotel') return 'hotel';
   if (cat === 'transport') return 'rail';
@@ -113,6 +121,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
   const [pendingDeleteVoucher, setPendingDeleteVoucher] = useState<BookingVoucher | null>(null);
   const [expandedFormPicker, setExpandedFormPicker] = useState<'category' | 'day' | null>(null);
   const [counterCard, setCounterCard] = useState<{
+    voucher?: BookingVoucher;
     title: string;
     category: BookingCategory;
     bookingCode: string;
@@ -175,12 +184,17 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     };
   }, [counterCard]);
 
+  const counterCodeIsPlaceholder = useMemo(
+    () => isPlaceholderBookingCode(counterCard?.bookingCode),
+    [counterCard?.bookingCode]
+  );
+
   const counterQr = useMemo(() => {
-    if (!counterCard?.bookingCode) return null;
+    if (!counterCard?.bookingCode || counterCodeIsPlaceholder) return null;
     const trimmed = counterCard.bookingCode.trim();
     if (!trimmed || trimmed.length > 180) return null;
     return generateQrSvgPath(trimmed);
-  }, [counterCard?.bookingCode]);
+  }, [counterCard?.bookingCode, counterCodeIsPlaceholder]);
 
   const cleanupUnsavedVoucherImages = () => {
     formImagesRef.current.forEach((ref) => {
@@ -501,17 +515,29 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
     return counts;
   }, [unifiedEntries]);
 
+  const pendingPlaceholderCount = useMemo(() => {
+    return unifiedEntries.filter((e) => {
+      const code = e.source === 'voucher' ? e.voucher.bookingCode : e.bookingCode;
+      return isPlaceholderBookingCode(code);
+    }).length;
+  }, [unifiedEntries]);
+
   return (
-    <div className="space-y-5 pb-12">
+    <div className="space-y-5 pb-24 sm:pb-12">
       {/* Header & Toolbar Card */}
       <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-5 sm:p-6 shadow-2xs space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E5E2DC] dark:border-slate-800">
           <div>
-            <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2">
+            <h3 className="font-bold text-slate-900 dark:text-white text-base flex items-center gap-2 flex-wrap">
               <Ticket className="w-5 h-5 text-teal-700 dark:text-teal-400" />
               <span className="tabular-nums">
                 {isZh ? `訂位憑證夾 (${unifiedEntries.length})` : `Booking Vault (${unifiedEntries.length})`}
               </span>
+              {pendingPlaceholderCount > 0 && (
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/70">
+                  {isZh ? `${pendingPlaceholderCount} 筆待補確認碼` : `${pendingPlaceholderCount} code(s) pending`}
+                </span>
+              )}
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               {isZh
@@ -973,6 +999,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                   ? `${v.startDate} ~ ${v.endDate}`
                   : v.startDate
                 : '';
+              const isPendingCode = isPlaceholderBookingCode(v.bookingCode);
 
               return (
                 <div
@@ -998,6 +1025,11 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                             <span className="font-mono tabular-nums">Day {v.dayNumber}</span>
                           </>
                         )}
+                        {isPendingCode && (
+                          <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800/70">
+                            {isZh ? '待補編號' : 'Pending'}
+                          </span>
+                        )}
                         {v.voucherImages && v.voucherImages.length > 0 && (
                           <>
                             <span aria-hidden="true">·</span>
@@ -1014,6 +1046,7 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                           type="button"
                           onClick={() =>
                             setCounterCard({
+                              voucher: v,
                               title: v.title,
                               category: v.category,
                               bookingCode: v.bookingCode,
@@ -1058,38 +1091,55 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                     </h4>
                   </div>
 
-                  {/* Flat Hairline Code Band with 1-Tap Copy */}
+                  {/* Flat Hairline Code Band with 1-Tap Copy or Quick Fill */}
                   <div className="px-4 sm:px-5 py-3 bg-[#FAF9F6]/65 dark:bg-slate-900/40 flex items-center justify-between gap-2.5">
                     <div className="min-w-0">
                       <span className="text-[11px] text-slate-400 block">
                         {isZh ? '訂位代號 / 確認碼' : 'Booking Code'}
                       </span>
-                      <span className="font-mono tabular-nums font-bold text-base text-slate-900 dark:text-white tracking-wider break-all select-all">
+                      <span
+                        className={`font-mono tabular-nums font-bold text-base tracking-wider break-all select-all ${
+                          isPendingCode
+                            ? 'text-amber-700 dark:text-amber-300'
+                            : 'text-slate-900 dark:text-white'
+                        }`}
+                      >
                         {v.bookingCode}
                       </span>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleCopy(v.bookingCode, copyMainId)}
-                      className={`min-h-[42px] sm:min-h-[38px] px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer ${
-                        copiedKey === copyMainId
-                          ? 'bg-teal-700 text-white'
-                          : 'bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:border-teal-600'
-                      }`}
-                    >
-                      {copiedKey === copyMainId ? (
-                        <>
-                          <Check className="w-3.5 h-3.5" />
-                          <span>{isZh ? '已複製' : 'Copied'}</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                          <span>{isZh ? '複製' : 'Copy'}</span>
-                        </>
-                      )}
-                    </button>
+                    {isPendingCode && canEdit ? (
+                      <button
+                        type="button"
+                        onClick={() => openEditForm(v)}
+                        className="min-h-[42px] sm:min-h-[38px] px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer bg-amber-600 hover:bg-amber-700 text-white shadow-2xs"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                        <span>{isZh ? '填入編號' : 'Fill Code'}</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(v.bookingCode, copyMainId)}
+                        className={`min-h-[42px] sm:min-h-[38px] px-3.5 py-2 rounded-xl font-bold text-xs flex items-center gap-1.5 shrink-0 transition active:scale-95 cursor-pointer ${
+                          copiedKey === copyMainId
+                            ? 'bg-teal-700 text-white'
+                            : 'bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-700 text-slate-800 dark:text-slate-100 hover:border-teal-600'
+                        }`}
+                      >
+                        {copiedKey === copyMainId ? (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>{isZh ? '已複製' : 'Copied'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                            <span>{isZh ? '複製' : 'Copy'}</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
 
                   {/* Attached QR / Voucher Screenshot Preview Strip */}
@@ -1446,6 +1496,29 @@ export const BookingVaultView: React.FC<BookingVaultViewProps> = ({
                 <span className="text-[11px] font-medium text-slate-500">
                   {isZh ? '離線即時產生 · 螢幕已保持常亮供櫃檯掃描' : 'Offline QR · Screen kept awake for scanning'}
                 </span>
+              </div>
+            ) : counterCodeIsPlaceholder ? (
+              <div className="flex flex-col items-center text-center py-5 px-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 space-y-2.5">
+                <QrCode className="w-7 h-7 text-amber-600 dark:text-amber-400" />
+                <p className="text-xs font-semibold text-amber-900 dark:text-amber-200 leading-relaxed">
+                  {isZh
+                    ? '尚未填入真實確認碼，已暫停產生 QR Code。完成預訂並補填編號（或上傳憑證截圖）後，即可離線供櫃檯掃描。'
+                    : 'Placeholder booking code detected. Fill in your confirmed reference or attach a QR screenshot to display here.'}
+                </p>
+                {canEdit && counterCard.voucher && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = counterCard.voucher!;
+                      setCounterCard(null);
+                      openEditForm(target);
+                    }}
+                    className="min-h-[38px] px-4 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold inline-flex items-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                    <span>{isZh ? '立即補填確認碼' : 'Fill Confirmation Code'}</span>
+                  </button>
+                )}
               </div>
             ) : null}
 

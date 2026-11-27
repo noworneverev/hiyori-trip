@@ -1113,7 +1113,7 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
                 value={draft.amount}
                 onChange={(e) => handleAmountChange(e.target.value)}
                 onBlur={handleAmountBlur}
-                placeholder="0（支援 850+320）"
+                placeholder="0"
                 className="w-full min-w-0 text-right bg-transparent text-xl sm:text-2xl font-black font-mono tabular-nums text-teal-800 dark:text-teal-300 placeholder:text-slate-300 dark:placeholder:text-slate-600 focus:outline-hidden"
               />
               {draft.amount && (
@@ -1172,11 +1172,21 @@ export const TiantianExpenseEditor: React.FC<TiantianExpenseEditorProps> = ({
                     title: '未稅價加上 10% 消費稅 (×1.1)',
                     apply: (v: number) => v * 1.1,
                   },
-                  {
-                    label: '÷2 均分',
-                    title: '金額除以 2',
-                    apply: (v: number) => v / 2,
-                  },
+                  ...(trip.isSoloTrip
+                    ? [
+                        {
+                          label: '含稅 +8%',
+                          title: '未稅價加上 8% 飲食外帶稅 (×1.08)',
+                          apply: (v: number) => v * 1.08,
+                        },
+                      ]
+                    : [
+                        {
+                          label: '÷2 均分',
+                          title: '金額除以 2',
+                          apply: (v: number) => v / 2,
+                        },
+                      ]),
                   ...(isSplitMode && splitMembersList.length > 2
                     ? [
                         {

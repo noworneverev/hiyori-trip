@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Trip } from '../../types/itinerary';
 import { Language } from '../../utils/i18n';
@@ -15,6 +15,7 @@ interface NotesAndPrepTabProps {
   onUpdateTrip: (updatedTrip: Trip) => void;
   requireAuth?: (action: () => void, reason?: string) => boolean;
   onJumpToDay?: (dayNumber: number) => void;
+  requestedSubTab?: { tab: 'checklist' | 'bookings'; nonce: number } | null;
 }
 
 export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
@@ -24,8 +25,15 @@ export const NotesAndPrepTab: React.FC<NotesAndPrepTabProps> = ({
   onUpdateTrip,
   requireAuth,
   onJumpToDay,
+  requestedSubTab = null,
 }) => {
-  const [subTab, setSubTab] = useState<'checklist' | 'bookings'>('checklist');
+  const [subTab, setSubTab] = useState<'checklist' | 'bookings'>(requestedSubTab?.tab || 'checklist');
+
+  useEffect(() => {
+    if (requestedSubTab?.tab) {
+      setSubTab(requestedSubTab.tab);
+    }
+  }, [requestedSubTab?.tab, requestedSubTab?.nonce]);
   const [addTodoTrigger, setAddTodoTrigger] = useState(0);
   const [addBookingTrigger, setAddBookingTrigger] = useState(0);
   const hasActiveModal = useHasActiveModalLayer();

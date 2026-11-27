@@ -1308,7 +1308,7 @@ export const ExpensesTab: React.FC<ExpensesTabProps> = ({ trip, lang, canEdit = 
     (withReceiptFilter ? 1 : 0);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-24 sm:pb-8">
       {/* 1. 預算資訊與財務總覽卡 */}
       <div className="rounded-3xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 sm:p-6 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#E5E2DC]/60 dark:border-slate-800">

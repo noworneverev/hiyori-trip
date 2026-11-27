@@ -123,7 +123,8 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
   const buildMarkerIcon = (item: ItineraryItem, displayNumber: number, isSelected: boolean) => {
     const color = CATEGORY_COLORS[item.category] || '#0d9488';
     const safeTitle = escapeHtml(item.title);
-    const showLabelAlways = isSelected || validIndexedItems.length <= 5;
+    // Only pin the text label permanently for the active spot so dense clusters never collide
+    const showLabelAlways = isSelected;
     return L.divIcon({
       className: 'custom-itinerary-marker',
       html: `
@@ -376,7 +377,7 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
 
   return (
     <div
-      className={`relative w-full ${heightClass} rounded-2xl overflow-hidden shadow-inner border border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-950 ${
+      className={`relative isolate z-0 w-full ${heightClass} rounded-2xl overflow-hidden shadow-inner border border-[#E5E2DC] dark:border-slate-800 bg-[#FAF9F6] dark:bg-slate-950 ${
         !effectiveDragEnabled ? 'touch-pan-y' : ''
       }`}
     >

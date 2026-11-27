@@ -60,7 +60,8 @@ import { sanitizeExternalUrl } from '../../utils/url';
 import { garbageCollectOrphanedMedia } from '../../utils/image';
 import { getStoredTrips } from '../../utils/storage';
 import { triggerHaptic } from '../../utils/pwaUpdater';
-import { IosActionSheet } from '../UI/IosPrimitives';
+import { copyTextToClipboard } from '../../utils/clipboard';
+import { IosActionSheet, IosModalSheet, IosNavBar, IosInsetGroup } from '../UI/IosPrimitives';
 import {
   Calendar,
   Clock,
@@ -100,7 +101,16 @@ import {
   CalendarArrowUp,
   GripVertical,
   ArrowRight,
+  Phone,
+  Ticket,
+  Bookmark,
 } from 'lucide-react';
+
+function extractPhoneFromText(text?: string): string | undefined {
+  if (!text) return undefined;
+  const match = text.match(/(?:\+\d{1,3}[-\s]?)?(?:0\d{1,4}[-\s]?\d{1,4}[-\s]?\d{3,4})/);
+  return match ? match[0].trim() : undefined;
+}
 import { MediaImage } from '../UI/MediaImage';
 
 interface TimelineTabProps {
@@ -234,10 +244,16 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
   }, []);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [expandedNoteIds, setExpandedNoteIds] = useState<Record<string, boolean>>({});
-  const [isMapExpanded, setIsMapExpanded] = useState(false);
+  const [isMapExpanded, setIsMapExpanded] = useState<boolean>(
+    () => typeof window !== 'undefined' && window.innerWidth >= 1024
+  );
   const [spotSearchQuery, setSpotSearchQuery] = useState('');
   const [dayWeatherMap, setDayWeatherMap] = useState<Record<number, DayWeatherStatus>>({});
   const [isWeatherLoading, setIsWeatherLoading] = useState(false);
+
+  // Read-Only Spot Detail Sheet (prevents accidental edits while walking)
+  const [detailSpot, setDetailSpot] = useState<{ item: ItineraryItem; index: number } | null>(null);
+  const [copiedDetailField, setCopiedDetailField] = useState<'address' | 'code' | 'phone' | null>(null);
 
   // Inline Day Theme & Notes Editor
   const [isEditingDayHeader, setIsEditingDayHeader] = useState(false);
@@ -1527,11 +1543,20 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
           />
         </Suspense>
       ) : (
-        <>
-          {/* Interactive Map (Auto-expanded on Pick Mode or Locate click) */}
+        <div
+          className={
+            isMapExpanded
+              ? 'grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-5 items-start'
+              : 'space-y-3'
+          }
+        >
+          {/* Interactive Map — Mobile: top collapsible; Desktop (>=1024px): sticky right split pane */}
           {isMapExpanded && (
-            <div id="timeline-day-map" className="scroll-mt-24">
-              <Suspense fallback={<LazyPanelFallback height={300} />}>
+            <div
+              id="timeline-day-map"
+              className="scroll-mt-28 lg:col-span-5 lg:order-2 lg:sticky lg:top-28"
+            >
+              <Suspense fallback={<LazyPanelFallback height={340} />}>
                 <LeafletMap
                   items={activeDay.items}
                   selectedItemId={selectedItemId}
@@ -1540,6 +1565,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                   onPickLocation={onPickLocation}
                   onCancelPickMode={onCancelMapPick}
                   pickedLocation={pickedCoords}
+                  heightClass="h-[320px] sm:h-[380px] lg:h-[calc(100vh-11.5rem)] lg:min-h-[480px]"
                 />
               </Suspense>
             </div>
@@ -1547,7 +1573,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
           {/* Swipeable Daily Schedule Body */}
           <div
-            className="space-y-3 touch-pan-y"
+            className={`space-y-3 touch-pan-y ${isMapExpanded ? 'lg:col-span-7 lg:order-1 min-w-0' : ''}`}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >
@@ -1561,10 +1587,10 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     : ''
               }`}
             >
-              {/* Streamlined Day Header Card with Integrated Weather + Inline Day Edit/Delete */}
+              {/* Streamlined Day Header Card with Integrated Weather + Daily Quick Stats + Inline Day Edit */}
               <div
                 id="day-schedule-section"
-                className="bg-white dark:bg-[#111827] rounded-2xl p-3.5 sm:p-4 border border-[#E5E2DC] dark:border-slate-800 shadow-2xs scroll-mt-24"
+                className="bg-white dark:bg-[#111827] rounded-2xl p-3.5 sm:p-4 border border-[#E5E2DC] dark:border-slate-800 shadow-2xs scroll-mt-28"
               >
                 {isEditingDayHeader ? (
                   <div className="space-y-2.5 text-xs animate-in fade-in duration-100">
@@ -1692,6 +1718,49 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                           {activeDay.notes}
                         </p>
                       )}
+
+                      {/* Compact Daily Stats Micro-Ribbon */}
+                      {activeDay.items.length > 0 && (() => {
+                        const doneCount = activeDay.items.filter((i) => i.completed).length;
+                        const unpaidCost = activeDay.items.reduce(
+                          (acc, i) => acc + (typeof i.cost === 'number' && i.cost > 0 && !i.costPaid ? i.cost : 0),
+                          0
+                        );
+                        const hasJrPassLeg = activeDay.items.some((i) =>
+                          /(JR\s*Pass|5\s*日券|五日券|新幹線|超級萩號|宮島渡輪)/i.test(
+                            `${i.title} ${i.transportNote || ''}`
+                          )
+                        );
+                        return (
+                          <div className="flex items-center gap-2 flex-wrap mt-2 pt-2 border-t border-[#E5E2DC]/65 dark:border-slate-800/80 text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
+                            <span>
+                              {isZh ? `${activeDay.items.length} 站` : `${activeDay.items.length} stops`}
+                            </span>
+                            {doneCount > 0 && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span className="text-teal-700 dark:text-teal-400 font-bold">
+                                  {isZh ? `已完成 ${doneCount}/${activeDay.items.length}` : `${doneCount}/${activeDay.items.length} done`}
+                                </span>
+                              </>
+                            )}
+                            {unpaidCost > 0 && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span>
+                                  {isZh ? '預估現場' : 'Est. on-site'} {trip.currency} {unpaidCost.toLocaleString()}
+                                </span>
+                              </>
+                            )}
+                            {hasJrPassLeg && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200/80 dark:border-sky-800/60 font-sans font-bold text-[10px]">
+                                <Ticket className="w-2.5 h-2.5" />
+                                <span>JR Pass</span>
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {canEdit && (
@@ -1798,7 +1867,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                     const pinColor = CATEGORY_COLORS[item.category] || '#0d9488';
 
                     const nextItem = activeDay.items[index + 1];
-                    let distanceInfo: { distStr: string; walkingMin: number; transitMin: number } | null = null;
+                    let distanceInfo: { km: number; distStr: string; walkingMin: number; transitMin: number } | null = null;
                     if (
                       isValidCoordinate(item.lat, item.lng) &&
                       nextItem &&
@@ -1810,11 +1879,17 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                       );
                       const times = estimateTravelTime(km);
                       distanceInfo = {
+                        km,
                         distStr: formatDistance(km, lang),
                         walkingMin: times.walkingMin,
                         transitMin: times.transitMin,
                       };
                     }
+
+                    const isJrPassSpot = /(JR\s*Pass|5\s*日券|五日券|新幹線|超級萩號|宮島渡輪)/i.test(
+                      `${item.transportNote || ''} ${item.category === 'transport' ? item.title : ''}`
+                    );
+                    const spotPhone = extractPhoneFromText(item.notes) || extractPhoneFromText(item.transportNote);
 
                     const isDraggingThis = dragState?.fromIndex === index;
                     const isDropTarget =
@@ -1832,13 +1907,15 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                         {isDropTarget && dragState.fromIndex > index && (
                           <div className="h-1 rounded-full bg-teal-600 dark:bg-teal-400 mx-2 animate-pulse" />
                         )}
-                        {/* Spot Card */}
+                        {/* Spot Card — Full-width readable layout on mobile; click opens read-only Detail Sheet */}
                         <div
                           id={`spot-card-${item.id}`}
                           onClick={() => {
-                            if (!dragState && !suppressClickRef.current) setSelectedItemId(item.id);
+                            if (dragState || suppressClickRef.current) return;
+                            setSelectedItemId(item.id);
+                            setDetailSpot({ item, index });
                           }}
-                          className={`rounded-2xl p-3.5 sm:p-4 transition shadow-2xs border cursor-pointer ${
+                          className={`scroll-mt-28 rounded-2xl p-3.5 sm:p-4 transition shadow-2xs border cursor-pointer ${
                             isDraggingThis
                               ? 'border-teal-600 ring-2 ring-teal-500/40 shadow-lg scale-[1.01] opacity-90 bg-teal-50/40 dark:bg-teal-950/30 select-none'
                               : isSelected
@@ -1848,9 +1925,9 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                 : 'border-[#E5E2DC] dark:border-slate-800 bg-white dark:bg-[#111827] hover:border-teal-600/50 dark:hover:border-teal-500/50'
                           }`}
                         >
-                          <div className="flex items-start justify-between gap-2.5">
-                            {/* Left Info with Drag Handle & Map Pin Twin Badge */}
-                            <div className="flex items-start gap-2.5 sm:gap-3 flex-1 min-w-0">
+                          {/* Top Compact Header Row: Pin + Time/Category + Right Actions (gives Title full width on 390px!) */}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
                               {canEdit && activeDay.items.length > 1 && (
                                 <button
                                   type="button"
@@ -1861,7 +1938,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                     e.preventDefault();
                                     beginDragReorder(index);
                                   }}
-                                  className="touch-none self-center -ml-1.5 w-7 h-10 rounded-lg flex items-center justify-center text-slate-300 hover:text-teal-600 dark:text-slate-600 dark:hover:text-teal-400 active:text-teal-700 cursor-grab active:cursor-grabbing shrink-0 transition"
+                                  className="hidden sm:flex touch-none -ml-1.5 w-6 h-8 rounded-lg items-center justify-center text-slate-300 hover:text-teal-600 dark:text-slate-600 dark:hover:text-teal-400 active:text-teal-700 cursor-grab active:cursor-grabbing shrink-0 transition"
                                   title={isZh ? '按住拖曳調整景點順序' : 'Drag to reorder spot'}
                                   aria-label={isZh ? '按住拖曳調整景點順序' : 'Drag to reorder'}
                                 >
@@ -1886,7 +1963,6 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                 onPointerMove={(e) => {
                                   const origin = longPressOriginRef.current;
                                   if (!origin || longPressTimerRef.current === null) return;
-                                  // User is scrolling, not long-pressing — cancel the pending drag
                                   if (Math.abs(e.clientX - origin.x) > 8 || Math.abs(e.clientY - origin.y) > 8) {
                                     clearLongPress();
                                   }
@@ -1910,11 +1986,11 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                   }, 80);
                                 }}
                                 title={isZh ? `點擊定位第 ${index + 1} 站（長按可拖曳排序）` : `Locate stop #${index + 1} (long-press to reorder)`}
-                                className="relative shrink-0 flex flex-col items-center group/pin transition-transform active:scale-95 cursor-pointer mt-0.5 select-none"
+                                className="relative shrink-0 flex flex-col items-center group/pin transition-transform active:scale-95 cursor-pointer select-none"
                               >
                                 <div
                                   style={{ backgroundColor: pinColor }}
-                                  className={`w-8 h-8 rounded-full text-white flex items-center justify-center font-black text-xs shadow-sm border-2 border-white dark:border-slate-800 transition-all ${
+                                  className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full text-white flex items-center justify-center font-black text-xs shadow-sm border-2 border-white dark:border-slate-800 transition-all ${
                                     isSelected
                                       ? 'ring-4 ring-teal-400 scale-110'
                                       : 'group-hover/pin:scale-105'
@@ -1922,163 +1998,51 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                 >
                                   <span>{index + 1}</span>
                                 </div>
-                                <div
-                                  style={{ borderTopColor: pinColor }}
-                                  className="w-0 h-0 border-l-[3.5px] border-l-transparent border-r-[3.5px] border-r-transparent border-t-[4.5px] -mt-0.5"
-                                />
                               </button>
 
-                              <div className="space-y-1 flex-1 min-w-0">
-                                {/* Metadata Line */}
-                                <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium flex-wrap">
-                                  {item.startTime && (
-                                    <>
-                                      <span className="flex items-center gap-1 font-mono tabular-nums text-teal-700 dark:text-teal-400 font-bold">
-                                        <Clock className="w-3 h-3" />
-                                        {item.startTime}
-                                        {item.endTime ? ` - ${item.endTime}` : ''}
-                                      </span>
-                                      <span aria-hidden="true">·</span>
-                                    </>
-                                  )}
-                                  <span className={`flex items-center gap-1 font-semibold ${cat.text}`}>
-                                    <cat.icon className="w-3 h-3 shrink-0" />
-                                    <span>{catLabel}</span>
+                              {/* Metadata Line */}
+                              <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium flex-wrap min-w-0">
+                                {item.startTime && (
+                                  <>
+                                    <span className="flex items-center gap-1 font-mono tabular-nums text-teal-700 dark:text-teal-400 font-bold">
+                                      <Clock className="w-3 h-3 shrink-0" />
+                                      {item.startTime}
+                                      {item.endTime ? `-${item.endTime}` : ''}
+                                    </span>
+                                    <span aria-hidden="true">·</span>
+                                  </>
+                                )}
+                                <span className={`flex items-center gap-1 font-semibold ${cat.text}`}>
+                                  <cat.icon className="w-3 h-3 shrink-0" />
+                                  <span>{catLabel}</span>
+                                </span>
+                                {isJrPassSpot && (
+                                  <span className="px-1.5 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-300 border border-sky-200/80 dark:border-sky-800/60 font-bold text-[10px] leading-none">
+                                    JR Pass
                                   </span>
-                                  {item.bookingCode && (
+                                )}
+                                {item.bookingCode && (
+                                  <>
+                                    <span aria-hidden="true">·</span>
+                                    <span className="font-mono tabular-nums text-slate-700 dark:text-slate-300 font-semibold truncate max-w-[110px]">
+                                      #{item.bookingCode}
+                                    </span>
+                                  </>
+                                )}
+                                {(() => {
+                                  const report = dayConflictReports[activeDay.dayNumber];
+                                  const key = getConflictKey(activeDay.dayNumber, report);
+                                  if (!report || dismissedConflictKeys[key] || !report.conflictedItemIds.includes(item.id)) return null;
+                                  return (
                                     <>
                                       <span aria-hidden="true">·</span>
-                                      <span className="font-mono tabular-nums text-slate-700 dark:text-slate-300 font-semibold">
-                                        #{item.bookingCode}
+                                      <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-400">
+                                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                                        <span>{isZh ? '時段重疊' : 'Overlap'}</span>
                                       </span>
                                     </>
-                                  )}
-                                  {(() => {
-                                    const report = dayConflictReports[activeDay.dayNumber];
-                                    const key = getConflictKey(activeDay.dayNumber, report);
-                                    if (!report || dismissedConflictKeys[key] || !report.conflictedItemIds.includes(item.id)) return null;
-                                    return (
-                                      <>
-                                        <span aria-hidden="true">·</span>
-                                        <span className="inline-flex items-center gap-1 font-semibold text-amber-700 dark:text-amber-400">
-                                          <AlertTriangle className="w-3 h-3 shrink-0" />
-                                          <span>{isZh ? '時段重疊' : 'Overlap'}</span>
-                                        </span>
-                                      </>
-                                    );
-                                  })()}
-                                </div>
-
-                                <h4
-                                  className={`text-[15px] sm:text-base font-bold tracking-tight leading-snug ${
-                                    item.completed
-                                      ? 'line-through text-slate-400 dark:text-slate-500'
-                                      : 'text-slate-900 dark:text-white'
-                                  }`}
-                                >
-                                  {item.title}
-                                </h4>
-
-                                {(item.locationName || item.address) && (
-                                  <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                                    <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                                    <span className="truncate">{item.locationName || item.address}</span>
-                                  </p>
-                                )}
-
-                                {(item.transportNote || item.notes) && (
-                                  <div className="mt-1.5 pt-1.5 border-t border-[#E5E2DC]/70 dark:border-slate-800 space-y-1">
-                                    {item.transportNote && (
-                                      <p className="text-xs text-teal-800 dark:text-teal-300 flex items-start gap-1.5 leading-relaxed">
-                                        <Bus className="w-3.5 h-3.5 shrink-0 mt-0.5 text-teal-700 dark:text-teal-400" />
-                                        <span>{item.transportNote}</span>
-                                      </p>
-                                    )}
-                                    {item.notes && (() => {
-                                      const isLong = item.notes.length > 120 || item.notes.split('\n').length > 4;
-                                      const isNotesOpen = Boolean(expandedNoteIds[item.id]);
-                                      return (
-                                        <div>
-                                          <p
-                                            className={`text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap break-words ${
-                                              isLong && !isNotesOpen ? 'line-clamp-3' : ''
-                                            }`}
-                                          >
-                                            {item.notes}
-                                          </p>
-                                          {isLong && (
-                                            <button
-                                              type="button"
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                setExpandedNoteIds((prev) => ({ ...prev, [item.id]: !prev[item.id] }));
-                                              }}
-                                              className="mt-0.5 min-h-[28px] text-[11px] font-bold text-teal-700 dark:text-teal-400 cursor-pointer"
-                                            >
-                                              {isNotesOpen ? (isZh ? '收合' : 'Show less') : (isZh ? '展開全文' : 'Show more')}
-                                            </button>
-                                          )}
-                                        </div>
-                                      );
-                                    })()}
-                                  </div>
-                                )}
-
-                                {/* Spot Memory Thumbnails */}
-                                {((item.memoryPhotos && item.memoryPhotos.length > 0) || item.googlePhotosUrl) && (
-                                  <div className="flex items-center gap-2 pt-1.5 flex-wrap" data-no-day-swipe="true">
-                                    {item.memoryPhotos && item.memoryPhotos.length > 0 && (
-                                      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 select-none">
-                                        {item.memoryPhotos.map((photo, pIdx) => (
-                                          <button
-                                            key={pIdx}
-                                            type="button"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setOverlaySpotPhoto({ item, photoIndex: pIdx });
-                                            }}
-                                            className="relative cursor-pointer transition hover:scale-105 active:scale-95 shrink-0"
-                                            title="點擊開啟高畫質大圖檢視"
-                                          >
-                                            <MediaImage
-                                              tripId={trip.id}
-                                              ownerId={trip.ownerId}
-                                              collabId={trip.collabId}
-                                              src={photo}
-                                              alt="Spot memory"
-                                              className="w-10 h-10 rounded-lg object-cover border border-[#E5E2DC] dark:border-slate-700 shadow-xs"
-                                            />
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                    {item.googlePhotosUrl && (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setOverlaySpotPhoto({ item, photoIndex: 0 });
-                                        }}
-                                        className="min-h-[34px] px-2 inline-flex items-center gap-1 text-teal-700 dark:text-teal-300 text-xs font-semibold hover:underline cursor-pointer"
-                                      >
-                                        <ExternalLink className="w-3.5 h-3.5" />
-                                        <span>相簿原圖</span>
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-
-                                {typeof item.cost === 'number' && item.cost > 0 && (
-                                  <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 font-mono tabular-nums pt-0.5">
-                                    <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
-                                    <span>
-                                      {trip.currency} {item.cost.toLocaleString()}
-                                    </span>
-                                    <span className="text-[10px] text-slate-400">
-                                      · {item.costPaid ? (isZh ? '已付款' : 'Paid') : (isZh ? '現場付' : 'Unpaid')}
-                                    </span>
-                                  </div>
-                                )}
+                                  );
+                                })()}
                               </div>
                             </div>
 
@@ -2088,7 +2052,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                 <button
                                   type="button"
                                   onClick={(e) => handleToggleComplete(item.id, e)}
-                                  className={`w-10 h-10 sm:w-9 sm:h-9 rounded-xl transition cursor-pointer flex items-center justify-center ${
+                                  className={`w-9 h-9 rounded-xl transition cursor-pointer flex items-center justify-center ${
                                     item.completed
                                       ? 'bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-400 border border-teal-300/70 dark:border-teal-800'
                                       : 'bg-[#FAF9F6] dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 border border-[#E5E2DC] dark:border-slate-700'
@@ -2103,7 +2067,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                   )}
                                 </button>
 
-                                {/* Desktop Quick Edit (reorder via drag handle or ⋯ menu) */}
+                                {/* Desktop Quick Edit */}
                                 <div className="hidden sm:flex items-center gap-0.5">
                                   <button
                                     type="button"
@@ -2115,11 +2079,11 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                   </button>
                                 </div>
 
-                                {/* Universal iOS Action Sheet Trigger (Move / Duplicate / Move Day / Edit / Safe Delete) */}
+                                {/* Universal iOS Action Sheet Trigger */}
                                 <button
                                   type="button"
                                   onClick={() => setActionMenuItem({ item, index })}
-                                  className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-[#E5E2DC] sm:border-transparent dark:border-slate-700 sm:dark:border-transparent transition cursor-pointer"
+                                  className="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-[#E5E2DC] sm:border-transparent dark:border-slate-700 sm:dark:border-transparent transition cursor-pointer"
                                   title="更多操作（編輯、移動天數、複製、刪除）"
                                   aria-label="更多景點操作"
                                 >
@@ -2127,13 +2091,142 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                 </button>
                               </div>
                             ) : item.completed ? (
-                              <div className="shrink-0 p-2 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800">
+                              <div className="shrink-0 p-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/70 text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800">
                                 <CheckCircle2 className="w-4 h-4 stroke-[2.4]" />
                               </div>
                             ) : null}
                           </div>
 
-                          {/* Card Footer Bar: Navigation, Memories, Locate */}
+                          {/* Full-Width Content Body (zero cramping on 390px screens!) */}
+                          <div className="mt-2 sm:pl-10 space-y-1.5">
+                            <h4
+                              className={`text-[15px] sm:text-base font-bold tracking-tight leading-snug ${
+                                item.completed
+                                  ? 'line-through text-slate-400 dark:text-slate-500'
+                                  : 'text-slate-900 dark:text-white'
+                              }`}
+                            >
+                              {item.title}
+                            </h4>
+
+                            {(item.locationName || item.address) && (
+                              <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                                <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span className="truncate">{item.locationName || item.address}</span>
+                              </p>
+                            )}
+
+                            {(item.transportNote || item.notes) && (
+                              <div className="mt-1.5 pt-1.5 border-t border-[#E5E2DC]/70 dark:border-slate-800 space-y-1">
+                                {item.transportNote && (
+                                  <p className="text-xs text-teal-800 dark:text-teal-300 flex items-start gap-1.5 leading-relaxed">
+                                    <Bus className="w-3.5 h-3.5 shrink-0 mt-0.5 text-teal-700 dark:text-teal-400" />
+                                    <span>{item.transportNote}</span>
+                                  </p>
+                                )}
+                                {item.notes && (() => {
+                                  const isLong = item.notes.length > 110 || item.notes.split('\n').length > 3;
+                                  const isNotesOpen = Boolean(expandedNoteIds[item.id]);
+                                  return (
+                                    <div>
+                                      <p
+                                        className={`text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-wrap break-words ${
+                                          isLong && !isNotesOpen ? 'line-clamp-3' : ''
+                                        }`}
+                                      >
+                                        {item.notes}
+                                      </p>
+                                      {isLong && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedNoteIds((prev) => ({ ...prev, [item.id]: !prev[item.id] }));
+                                          }}
+                                          className="mt-0.5 min-h-[28px] text-[11px] font-bold text-teal-700 dark:text-teal-400 cursor-pointer"
+                                        >
+                                          {isNotesOpen ? (isZh ? '收合' : 'Show less') : (isZh ? '展開全文' : 'Show more')}
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            )}
+
+                            {/* Spot Memory Thumbnails */}
+                            {((item.memoryPhotos && item.memoryPhotos.length > 0) || item.googlePhotosUrl) && (
+                              <div className="flex items-center gap-2 pt-1.5 flex-wrap" data-no-day-swipe="true">
+                                {item.memoryPhotos && item.memoryPhotos.length > 0 && (
+                                  <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 select-none">
+                                    {item.memoryPhotos.map((photo, pIdx) => (
+                                      <button
+                                        key={pIdx}
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setOverlaySpotPhoto({ item, photoIndex: pIdx });
+                                        }}
+                                        className="relative cursor-pointer transition hover:scale-105 active:scale-95 shrink-0"
+                                        title="點擊開啟高畫質大圖檢視"
+                                      >
+                                        <MediaImage
+                                          tripId={trip.id}
+                                          ownerId={trip.ownerId}
+                                          collabId={trip.collabId}
+                                          src={photo}
+                                          alt="Spot memory"
+                                          className="w-10 h-10 rounded-lg object-cover border border-[#E5E2DC] dark:border-slate-700 shadow-xs"
+                                        />
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                                {item.googlePhotosUrl && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOverlaySpotPhoto({ item, photoIndex: 0 });
+                                    }}
+                                    className="min-h-[34px] px-2 inline-flex items-center gap-1 text-teal-700 dark:text-teal-300 text-xs font-semibold hover:underline cursor-pointer"
+                                  >
+                                    <ExternalLink className="w-3.5 h-3.5" />
+                                    <span>相簿原圖</span>
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Cost + Auto-Detected Phone Quick Call Row */}
+                            {((typeof item.cost === 'number' && item.cost > 0) || spotPhone) && (
+                              <div className="flex items-center gap-3 flex-wrap pt-0.5">
+                                {typeof item.cost === 'number' && item.cost > 0 && (
+                                  <div className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400 font-mono tabular-nums">
+                                    <DollarSign className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                                    <span>
+                                      {trip.currency} {item.cost.toLocaleString()}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400">
+                                      · {item.costPaid ? (isZh ? '已付款' : 'Paid') : (isZh ? '現場付' : 'Unpaid')}
+                                    </span>
+                                  </div>
+                                )}
+                                {spotPhone && (
+                                  <a
+                                    href={`tel:${spotPhone.replace(/[^\d+]/g, '')}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-1 text-[11px] font-mono tabular-nums font-bold text-teal-700 dark:text-teal-400 hover:underline"
+                                  >
+                                    <Phone className="w-3 h-3" />
+                                    <span>{spotPhone}</span>
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Card Footer Bar: Balanced Actions */}
                           <div className="mt-3 pt-2.5 border-t border-[#E5E2DC]/80 dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap">
                             <div className="flex items-center gap-1.5">
                               <a
@@ -2141,7 +2234,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 onClick={(e) => e.stopPropagation()}
-                                className="min-h-[38px] px-3 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs transition active:scale-95"
+                                className="min-h-[36px] px-3 py-1.5 rounded-xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs transition active:scale-95"
                               >
                                 <Navigation className="w-3.5 h-3.5" />
                                 <span>{t.navGoogle}</span>
@@ -2154,7 +2247,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                     e.stopPropagation();
                                     onOpenMemories(item.id);
                                   }}
-                                  className="min-h-[38px] px-2.5 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 text-teal-700 dark:text-teal-400 font-semibold text-xs flex items-center gap-1 hover:bg-teal-50 dark:hover:bg-teal-950/50 transition border border-[#E5E2DC] dark:border-slate-700 cursor-pointer"
+                                  className="min-h-[36px] px-2.5 py-1.5 rounded-xl bg-[#FAF9F6] dark:bg-slate-800 text-teal-700 dark:text-teal-400 font-semibold text-xs flex items-center gap-1 hover:bg-teal-50 dark:hover:bg-teal-950/50 transition border border-[#E5E2DC] dark:border-slate-700 cursor-pointer"
                                 >
                                   <Camera className="w-3.5 h-3.5" />
                                   <span>
@@ -2180,7 +2273,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                                     });
                                   }, 80);
                                 }}
-                                className="min-h-[38px] px-2.5 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+                                className="min-h-[36px] px-2.5 py-1.5 rounded-xl border border-[#E5E2DC] dark:border-slate-700 hover:bg-[#FAF9F6] dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
                               >
                                 <MapPin className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
                                 <span>{t.locateMap}</span>
@@ -2193,38 +2286,48 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
                           <div className="h-1 rounded-full bg-teal-600 dark:bg-teal-400 mx-2 animate-pulse" />
                         )}
 
-                        {/* Two-Point Route Connector (origin -> destination) & Inline Spot Insert */}
+                        {/* Smart Two-Point Route Connector (never shows absurd walking times for 200km Shinkansen legs!) */}
                         {index < activeDay.items.length - 1 && (
-                          <div className="py-1 px-2 flex flex-wrap items-center justify-center gap-2 group/connector">
-                            {routeUrl && (
-                              <a
-                                href={routeUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                title={isZh ? `開啟「${item.title} → ${nextItem.title}」Google Maps 路線規劃` : `Route from ${item.title} to ${nextItem.title}`}
-                                className="min-h-[32px] inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white dark:bg-[#111827] hover:bg-teal-50 dark:hover:bg-teal-950/50 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-500/60 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 shadow-2xs transition"
-                              >
-                                <Footprints className="w-3 h-3 text-teal-700 dark:text-teal-400 shrink-0" />
-                                {distanceInfo ? (
-                                  <span className="font-mono tabular-nums">
-                                    {distanceInfo.distStr} · {t.walkMin.replace('{m}', String(distanceInfo.walkingMin))} · {t.driveMin.replace('{m}', String(distanceInfo.transitMin))}
+                          <div className="py-1 px-1 flex flex-wrap items-center justify-center gap-1.5 group/connector">
+                            {routeUrl && (() => {
+                              const km = distanceInfo?.km ?? 0;
+                              const isLongIntercity = km > 30;
+                              const isMediumTransit = km >= 2.5 && km <= 30;
+                              const LegIcon = isLongIntercity ? Train : isMediumTransit ? Bus : Footprints;
+                              const summaryLabel = distanceInfo
+                                ? isLongIntercity
+                                  ? `${distanceInfo.distStr} · ${isZh ? '跨城移動' : 'Intercity'}`
+                                  : isMediumTransit
+                                    ? `${distanceInfo.distStr} · ${t.driveMin.replace('{m}', String(distanceInfo.transitMin))}`
+                                    : `${distanceInfo.distStr} · ${t.walkMin.replace('{m}', String(distanceInfo.walkingMin))}`
+                                : isZh
+                                  ? '前往下一站'
+                                  : 'Next leg';
+
+                              return (
+                                <a
+                                  href={routeUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  title={isZh ? `開啟「${item.title} → ${nextItem.title}」Google Maps 路線規劃` : `Route from ${item.title} to ${nextItem.title}`}
+                                  className="min-h-[32px] max-w-full inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white dark:bg-[#111827] hover:bg-teal-50 dark:hover:bg-teal-950/50 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-500/60 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 shadow-2xs transition whitespace-nowrap"
+                                >
+                                  <LegIcon className="w-3 h-3 text-teal-700 dark:text-teal-400 shrink-0" />
+                                  <span className="font-mono tabular-nums truncate">{summaryLabel}</span>
+                                  <span aria-hidden="true" className="text-slate-300 dark:text-slate-600 shrink-0">|</span>
+                                  <span className="font-bold text-teal-700 dark:text-teal-400 inline-flex items-center gap-0.5 shrink-0 whitespace-nowrap">
+                                    <span>{isZh ? '路線規劃' : 'Route'}</span>
+                                    <ArrowRight className="w-3 h-3" />
                                   </span>
-                                ) : (
-                                  <span>{isZh ? '前往下一站' : 'Next leg'}</span>
-                                )}
-                                <span aria-hidden="true" className="text-slate-300 dark:text-slate-600">|</span>
-                                <span className="font-bold text-teal-700 dark:text-teal-400 inline-flex items-center gap-0.5">
-                                  <span>{isZh ? '路線規劃' : 'Route'}</span>
-                                  <ArrowRight className="w-3 h-3" />
-                                </span>
-                              </a>
-                            )}
+                                </a>
+                              );
+                            })()}
                             {canEdit && (
                               <button
                                 type="button"
                                 onClick={() => onOpenAddItem(activeDay.dayNumber, getBetweenTime(item, nextItem))}
-                                className="opacity-85 sm:opacity-0 sm:group-hover/connector:opacity-100 hover:opacity-100 transition-all duration-150 min-h-[32px] inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#FAF9F6] hover:bg-teal-50 dark:bg-slate-800/80 dark:hover:bg-teal-950/60 text-[11px] font-semibold text-slate-500 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 border border-[#E5E2DC] dark:border-slate-700 cursor-pointer"
+                                className="opacity-85 sm:opacity-0 sm:group-hover/connector:opacity-100 hover:opacity-100 transition-all duration-150 min-h-[32px] inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#FAF9F6] hover:bg-teal-50 dark:bg-slate-800/80 dark:hover:bg-teal-950/60 text-[11px] font-semibold text-slate-500 dark:text-slate-300 hover:text-teal-700 dark:hover:text-teal-300 border border-[#E5E2DC] dark:border-slate-700 cursor-pointer shrink-0 whitespace-nowrap"
                               >
                                 <Plus className="w-3 h-3 text-teal-700 dark:text-teal-400" />
                                 <span>{isZh ? '插入' : 'Insert'}</span>
@@ -2252,8 +2355,192 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
               )}
             </div>
           </div>
-        </>
+        </div>
       )}
+
+      {/* Read-Only Spot Detail Sheet (Tap card to read comfortably without accidental edits) */}
+      {detailSpot && (() => {
+        const liveItem = activeDay.items.find((it) => it.id === detailSpot.item.id) || detailSpot.item;
+        const detailCat = CATEGORY_MAP[liveItem.category] || CATEGORY_MAP.other;
+        const detailCatLabel = (t as any)[detailCat.labelKey] || detailCat.fallbackLabel;
+        const detailPhone = extractPhoneFromText(liveItem.notes) || extractPhoneFromText(liveItem.transportNote);
+        const copyDetail = async (val: string, field: 'address' | 'code' | 'phone') => {
+          const ok = await copyTextToClipboard(val);
+          if (ok) {
+            setCopiedDetailField(field);
+            window.setTimeout(() => setCopiedDetailField((p) => (p === field ? null : p)), 1600);
+          }
+        };
+
+        return (
+          <IosModalSheet
+            onClose={() => setDetailSpot(null)}
+            variant="grouped"
+            maxWidthClass="sm:max-w-lg"
+            zIndexClass="z-[72]"
+            ariaLabel={liveItem.title}
+          >
+            <IosNavBar
+              title={`Day ${activeDay.dayNumber} · 第 ${detailSpot.index + 1} 站`}
+              subtitle={liveItem.startTime ? `${liveItem.startTime}${liveItem.endTime ? ` ~ ${liveItem.endTime}` : ''}` : undefined}
+              leftLabel={isZh ? '關閉' : 'Close'}
+              onLeftClick={() => setDetailSpot(null)}
+              rightLabel={canEdit ? (isZh ? '編輯' : 'Edit') : undefined}
+              onRightClick={
+                canEdit
+                  ? () => {
+                      const target = liveItem;
+                      setDetailSpot(null);
+                      onOpenEditItem(target, activeDay.dayNumber);
+                    }
+                  : undefined
+              }
+            />
+
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y p-4 space-y-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]">
+              <div className="rounded-2xl bg-white dark:bg-[#111827] border border-[#E5E2DC] dark:border-slate-800 p-4 space-y-2">
+                <div className="flex items-center gap-2 flex-wrap text-xs">
+                  <span className={`inline-flex items-center gap-1 font-bold ${detailCat.text}`}>
+                    <detailCat.icon className="w-3.5 h-3.5" />
+                    <span>{detailCatLabel}</span>
+                  </span>
+                  {liveItem.completed && (
+                    <span className="px-2 py-0.5 rounded-full bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 font-bold text-[10px]">
+                      {isZh ? '已造訪' : 'Completed'}
+                    </span>
+                  )}
+                </div>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white leading-snug">
+                  {liveItem.title}
+                </h3>
+                {(liveItem.locationName || liveItem.address) && (
+                  <div className="pt-2 border-t border-[#E5E2DC]/70 dark:border-slate-800 flex items-start justify-between gap-2 text-xs text-slate-600 dark:text-slate-300">
+                    <div className="flex items-start gap-1.5 min-w-0">
+                      <MapPin className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
+                      <div className="min-w-0 space-y-0.5">
+                        {liveItem.locationName && <p className="font-semibold text-slate-800 dark:text-slate-100">{liveItem.locationName}</p>}
+                        {liveItem.address && liveItem.address !== liveItem.locationName && (
+                          <p className="text-slate-500 dark:text-slate-400 break-words">{liveItem.address}</p>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyDetail(liveItem.address || liveItem.locationName || liveItem.title, 'address')}
+                      className="min-h-[32px] px-2.5 rounded-lg bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-[11px] font-bold text-teal-700 dark:text-teal-400 shrink-0 cursor-pointer"
+                    >
+                      {copiedDetailField === 'address' ? (isZh ? '已複製' : 'Copied') : isZh ? '複製' : 'Copy'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {(liveItem.transportNote || liveItem.notes) && (
+                <IosInsetGroup header={isZh ? '交通與重點備註' : 'Transit & Notes'}>
+                  {liveItem.transportNote && (
+                    <div className="p-3.5 flex items-start gap-2 text-xs text-teal-900 dark:text-teal-200 leading-relaxed">
+                      <Bus className="w-4 h-4 text-teal-700 dark:text-teal-400 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold text-[11px] text-teal-700 dark:text-teal-400 block mb-0.5">
+                          {isZh ? '交通方式' : 'Transit'}
+                        </span>
+                        <span>{liveItem.transportNote}</span>
+                      </div>
+                    </div>
+                  )}
+                  {liveItem.notes && (
+                    <div className="p-3.5 text-xs text-slate-700 dark:text-slate-200 leading-relaxed whitespace-pre-wrap break-words">
+                      {liveItem.notes}
+                    </div>
+                  )}
+                </IosInsetGroup>
+              )}
+
+              {(liveItem.bookingCode || detailPhone || (typeof liveItem.cost === 'number' && liveItem.cost > 0)) && (
+                <IosInsetGroup header={isZh ? '預約、電話與花費' : 'Booking, Phone & Cost'}>
+                  {liveItem.bookingCode && (
+                    <div className="px-4 py-3 flex items-center justify-between gap-2 text-xs">
+                      <span className="flex items-center gap-1.5 font-mono font-bold text-slate-800 dark:text-slate-100">
+                        <Bookmark className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                        <span>#{liveItem.bookingCode}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => copyDetail(liveItem.bookingCode!, 'code')}
+                        className="min-h-[32px] px-2.5 rounded-lg bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-[11px] font-bold text-teal-700 dark:text-teal-400 cursor-pointer"
+                      >
+                        {copiedDetailField === 'code' ? (isZh ? '已複製' : 'Copied') : isZh ? '複製代號' : 'Copy'}
+                      </button>
+                    </div>
+                  )}
+                  {detailPhone && (
+                    <div className="px-4 py-3 flex items-center justify-between gap-2 text-xs">
+                      <span className="flex items-center gap-1.5 font-mono font-bold text-slate-800 dark:text-slate-100">
+                        <Phone className="w-3.5 h-3.5 text-teal-700 dark:text-teal-400" />
+                        <span>{detailPhone}</span>
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => copyDetail(detailPhone, 'phone')}
+                          className="min-h-[32px] px-2.5 rounded-lg bg-[#FAF9F6] dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 text-[11px] font-bold text-slate-700 dark:text-slate-200 cursor-pointer"
+                        >
+                          {copiedDetailField === 'phone' ? (isZh ? '已複製' : 'Copied') : isZh ? '複製' : 'Copy'}
+                        </button>
+                        <a
+                          href={`tel:${detailPhone.replace(/[^\d+]/g, '')}`}
+                          className="min-h-[32px] px-3 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-[11px] font-bold inline-flex items-center gap-1"
+                        >
+                          <Phone className="w-3 h-3" />
+                          <span>{isZh ? '撥打' : 'Call'}</span>
+                        </a>
+                      </div>
+                    </div>
+                  )}
+                  {typeof liveItem.cost === 'number' && liveItem.cost > 0 && (
+                    <div className="px-4 py-3 flex items-center justify-between text-xs font-mono tabular-nums">
+                      <span className="text-slate-500 dark:text-slate-400 font-sans">
+                        {isZh ? '預估花費' : 'Estimated Cost'}
+                      </span>
+                      <span className="font-bold text-slate-900 dark:text-white">
+                        {trip.currency} {liveItem.cost.toLocaleString()} ·{' '}
+                        {liveItem.costPaid ? (isZh ? '已付款' : 'Paid') : isZh ? '現場付' : 'Unpaid'}
+                      </span>
+                    </div>
+                  )}
+                </IosInsetGroup>
+              )}
+
+              {/* Primary Bottom Actions */}
+              <div className="space-y-2 pt-1">
+                <a
+                  href={getGoogleMapsNavigationUrl(liveItem)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full min-h-[46px] px-3.5 py-2.5 rounded-2xl bg-teal-700 hover:bg-teal-800 dark:bg-teal-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition active:scale-95"
+                >
+                  <Navigation className="w-4 h-4" />
+                  <span>{t.navGoogle}</span>
+                </a>
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={(e) => handleToggleComplete(liveItem.id, e)}
+                    className="w-full min-h-[44px] px-4 py-2.5 rounded-2xl bg-white dark:bg-slate-800 border border-[#E5E2DC] dark:border-slate-700 hover:border-teal-600 text-slate-800 dark:text-slate-100 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-teal-700 dark:text-teal-400" />
+                    <span>
+                      {liveItem.completed
+                        ? isZh ? '取消已造訪標記' : 'Mark Incomplete'
+                        : isZh ? '標記為已造訪' : 'Mark Completed'}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </IosModalSheet>
+        );
+      })()}
 
       {/* Spot More Actions Sheet */}
       {actionMenuItem && (

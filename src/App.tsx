@@ -196,6 +196,10 @@ export default function App() {
     dayNumber: number;
     nonce: number;
   } | null>(null);
+  const [requestedPrepSubTab, setRequestedPrepSubTab] = useState<{
+    tab: 'checklist' | 'bookings';
+    nonce: number;
+  } | null>(null);
 
   // i18n & Theme
   const [lang, setLang] = useState<Language>(getStoredLanguage);
@@ -1381,7 +1385,7 @@ export default function App() {
     } else {
       document.title = `${t.appName} - ${t.appSubtitle}`;
     }
-  }, [currentTrip?.title, t.appName, t.appSubtitle]);
+  }, [currentTrip?.id, currentTrip?.title, t.appName, t.appSubtitle]);
 
   const handleSaveTripModal = (data: Partial<Trip> | Trip) => {
     const user = currentUserRef.current;
@@ -2551,14 +2555,9 @@ export default function App() {
                 setRequestedTimelineDay({ dayNumber: dayNum, nonce: Date.now() });
                 switchTab('timeline');
               }}
-              onOpenQuickAction={(tab, preferredDate) => {
-                if (currentTrip.isCollaborative && !permission.canEdit) {
-                  showToast(isZh ? '目前為僅檢視權限' : 'View-only mode');
-                  return;
-                }
-                setQuickActionTab(tab);
-                setQuickActionDate(preferredDate);
-                setShowQuickActionModal(true);
+              onNavigateToPrep={(subTab) => {
+                setRequestedPrepSubTab({ tab: subTab, nonce: Date.now() });
+                switchTab('prep');
               }}
             />
           )}
@@ -2580,6 +2579,7 @@ export default function App() {
               canEdit={permission.canEdit}
               onUpdateTrip={handleUpdateTrip}
               requireAuth={requireAuth}
+              requestedSubTab={requestedPrepSubTab}
               onJumpToDay={(dayNumber) => {
                 setRequestedTimelineDay({ dayNumber, nonce: Date.now() });
                 switchTab('timeline');
@@ -2659,7 +2659,7 @@ export default function App() {
               type="button"
               aria-current={active ? 'page' : undefined}
               onClick={() => switchTab(id)}
-              className={`relative flex flex-col items-center justify-center min-h-[48px] py-1 transition-all duration-150 active:scale-92 cursor-pointer ${
+              className={`relative flex flex-col items-center justify-center min-h-[48px] py-1 rounded-xl transition-all duration-150 active:scale-92 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/60 focus-visible:ring-inset ${
                 active
                   ? 'text-teal-700 dark:text-teal-400'
                   : 'text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'

@@ -69,6 +69,16 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   const [isExporting, setIsExporting] = useState(false);
   const [aiMode, setAiMode] = useState<AiBackendMode>('local_only');
   const [showAdvancedExportFormats, setShowAdvancedExportFormats] = useState(false);
+  const previewSectionRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (parsedPreviewTrip || (parsedMultiTrips && parsedMultiTrips.length > 0)) {
+      const timer = window.setTimeout(() => {
+        previewSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+      return () => window.clearTimeout(timer);
+    }
+  }, [parsedPreviewTrip, parsedMultiTrips]);
 
   useEffect(() => {
     let active = true;
@@ -490,7 +500,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                   type="text"
                   value={tripTitleInput}
                   onChange={(e) => setTripTitleInput(e.target.value)}
-                  placeholder="選填（例：東京 5 日自由行）"
+                  placeholder="選填（如：山陽 7 日）"
                   className="min-w-0 flex-1 bg-transparent text-right text-[16px] sm:text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 outline-none"
                 />
               </div>
@@ -502,7 +512,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                   type="text"
                   value={destinationHint}
                   onChange={(e) => setDestinationHint(e.target.value)}
-                  placeholder="選填（例：日本京都、法國巴黎）"
+                  placeholder="選填（如：日本岡山）"
                   className="min-w-0 flex-1 bg-transparent text-right text-[16px] sm:text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 outline-none"
                 />
               </div>
@@ -566,6 +576,9 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                 )}
               </div>
             </IosInsetGroup>
+
+            {/* Anchor for auto-scrolling parsed previews into mobile viewport */}
+            <div ref={previewSectionRef} />
 
             {/* Multi-Trip Backup Preview */}
             {parsedMultiTrips && parsedMultiTrips.length > 0 && (
